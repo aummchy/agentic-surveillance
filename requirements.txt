@@ -1,0 +1,30 @@
+# Core CV
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Detection + tracking
+ultralytics>=8.1.0          # YOLOv8 + ByteTrack
+
+# Face recognition
+insightface>=0.7.3          # SCRFD detection + ArcFace embedding
+onnxruntime>=1.16.0         # CPU inference (use onnxruntime-gpu if CUDA)
+
+# Storage
+pymongo>=4.6.0              # MongoDB Atlas + vector search
+cloudinary>=1.36.0          # Image archival
+
+# Orchestration
+langgraph>=0.1.0            # Optional: stateful agent graph
+langchain>=0.1.0
+
+# Backend / dashboard
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+# streamlit>=1.30.0         # Alternative simple dashboard
+
+# Alerting
+twilio>=8.0.0              # Optional SMS
+requests>=2.31.0           # Webhook alerts
+
+# Config
+python-dotenv>=1.0.0
