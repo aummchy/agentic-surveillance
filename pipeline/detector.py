@@ -1,9 +1,9 @@
-import logging
+import structlog
 import numpy as np
 from ultralytics import YOLO
 from config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _model = None
 
@@ -12,7 +12,7 @@ def get_model() -> YOLO:
     global _model
     if _model is None:
         _model = YOLO(settings.YOLO_MODEL)
-        logger.info(f"Loaded YOLO model: {settings.YOLO_MODEL}")
+        logger.info("yolo_model_loaded", model=settings.YOLO_MODEL)
     return _model
 
 

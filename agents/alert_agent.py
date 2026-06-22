@@ -1,5 +1,5 @@
 import json
-import logging
+import structlog
 import time
 import smtplib
 from email.mime.text import MIMEText
@@ -8,7 +8,7 @@ import requests
 from config import settings
 from pipeline.models import Track, DecisionResult
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _alert_timestamps = {}
 
@@ -58,7 +58,7 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
             elif channel == "webhook":
                 _alert_webhook(payload)
         except Exception as e:
-            logger.error(f"Alert channel '{channel}' failed: {e}")
+            logger.error("alert_channel_failed", channel=channel, error=str(e))
             success = False
 
     return success
@@ -121,7 +121,7 @@ Name: {payload.get('name', 'N/A')}
         server.send_message(msg)
         server.quit()
     except Exception as e:
-        logger.error(f"Email alert failed: {e}")
+        logger.error("email_alert_failed", error=str(e))
         raise
 
 
@@ -143,9 +143,9 @@ def _alert_sms(payload: dict):
             to=settings.ALERT_SMS_TO
         )
     except ImportError:
-        logger.warning("Twilio not installed, SMS alert skipped")
+        logger.warning("twilio_not_installed")
     except Exception as e:
-        logger.error(f"SMS alert failed: {e}")
+        logger.error("sms_alert_failed", error=str(e))
         raise
 
 
@@ -161,5 +161,5 @@ def _alert_webhook(payload: dict):
         )
         resp.raise_for_status()
     except Exception as e:
-        logger.error(f"Webhook alert failed: {e}")
+        logger.error("webhook_alert_failed", error=str(e))
         raise

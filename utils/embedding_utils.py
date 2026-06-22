@@ -1,9 +1,12 @@
 import threading
+import structlog
 import numpy as np
 import cv2
 from insightface.app import FaceAnalysis
 from config import settings
 from pipeline.models import EmbeddingResult
+
+logger = structlog.get_logger(__name__)
 
 
 class InsightFaceSingleton:
@@ -30,85 +33,147 @@ class InsightFaceSingleton:
                     InsightFaceSingleton._initialized = True
 
     def detect_and_embed(self, image: np.ndarray) -> EmbeddingResult:
-        with self._lock:
-            try:
-                faces = self.app.get(image)
+        try:
+            h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
+            faces = self.app.get(image)
 
-                if not faces:
-                    return EmbeddingResult(
-                        face_detected=False,
-                        error="No face detected"
-                    )
-
-                best_face = max(faces, key=lambda f: f.det_score)
-
-                if best_face.det_score < settings.DET_SCORE_MIN:
-                    return EmbeddingResult(
-                        face_detected=True,
-                        detection_score=float(best_face.det_score),
-                        error=f"Detection score {best_face.det_score:.3f} below threshold"
-                    )
-
-                embedding = best_face.normed_embedding
-                bbox = tuple(map(int, best_face.bbox))
-
-                is_masked = self._detect_mask_geometric(best_face.landmark)
-
+            if not faces:
+                logger.debug("no_face_detected", width=w, height=h)
                 return EmbeddingResult(
-                    embedding=embedding,
+                    face_detected=False,
+                    error="No face detected"
+                )
+
+            best_face = max(faces, key=lambda f: f.det_score)
+            logger.debug("face_detected",
+                        det_score=best_face.det_score,
+                        threshold=settings.DET_SCORE_MIN,
+                        faces_found=len(faces),
+                        width=w,
+                        height=h)
+
+            if best_face.det_score < settings.DET_SCORE_MIN:
+                logger.debug("detection_score_below_threshold",
+                           score=best_face.det_score,
+                           threshold=settings.DET_SCORE_MIN)
+                return EmbeddingResult(
+                    face_detected=True,
+                    detection_score=float(best_face.det_score),
+                    error=f"Detection score {best_face.det_score:.3f} below threshold"
+                )
+
+            embedding = best_face.normed_embedding
+            bbox = tuple(map(int, best_face.bbox))
+
+            is_masked = self._detect_mask_geometric(best_face.landmark)
+
+            return EmbeddingResult(
+                embedding=embedding,
+                face_detected=True,
+                detection_score=float(best_face.det_score),
+                embedding_score=float(best_face.det_score),
+                bbox=bbox,
+                is_masked=is_masked
+            )
+
+        except Exception as e:
+            logger.error("detect_and_embed_failed", error=str(e))
+            return EmbeddingResult(
+                face_detected=False,
+                error=str(e)
+            )
+
+    def detect_and_embed_relaxed(self, image: np.ndarray, min_score: float = 0.20) -> EmbeddingResult:
+        try:
+            h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
+            faces = self.app.get(image)
+
+            if not faces:
+                return EmbeddingResult(
+                    face_detected=False,
+                    error="No face detected (relaxed)"
+                )
+
+            best_face = max(faces, key=lambda f: f.det_score)
+            logger.debug("relaxed_face_detected",
+                        det_score=best_face.det_score,
+                        min_score=min_score,
+                        faces_found=len(faces),
+                        width=w,
+                        height=h)
+
+            if best_face.det_score < min_score:
+                return EmbeddingResult(
+                    face_detected=True,
+                    detection_score=float(best_face.det_score),
+                    error=f"Detection score {best_face.det_score:.3f} below relaxed threshold {min_score}"
+                )
+
+            embedding = best_face.normed_embedding
+            bbox = tuple(map(int, best_face.bbox))
+            is_masked = self._detect_mask_geometric(best_face.landmark)
+
+            return EmbeddingResult(
+                embedding=embedding,
+                face_detected=True,
+                detection_score=float(best_face.det_score),
+                embedding_score=float(best_face.det_score),
+                bbox=bbox,
+                is_masked=is_masked
+            )
+
+        except Exception as e:
+            logger.error("detect_and_embed_relaxed_failed", error=str(e))
+            return EmbeddingResult(
+                face_detected=False,
+                error=str(e)
+            )
+
+    def embed_only(self, image: np.ndarray, det_score: float) -> EmbeddingResult:
+        try:
+            h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
+            faces = self.app.get(image)
+
+            if not faces:
+                logger.debug("embed_only_no_face", width=w, height=h)
+                return EmbeddingResult(
+                    face_detected=False,
+                    error="No face detected"
+                )
+
+            best_face = max(faces, key=lambda f: f.det_score)
+            logger.debug("embed_only_face_detected",
+                        det_score=best_face.det_score,
+                        threshold=settings.EMBEDDING_DET_SCORE_MIN)
+
+            if best_face.det_score < settings.EMBEDDING_DET_SCORE_MIN:
+                return EmbeddingResult(
                     face_detected=True,
                     detection_score=float(best_face.det_score),
                     embedding_score=float(best_face.det_score),
-                    bbox=bbox,
-                    is_masked=is_masked
+                    error=f"Embedding quality score {best_face.det_score:.3f} below threshold"
                 )
 
-            except Exception as e:
-                return EmbeddingResult(
-                    face_detected=False,
-                    error=str(e)
-                )
+            embedding = best_face.normed_embedding
+            bbox = tuple(map(int, best_face.bbox))
 
-    def embed_only(self, image: np.ndarray, det_score: float) -> EmbeddingResult:
-        with self._lock:
-            try:
-                faces = self.app.get(image)
+            is_masked = self._detect_mask_geometric(best_face.landmark)
 
-                if not faces:
-                    return EmbeddingResult(
-                        face_detected=False,
-                        error="No face detected"
-                    )
+            return EmbeddingResult(
+                embedding=embedding,
+                face_detected=True,
+                detection_score=det_score,
+                embedding_score=float(best_face.det_score),
+                bbox=bbox,
+                is_masked=is_masked
+            )
 
-                best_face = max(faces, key=lambda f: f.det_score)
-
-                if best_face.det_score < settings.EMBEDDING_DET_SCORE_MIN:
-                    return EmbeddingResult(
-                        face_detected=True,
-                        detection_score=float(best_face.det_score),
-                        embedding_score=float(best_face.det_score),
-                        error=f"Embedding quality score {best_face.det_score:.3f} below threshold"
-                    )
-
-                embedding = best_face.normed_embedding
-                bbox = tuple(map(int, best_face.bbox))
-
-                is_masked = self._detect_mask_geometric(best_face.landmark)
-
-                return EmbeddingResult(
-                    embedding=embedding,
-                    face_detected=True,
-                    detection_score=det_score,
-                    embedding_score=float(best_face.det_score),
-                    bbox=bbox,
-                    is_masked=is_masked
-                )
-
-            except Exception as e:
-                return EmbeddingResult(
-                    face_detected=False,
-                    error=str(e)
-                )
+        except Exception as e:
+            logger.error("embed_only_failed", error=str(e))
+            return EmbeddingResult(
+                face_detected=False,
+                error=str(e)
+            )
 
     def _detect_mask_geometric(self, landmarks: np.ndarray) -> bool:
         if landmarks is None or len(landmarks) < 5:

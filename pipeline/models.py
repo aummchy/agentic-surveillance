@@ -21,6 +21,7 @@ class Track:
     last_recognition_frame: int = 0
     pending_embedding: Optional[list] = None
     pending_match: Optional[dict] = None
+    pending_recognition: Optional[dict] = None  # Phase 2.1: Recognition Agent output
     total_frames_seen: int = 0
     frames_with_detectable_face: int = 0
     face_detected_once: bool = False
@@ -65,6 +66,8 @@ class MatchResult:
     similarity_score: float = 0.0
     image_url: Optional[str] = None
     matched: bool = False
+    verified: bool = False
+    alert_level: str = "low"
 
 
 @dataclass
@@ -76,3 +79,31 @@ class DecisionResult:
     reason: str = ""
     should_alert: bool = False
     should_register: bool = False
+
+
+@dataclass
+class RecognitionResult:
+    """Output from the Recognition Agent.
+
+    Instead of a simple if/else on similarity, the agent considers
+    multiple factors to make a structured decision.
+    """
+    status: str = "unknown"           # "known" | "unknown" | "uncertain"
+    confidence: float = 0.0           # 0-100, how confident in the decision
+    similarity: float = 0.0           # raw cosine similarity from ArcFace
+    face_quality: float = 0.0         # quality score (0-1)
+    is_masked: bool = False           # mask detected
+    track_duration: float = 0.0       # seconds since first seen
+    reason: str = ""                  # human-readable explanation
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for easy serialization."""
+        return {
+            "status": self.status,
+            "confidence": round(self.confidence, 1),
+            "similarity": round(self.similarity, 4),
+            "face_quality": round(self.face_quality, 3),
+            "is_masked": self.is_masked,
+            "track_duration": round(self.track_duration, 1),
+            "reason": self.reason,
+        }

@@ -28,3 +28,6 @@ requests>=2.31.0           # Webhook alerts
 
 # Config
 python-dotenv>=1.0.0
+
+# Structured logging
+structlog>=24.1.0

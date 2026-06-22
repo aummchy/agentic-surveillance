@@ -1,8 +1,38 @@
 import os
+import logging
+import structlog
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def setup_logging():
+    """Configure structlog with JSON output for production, console for dev."""
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.dev.ConsoleRenderer() if os.getenv("LOG_FORMAT") != "json"
+            else structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # Make structlog work with standard logging calls from third-party libraries
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.INFO,
+    )
+
+
+setup_logging()
 
 
 def validate_config():
@@ -59,16 +89,16 @@ INSIGHTFACE_PROVIDER = os.getenv("INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
 PERSON_CONF_THRESHOLD = float(os.getenv("PERSON_CONF_THRESHOLD", "0.5"))
 TRACK_TIMEOUT_SECS = float(os.getenv("TRACK_TIMEOUT_SECS", "2.0"))
 MAX_TRACK_SECS = float(os.getenv("MAX_TRACK_SECS", "300"))
-DET_SCORE_MIN = float(os.getenv("DET_SCORE_MIN", "0.50"))
-EMBEDDING_DET_SCORE_MIN = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.70"))
+DET_SCORE_MIN = float(os.getenv("DET_SCORE_MIN", "0.30"))
+EMBEDDING_DET_SCORE_MIN = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.40"))
 
 RECOGNITION_INTERVAL_FRAMES = int(os.getenv("RECOGNITION_INTERVAL_FRAMES", "30"))
 
 QUALITY_BLUR_MAX = float(os.getenv("QUALITY_BLUR_MAX", "1000"))
 QUALITY_AREA_MAX = float(os.getenv("QUALITY_AREA_MAX", "10000"))
 
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.35"))
-DEDUP_SIMILARITY_THRESHOLD = float(os.getenv("DEDUP_SIMILARITY_THRESHOLD", "0.50"))
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.25"))
+DEDUP_SIMILARITY_THRESHOLD = float(os.getenv("DEDUP_SIMILARITY_THRESHOLD", "0.40"))
 
 MASK_DETECTION = os.getenv("MASK_DETECTION", "heuristic")
 LOITER_SECS = float(os.getenv("LOITER_SECS", "30"))

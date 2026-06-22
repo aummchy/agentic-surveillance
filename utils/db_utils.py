@@ -1,4 +1,4 @@
-import logging
+import structlog
 from datetime import datetime
 from typing import Optional
 from pymongo import MongoClient
@@ -6,11 +6,12 @@ from pymongo.collection import Collection
 from config import settings
 from utils.embedding_utils import compare_similarity, atlas_score_to_cosine
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _client: Optional[MongoClient] = None
 _faces_collection: Optional[Collection] = None
 _events_collection: Optional[Collection] = None
+_memory_collection: Optional[Collection] = None
 
 
 def get_client() -> MongoClient:
@@ -34,6 +35,18 @@ def get_events_collection() -> Collection:
         db = get_client()[settings.MONGODB_DATABASE]
         _events_collection = db[settings.MONGODB_EVENTS_COLLECTION]
     return _events_collection
+
+
+def get_memory_collection() -> Collection:
+    """Get the memory collection for visit history tracking."""
+    global _memory_collection
+    if _memory_collection is None:
+        db = get_client()[settings.MONGODB_DATABASE]
+        _memory_collection = db["visit_memory"]
+        # Create indexes for efficient queries
+        _memory_collection.create_index("person_id", unique=True)
+        _memory_collection.create_index("last_seen")
+    return _memory_collection
 
 
 def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> list:
@@ -72,13 +85,15 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
                     "role": r.get("role"),
                     "tags": r.get("tags", []),
                     "similarity_score": raw_cosine,
-                    "image_url": r.get("images", [{}])[0].get("url") if r.get("images") else None
+                    "image_url": r.get("images", [{}])[0].get("url") if r.get("images") else None,
+                    "verified": r.get("verified", False),
+                    "alert_level": r.get("alert_level", "low")
                 })
 
         return matches
 
     except Exception as e:
-        logger.warning(f"Atlas vector search failed, falling back to Python scan: {e}")
+        logger.warning("atlas_vector_search_failed", error=str(e))
         return _python_cosine_scan(embedding, filter_role, limit)
 
 
@@ -91,8 +106,9 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
         query["role"] = filter_role
 
     all_faces = list(collection.find(query, {"latest_embedding": 1, "person_id": 1,
-                                              "name": 1, "role": 1, "tags": 1,
-                                              "images": 1}))
+                                               "name": 1, "role": 1, "tags": 1,
+                                               "images": 1, "verified": 1,
+                                               "alert_level": 1}))
 
     if not all_faces:
         return []
@@ -113,7 +129,9 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
             "role": face.get("role"),
             "tags": face.get("tags", []),
             "similarity_score": similarity,
-            "image_url": face.get("images", [{}])[0].get("url") if face.get("images") else None
+            "image_url": face.get("images", [{}])[0].get("url") if face.get("images") else None,
+            "verified": face.get("verified", False),
+            "alert_level": face.get("alert_level", "low")
         })
 
     scored.sort(key=lambda x: x["similarity_score"], reverse=True)
@@ -172,6 +190,10 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
         "source": {"camera_id": camera_id, "captured_at": datetime.utcnow()},
         "quality_scores": quality_scores or {},
         "tags": tags or [],
+        "verified": False,
+        "verified_at": None,
+        "verified_by": None,
+        "alert_level": "low",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -180,19 +202,138 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
     return person_id
 
 
-def update_face(person_id: str, image_url: str = None, embedding: list = None):
+def update_face(person_id: str, image_url: str = None, embedding: list = None,
+                name: str = None, tags: list = None, verified: bool = None,
+                alert_level: str = None, verified_by: str = None):
     collection = get_faces_collection()
 
     update_ops = {"$set": {"updated_at": datetime.utcnow()}}
 
-    if image_url:
-        update_ops["$push"] = {"images": {"url": image_url, "captured_at": datetime.utcnow()}}
+    if name is not None:
+        update_ops["$set"]["name"] = name
+    if tags is not None:
+        update_ops["$set"]["tags"] = tags
+    if verified is not None:
+        update_ops["$set"]["verified"] = verified
+        if verified:
+            update_ops["$set"]["verified_at"] = datetime.utcnow()
+    if alert_level is not None:
+        update_ops["$set"]["alert_level"] = alert_level
+    if verified_by is not None:
+        update_ops["$set"]["verified_by"] = verified_by
 
+    push_ops = {}
+    if image_url:
+        push_ops["images"] = {"url": image_url, "captured_at": datetime.utcnow()}
     if embedding:
-        update_ops["$push"] = {"embeddings": embedding}
+        push_ops["embeddings"] = embedding
         update_ops["$set"]["latest_embedding"] = embedding
 
+    if push_ops:
+        update_ops["$push"] = push_ops
+
     collection.update_one({"person_id": person_id}, update_ops)
+
+
+def verify_person(person_id: str, name: str, alert_level: str = "low",
+                  verified_by: str = "operator") -> bool:
+    collection = get_faces_collection()
+
+    existing = collection.find_one({"person_id": person_id})
+    if not existing:
+        return False
+
+    tags = existing.get("tags", [])
+    if "verified" not in tags:
+        tags.append("verified")
+
+    update_ops = {
+        "$set": {
+            "name": name,
+            "verified": True,
+            "verified_at": datetime.utcnow(),
+            "verified_by": verified_by,
+            "alert_level": alert_level,
+            "role": "visitor",
+            "tags": tags,
+            "updated_at": datetime.utcnow()
+        }
+    }
+
+    result = collection.update_one({"person_id": person_id}, update_ops)
+    return result.modified_count > 0
+
+
+def get_unknown_faces(limit: int = 50, offset: int = 0) -> list:
+    collection = get_faces_collection()
+
+    query = {"verified": {"$ne": True}}
+    sort_order = [("created_at", -1)]
+
+    total = collection.count_documents(query)
+    faces = list(collection.find(query, {"latest_embedding": 0})
+                 .sort(sort_order)
+                 .skip(offset)
+                 .limit(limit))
+
+    for face in faces:
+        face["_id"] = str(face["_id"])
+
+    return {"faces": faces, "total": total, "limit": limit, "offset": offset}
+
+
+def get_face_by_id(person_id: str) -> dict:
+    collection = get_faces_collection()
+    face = collection.find_one({"person_id": person_id})
+    if face:
+        face["_id"] = str(face["_id"])
+    return face
+
+
+def update_alert_level(person_id: str, alert_level: str) -> bool:
+    collection = get_faces_collection()
+    result = collection.update_one(
+        {"person_id": person_id},
+        {"$set": {"alert_level": alert_level, "updated_at": datetime.utcnow()}}
+    )
+    return result.modified_count > 0
+
+
+def delete_face(person_id: str) -> bool:
+    collection = get_faces_collection()
+    result = collection.delete_one({"person_id": person_id})
+    return result.deleted_count > 0
+
+
+def get_events_with_faces(limit: int = 50, offset: int = 0,
+                          status_filter: str = None) -> list:
+    collection = get_events_collection()
+    faces_collection = get_faces_collection()
+
+    query = {}
+    if status_filter:
+        query["status"] = status_filter
+
+    total = collection.count_documents(query)
+    events = list(collection.find(query)
+                  .sort("timestamp", -1)
+                  .skip(offset)
+                  .limit(limit))
+
+    for event in events:
+        event["_id"] = str(event["_id"])
+        if event.get("person_id"):
+            face = faces_collection.find_one(
+                {"person_id": event["person_id"]},
+                {"name": 1, "verified": 1, "images": 1}
+            )
+            if face:
+                event["person_name"] = face.get("name")
+                event["person_verified"] = face.get("verified", False)
+                event["person_image"] = (face.get("images", [{}])[0].get("url")
+                                        if face.get("images") else None)
+
+    return {"events": events, "total": total, "limit": limit, "offset": offset}
 
 
 def log_event(track_id: str, camera_id: str, status: str, alert_level: str,
@@ -217,3 +358,147 @@ def log_event(track_id: str, camera_id: str, status: str, alert_level: str,
     }
 
     collection.insert_one(doc)
+
+
+def get_stats() -> dict:
+    faces_col = get_faces_collection()
+    events_col = get_events_collection()
+
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return {
+        "total_unknown": faces_col.count_documents({"verified": {"$ne": True}}),
+        "total_verified": faces_col.count_documents({"verified": True}),
+        "events_today": events_col.count_documents({"timestamp": {"$gte": today_start}}),
+        "unknown_today": events_col.count_documents({
+            "timestamp": {"$gte": today_start},
+            "status": {"$in": ["unknown", "masked_unknown"]}
+        }),
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# Memory Collection Functions (Phase 2.2)
+# ══════════════════════════════════════════════════════════════
+
+def get_or_create_memory(person_id: str) -> dict:
+    """Get existing memory or create a new one for a person."""
+    collection = get_memory_collection()
+    
+    memory = collection.find_one({"person_id": person_id})
+    if memory:
+        return memory
+    
+    # Create new memory document
+    new_memory = {
+        "person_id": person_id,
+        "visit_count": 0,
+        "first_seen": datetime.utcnow(),
+        "last_seen": datetime.utcnow(),
+        "last_camera": None,
+        "last_status": None,
+        "typical_hours": [],        # hours when person is usually seen
+        "typical_cameras": [],      # cameras where person is usually seen
+        "avg_similarity": 0.0,      # average similarity across visits
+        "similarity_history": [],   # last N similarity scores
+        "status_history": [],       # last N statuses
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    
+    collection.insert_one(new_memory)
+    return new_memory
+
+
+def update_visit_memory(person_id: str, camera_id: str, status: str,
+                        similarity: float, is_masked: bool = False) -> dict:
+    """Update memory after a visit. Returns updated memory."""
+    collection = get_memory_collection()
+    now = datetime.utcnow()
+    
+    memory = get_or_create_memory(person_id)
+    
+    # Update visit count
+    new_count = memory.get("visit_count", 0) + 1
+    
+    # Update similarity history (keep last 10)
+    sim_history = memory.get("similarity_history", [])
+    sim_history.append(similarity)
+    if len(sim_history) > 10:
+        sim_history = sim_history[-10:]
+    avg_sim = sum(sim_history) / len(sim_history) if sim_history else 0.0
+    
+    # Update status history (keep last 10)
+    status_history = memory.get("status_history", [])
+    status_history.append({"status": status, "timestamp": now})
+    if len(status_history) > 10:
+        status_history = status_history[-10:]
+    
+    # Update typical hours (extract hour from last 20 visits)
+    hour = now.hour
+    typical_hours = memory.get("typical_hours", [])
+    typical_hours.append(hour)
+    if len(typical_hours) > 20:
+        typical_hours = typical_hours[-20:]
+    
+    # Update typical cameras
+    typical_cameras = memory.get("typical_cameras", [])
+    if camera_id not in typical_cameras:
+        typical_cameras.append(camera_id)
+    if len(typical_cameras) > 5:
+        typical_cameras = typical_cameras[-5:]
+    
+    update_ops = {
+        "$set": {
+            "visit_count": new_count,
+            "last_seen": now,
+            "last_camera": camera_id,
+            "last_status": status,
+            "avg_similarity": avg_sim,
+            "similarity_history": sim_history,
+            "status_history": status_history,
+            "typical_hours": typical_hours,
+            "typical_cameras": typical_cameras,
+            "updated_at": now
+        }
+    }
+    
+    # Update first_seen only if it's the first visit
+    if new_count == 1:
+        update_ops["$set"]["first_seen"] = now
+    
+    collection.update_one({"person_id": person_id}, update_ops, upsert=True)
+    
+    return get_or_create_memory(person_id)
+
+
+def get_visit_history(person_id: str) -> dict:
+    """Get visit history for a person."""
+    collection = get_memory_collection()
+    return collection.find_one({"person_id": person_id}) or {}
+
+
+def get_recent_unknowns(hours: int = 24, limit: int = 50) -> list:
+    """Get recently seen unknown persons."""
+    collection = get_memory_collection()
+    from datetime import timedelta
+    
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    
+    return list(collection.find({
+        "last_seen": {"$gte": cutoff},
+        "last_status": {"$in": ["unknown", "masked_unknown"]}
+    }).sort("last_seen", -1).limit(limit))
+
+
+def get_memory_stats() -> dict:
+    """Get memory collection statistics."""
+    collection = get_memory_collection()
+    
+    return {
+        "total_persons": collection.count_documents({}),
+        "known_persons": collection.count_documents({"visit_count": {"$gt": 1}}),
+        "recent_unknowns": collection.count_documents({
+            "last_status": {"$in": ["unknown", "masked_unknown"]}
+        }),
+    }

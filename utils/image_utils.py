@@ -1,7 +1,49 @@
 import cv2
 import numpy as np
+import structlog
 from pathlib import Path
 from config import settings
+
+logger = structlog.get_logger(__name__)
+
+_cloudinary_configured = False
+
+
+def _init_cloudinary():
+    global _cloudinary_configured
+    if _cloudinary_configured:
+        return True
+    if not all([settings.CLOUDINARY_CLOUD_NAME, settings.CLOUDINARY_API_KEY, settings.CLOUDINARY_API_SECRET]):
+        return False
+    try:
+        import cloudinary
+        cloudinary.config(
+            cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+            api_key=settings.CLOUDINARY_API_KEY,
+            api_secret=settings.CLOUDINARY_API_SECRET
+        )
+        _cloudinary_configured = True
+        return True
+    except Exception as e:
+        logger.error("cloudinary_init_failed", error=str(e))
+        return False
+
+
+def upload_to_cloudinary(image: np.ndarray, folder: str = "surveillance") -> str | None:
+    if not _init_cloudinary():
+        return None
+    try:
+        import cloudinary.uploader
+        _, buffer = cv2.imencode(".jpg", image)
+        result = cloudinary.uploader.upload(
+            buffer.tobytes(),
+            folder=folder,
+            resource_type="image"
+        )
+        return result.get("secure_url")
+    except Exception as e:
+        logger.error("cloudinary_upload_failed", error=str(e))
+        return None
 
 
 def compute_blur_score(image: np.ndarray) -> float:
@@ -36,8 +78,8 @@ def crop_face_region(person_crop: np.ndarray, face_bbox: tuple, person_box: tupl
     abs_fy1 = max(0, abs_fy1)
 
     h, w = person_crop.shape[:2]
-    abs_fx2 = min(w, abs_fx2 - px1)
-    abs_fy2 = min(h, abs_fy2 - py1)
+    abs_fx2 = min(w, abs_fx2)
+    abs_fy2 = min(h, abs_fy2)
 
     if abs_fx2 <= abs_fx1 or abs_fy2 <= abs_fy1:
         return person_crop
@@ -69,6 +111,8 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
             color = (0, 0, 255)
         elif track.decision == "authorized":
             color = (0, 255, 0)
+        elif track.decision == "verified":
+            color = (0, 255, 0)
         elif track.decision == "known_visitor":
             color = (255, 165, 0)
 
@@ -76,7 +120,11 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
 
         label = f"ID:{track.track_id}"
         if track.decision:
-            label += f" [{track.decision}]"
+            if track.decision == "verified" and decisions and track.track_id in decisions:
+                name = decisions[track.track_id].get("name", "")
+                label += f" [Verified: {name}]" if name else " [Verified]"
+            else:
+                label += f" [{track.decision}]"
         if track.is_masked:
             label += " MASK"
 

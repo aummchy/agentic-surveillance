@@ -23,7 +23,9 @@ def run_matching(embedding_result: EmbeddingResult) -> MatchResult:
         tags=best.get("tags", []),
         similarity_score=best.get("similarity_score", 0.0),
         image_url=best.get("image_url"),
-        matched=True
+        matched=True,
+        verified=best.get("verified", False),
+        alert_level=best.get("alert_level", "low")
     )
 
 
@@ -44,5 +46,7 @@ def run_matching_from_embedding(embedding: list) -> MatchResult:
         tags=best.get("tags", []),
         similarity_score=best.get("similarity_score", 0.0),
         image_url=best.get("image_url"),
-        matched=True
+        matched=True,
+        verified=best.get("verified", False),
+        alert_level=best.get("alert_level", "low")
     )
