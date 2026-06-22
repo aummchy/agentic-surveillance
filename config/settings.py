@@ -1,34 +1,74 @@
 import os
 import logging
+import logging.handlers
 import structlog
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
 
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+
+def setup_file_logging():
+    """Add rotating file handler for full system logs at DEBUG level."""
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_DIR / "surveillance.log",
+        maxBytes=5 * 1024 * 1024,  # 5 MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(
+        logging.Formatter("%(message)s")
+    )
+    logging.root.addHandler(file_handler)
+
 
 def setup_logging():
-    """Configure structlog with JSON output for production, console for dev."""
+    """Configure structlog with console (INFO+) and rotating file (DEBUG) output."""
+    setup_file_logging()
+
+    # Console handler — INFO and above to reduce noise
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    logging.root.addHandler(console_handler)
+    logging.root.setLevel(logging.DEBUG)
+
+    # Structlog renderer — chosen by LOG_FORMAT env var
+    if os.getenv("LOG_FORMAT") == "json":
+        renderer = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer()
+
+    # ProcessorFormatter routes structlog output through standard logging handlers
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            renderer,
+        ],
+    )
+
+    console_handler.setFormatter(formatter)
+    # Re-apply formatter to the file handler we added earlier
+    for handler in logging.root.handlers:
+        if isinstance(handler, logging.handlers.RotatingFileHandler):
+            handler.setFormatter(formatter)
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
+            structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
-            structlog.dev.ConsoleRenderer() if os.getenv("LOG_FORMAT") != "json"
-            else structlog.processors.JSONRenderer(),
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.BoundLogger,
+        wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
-    )
-
-    # Make structlog work with standard logging calls from third-party libraries
-    logging.basicConfig(
-        format="%(message)s",
-        level=logging.INFO,
     )
 
 

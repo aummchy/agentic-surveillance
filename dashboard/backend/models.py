@@ -56,7 +56,7 @@ class EventResponse(BaseModel):
     person_verified: bool = False
     person_image: Optional[str] = None
     is_masked: bool = False
-    similarity_score: float = 0.0
+    similarity_score: Optional[float] = 0.0
     image_url: Optional[str] = None
     reason: str = ""
     alerted: bool = False

@@ -4,6 +4,10 @@
 
 ### Recently Fixed
 - [x] **Vite build error** — axios v1.18.0 incompatible with esbuild. Pinned to `axios@1.7.9` in `dashboard/frontend/`
+- [x] **`GET /api/events` 500 error** — `similarity_score: float` rejected null values from MongoDB. Fixed to `Optional[float]` in `dashboard/backend/models.py`
+- [x] **Terminal log noise** — uvicorn access logs (`GET /api/... 200 OK`) spamming console. Set to `warning` + `access_log=False` in `main.py`
+- [x] **File logging not working** — `structlog.PrintLoggerFactory` bypassed stdlib logging entirely, so `logs/surveillance.log` was empty. Switched to `structlog.stdlib.LoggerFactory()` + `ProcessorFormatter` so all output goes through standard logging handlers
+- [x] **Console too noisy** — `[debug]` messages from structlog were printing directly to stdout. Now goes through stdlib; console handler filters to INFO+, only `[info]` and above show. Verified working — console is clean, `logs/surveillance.log` captures everything including `[debug]`
 
 ---
 
@@ -111,18 +115,18 @@ The `.env` file contains actual production credentials:
 ## Missing Features (Phase 4 — Dashboard)
 
 ### Backend (`dashboard/backend/`)
-- [ ] FastAPI app setup
-- [ ] `GET /api/events` — paginated audit log (filter by status, alert_level, date)
-- [ ] `GET /api/faces` — enrolled identities CRUD
-- [ ] `GET /api/alerts` — active/recent high+ alerts
-- [ ] `WS /ws/live` — WebSocket pushing annotated frames + tracks
+- [x] FastAPI app setup
+- [x] `GET /api/events` — paginated audit log (filter by status, alert_level, date)
+- [x] `GET /api/faces` — enrolled identities CRUD
+- [x] `GET /api/alerts` — active/recent high+ alerts
+- [x] `WS /ws/live` — WebSocket pushing annotated frames + tracks
 - [ ] `POST /api/faces/{person_id}/review` — operator relabels unknown
 
 ### Frontend (`dashboard/frontend/`)
-- [ ] Live view — annotated camera feed with track boxes, IDs, names, badges
-- [ ] Visitor log — chronological events with thumbnails
-- [ ] Alerts panel — high/critical events with acknowledge
-- [ ] Enrollment manager — review unknowns, assign names/roles/tags
+- [x] Live view — annotated camera feed with track boxes, IDs, names, badges
+- [x] Visitor log — chronological events with thumbnails
+- [x] Alerts panel — high/critical events with acknowledge
+- [x] Enrollment manager — review unknowns, assign names/roles/tags
 - [ ] Audit trail — immutable events history
 
 ---
@@ -131,23 +135,23 @@ The `.env` file contains actual production credentials:
 
 | File | Status | Priority |
 |------|--------|----------|
-| `dashboard/backend/` | Missing | High — Phase 4 |
-| `dashboard/frontend/` | Missing | High — Phase 4 |
-| `README.md` | Missing | Medium — documentation |
-| `.env.example` | Missing | High — security |
+| `dashboard/backend/` | Exists | Done |
+| `dashboard/frontend/` | Exists | Done |
+| `README.md` | Exists | Done |
+| `.env.example` | Exists | Done |
+| `logs/` directory | Exists | Done |
 | `models/` directory | Missing | Medium — organize weights |
 | `pipeline/visibility_analyzer.py` | Missing | Low — logic in track_state.py (acceptable) |
 | `pipeline/decision_engine.py` | Missing | Low — logic in decision_agent.py (acceptable) |
 
 ---
 
-## Cloudinary Integration (incomplete)
+## Cloudinary Integration
 
-**Status: NOT IMPLEMENTED**
-- `utils/image_utils.py` has no Cloudinary upload function
-- Images saved locally only, no `secure_url` stored in MongoDB
-- `store_face` receives `image_url=None` always
-- Config variables (`CLOUDINARY_CLOUD_NAME`, etc.) exist but are unused
+**Status: IMPLEMENTED**
+- `utils/image_utils.py` has `upload_to_cloudinary()` function
+- `main.py:60` calls `upload_to_cloudinary()` and stores `secure_url`
+- Images uploaded successfully (confirmed in logs: `url=https://res.cloudinary.com/...`)
 
 ---
 
@@ -170,8 +174,8 @@ The `.env` file contains actual production credentials:
 4. **Fix bug #4** — `crop_face_region` coordinate bug (broken face crops)
 5. **Fix bug #1** — Add `track.alerted` check in main.py (cleanup)
 6. **Fix config defaults** — DET_SCORE_MIN=0.70, MIN_TRACK_FRAMES=30
-7. **Add Cloudinary upload** (image archival)
-8. **Create `.env.example`** (security)
-9. **Build dashboard** (Phase 4 — biggest gap)
-10. **Add README.md**
+7. ~~Add Cloudinary upload~~ ✓ Done
+8. ~~Create `.env.example`~~ ✓ Done
+9. ~~Build dashboard~~ ✓ Done
+10. ~~Add README.md~~ ✓ Done
 11. **Hardening** (move yolov8n.pt, lock contention, edge cases)

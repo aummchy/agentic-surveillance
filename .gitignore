@@ -22,6 +22,10 @@ captures/
 *.jpg
 *.png
 
+# Logs
+logs/*
+!logs/.gitkeep
+
 # IDE
 .vscode/
 .idea/

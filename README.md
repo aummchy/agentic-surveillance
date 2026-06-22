@@ -19,7 +19,7 @@ Camera → Detect Person → Track → Recognize → Decide → Alert → Report
 - Intelligent decisions based on multiple factors
 - Context-aware alerts (not just "unknown → alert")
 - Live dashboard with React + WebSocket
-- Structured logging with structlog
+- Structured logging with structlog + rotating file logs
 
 ---
 
@@ -219,6 +219,9 @@ surveillance-system/
 ├── requirements.txt                 # Python dependencies
 ├── yolov8n.pt                       # YOLO model weights
 │
+├── logs/                            # System logs (gitignored)
+│   └── surveillance.log             # Rotating file: 5MB × 5 backups
+│
 ├── agents/                          # Intelligent Agents
 │   ├── base.py                      # BaseAgent ABC
 │   ├── recognition.py               # Phase 2.1: Recognition decisions
@@ -321,6 +324,23 @@ The React dashboard provides:
 
 ---
 
+## Logging
+
+Logs are written to **two destinations** via structlog + standard logging:
+
+| Destination | Level | What you see |
+|-------------|-------|-------------|
+| **Console** (stdout) | `INFO` and above | `[info]` messages, alerts, errors — clean and minimal |
+| **`logs/surveillance.log`** | `DEBUG` (all) | Full system log including `[debug]` frames, face quality scores, recognition details |
+
+The file log uses Python's `RotatingFileHandler` — max **5 MB** per file, **5 backups** kept.
+
+- `[debug]` messages only appear in the log file, not on console
+- `logs/surveillance.log` also captures stdlib logs from third-party libraries (MongoDB driver, uvicorn)
+- To see debug output on console, adjust the console handler level in `config/settings.py`
+
+---
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -330,6 +350,9 @@ The React dashboard provides:
 | No face embeddings | Lower `DET_SCORE_MIN` to `0.20` |
 | Dashboard shows nothing | Ensure FastAPI running on port 8000 |
 | Vite build error (`env/data.js`) | Run `npm install axios@1.7.9` — axios 1.7.10+ is incompatible with Vite's esbuild |
+| `GET /api/events` returns 500 | `similarity_score` is null in MongoDB — ensure `Optional[float]` in `dashboard/backend/models.py` |
+| Terminal too noisy | Console shows `INFO+`; full debug logs go to `logs/surveillance.log` |
+| `FutureWarning` from insightface | Harmless — `estimate` deprecated in InsightFace 0.26, will be removed in 2.2. Safe to ignore |
 | Slow performance | Use GPU: set `YOLO_DEVICE=0` |
 | No local camera window | The system streams via WebSocket — open `http://localhost:5173` in your browser to see the feed |
 
