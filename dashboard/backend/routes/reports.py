@@ -13,7 +13,7 @@ async def get_stats():
 
 
 @router.get("/reports/summary")
-async def get_summary(period: str = Query("daily", regex="^(daily|weekly)$")):
+async def get_summary(period: str = Query("daily", pattern="^(daily|weekly)$")):
     """Get daily or weekly summary."""
     result = report_agent.run({"report_type": "summary", "period": period})
     return result

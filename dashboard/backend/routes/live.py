@@ -9,10 +9,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 connected_clients: Set[WebSocket] = set()
+MAX_FRAME_SIZE = 1024 * 1024  # 1MB max frame size
 
 
 async def broadcast_frame(frame_data: bytes):
     if not connected_clients:
+        return
+
+    if len(frame_data) > MAX_FRAME_SIZE:
+        logger.warning("frame_too_large", size=len(frame_data))
         return
 
     message = json.dumps({
@@ -23,7 +28,9 @@ async def broadcast_frame(frame_data: bytes):
     disconnected = set()
     for client in connected_clients:
         try:
-            await client.send_text(message)
+            await asyncio.wait_for(client.send_text(message), timeout=0.5)
+        except asyncio.TimeoutError:
+            logger.debug("client_slow", action="dropping_frame")
         except Exception:
             disconnected.add(client)
 
@@ -42,7 +49,9 @@ async def broadcast_event(event: dict):
     disconnected = set()
     for client in connected_clients:
         try:
-            await client.send_text(message)
+            await asyncio.wait_for(client.send_text(message), timeout=1.0)
+        except asyncio.TimeoutError:
+            logger.debug("client_slow", action="dropping_event")
         except Exception:
             disconnected.add(client)
 
@@ -61,7 +70,9 @@ async def broadcast_alert(alert_data: dict):
     disconnected = set()
     for client in connected_clients:
         try:
-            await client.send_text(message)
+            await asyncio.wait_for(client.send_text(message), timeout=1.0)
+        except asyncio.TimeoutError:
+            logger.debug("client_slow", action="dropping_alert")
         except Exception:
             disconnected.add(client)
 

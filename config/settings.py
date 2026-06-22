@@ -120,7 +120,7 @@ CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
 
-YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
+YOLO_MODEL = os.getenv("YOLO_MODEL", "models/yolov8n.pt")
 YOLO_DEVICE = os.getenv("YOLO_DEVICE", "cpu")
 INSIGHTFACE_MODEL = os.getenv("INSIGHTFACE_MODEL", "buffalo_l")
 INSIGHTFACE_DET_SIZE = int(os.getenv("INSIGHTFACE_DET_SIZE", "640"))
@@ -129,7 +129,7 @@ INSIGHTFACE_PROVIDER = os.getenv("INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
 PERSON_CONF_THRESHOLD = float(os.getenv("PERSON_CONF_THRESHOLD", "0.5"))
 TRACK_TIMEOUT_SECS = float(os.getenv("TRACK_TIMEOUT_SECS", "2.0"))
 MAX_TRACK_SECS = float(os.getenv("MAX_TRACK_SECS", "300"))
-DET_SCORE_MIN = float(os.getenv("DET_SCORE_MIN", "0.30"))
+DET_SCORE_MIN = float(os.getenv("DET_SCORE_MIN", "0.50"))
 EMBEDDING_DET_SCORE_MIN = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.40"))
 
 RECOGNITION_INTERVAL_FRAMES = int(os.getenv("RECOGNITION_INTERVAL_FRAMES", "30"))
@@ -145,7 +145,7 @@ LOITER_SECS = float(os.getenv("LOITER_SECS", "30"))
 
 VISIBLE_FACE_RATIO = float(os.getenv("VISIBLE_FACE_RATIO", "0.025"))
 PARTIAL_FACE_RATIO = float(os.getenv("PARTIAL_FACE_RATIO", "0.010"))
-MIN_TRACK_FRAMES = int(os.getenv("MIN_TRACK_FRAMES", "15"))
+MIN_TRACK_FRAMES = int(os.getenv("MIN_TRACK_FRAMES", "30"))
 
 ALERT_CHANNELS = [ch.strip() for ch in os.getenv("ALERT_CHANNELS", "console").split(",")]
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")

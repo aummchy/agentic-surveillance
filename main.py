@@ -1,23 +1,20 @@
 import sys
 import os
-import time
 import threading
 import queue
 import cv2
 import asyncio
 from datetime import datetime
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
 from agents.camera_agent import CameraAgent
-from agents.matching_agent import run_matching
 from agents.decision_agent import decide
 from agents.alert_agent import dispatch
+from agents.memory import MemoryAgent
 from utils.db_utils import store_face, log_event
 from utils.image_utils import save_image, upload_to_cloudinary
-from utils.embedding_utils import get_insightface
 from pipeline.models import Track
 from dashboard.backend.routes.live import broadcast_frame, broadcast_alert
 
@@ -28,6 +25,7 @@ logger = structlog.get_logger(__name__)
 worker_pool = None
 track_queue = None
 loop = None
+memory_agent = MemoryAgent()
 
 
 def handle_track_finalized(track: Track):
@@ -37,19 +35,23 @@ def handle_track_finalized(track: Track):
 
 def handle_frame_annotated(frame):
     if loop and loop.is_running():
-        asyncio.run_coroutine_threadsafe(broadcast_frame(frame), loop)
+        _, buffer = cv2.imencode(".jpg", frame)
+        asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
 
 
 def worker_process_tracks():
     while True:
+        track = None
         try:
             track = track_queue.get(timeout=1.0)
             process_finalized_track(track)
-            track_queue.task_done()
         except queue.Empty:
             continue
         except Exception as e:
-            logger.error("worker_failed", error=str(e))
+            logger.error("worker_failed", track_id=track.track_id if track else None, error=str(e))
+        finally:
+            if track is not None:
+                track_queue.task_done()
 
 
 def process_finalized_track(track: Track):
@@ -64,13 +66,23 @@ def process_finalized_track(track: Track):
 
         if track.embedding is None:
             logger.info("track_no_embedding", track_id=track.track_id)
-            _log_event(track, "unknown", "none", False, None, image_url)
+            _log_event(track, "unknown", "none", False, 0.0, image_url)
             return
 
         from agents.matching_agent import run_matching_from_embedding
         match_result = run_matching_from_embedding(track.embedding)
 
-        decision = decide(track, match_result)
+        recognition_result = getattr(track, 'pending_recognition', None)
+        memory_context = {}
+        if match_result.matched:
+            memory_context = memory_agent.run({
+                "person_id": match_result.person_id,
+                "camera_id": settings.CAMERA_ID,
+                "similarity": match_result.similarity_score,
+                "status": "known" if match_result.matched else "unknown",
+            })
+
+        decision = decide(track, match_result, recognition_result, memory_context)
 
         if decision.should_register:
             person_id = track.track_id
@@ -91,7 +103,16 @@ def process_finalized_track(track: Track):
             except Exception as e:
                 logger.error("store_face_failed", track_id=track.track_id, error=str(e))
 
-        if decision.should_alert:
+        if match_result.matched:
+            memory_agent.record_visit(
+                person_id=match_result.person_id,
+                camera_id=settings.CAMERA_ID,
+                status=decision.status,
+                similarity=match_result.similarity_score,
+                is_masked=track.is_masked
+            )
+
+        if decision.should_alert and not track.alerted:
             dispatch(track, decision, image_url)
             track.alerted = True
 

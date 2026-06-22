@@ -97,12 +97,15 @@ class CameraAgent:
 
             app = get_insightface()
 
+            # Track which image the face was detected in for coordinate conversion
+            detected_in_person_crop = True
             embedding_result = app.detect_and_embed(person_crop)
 
             if not embedding_result.face_detected or embedding_result.embedding is None:
                 logger.debug("no_face_in_crop",
                            track_id=track.track_id,
                            error=embedding_result.error)
+                detected_in_person_crop = False
                 embedding_result = app.detect_and_embed(frame)
 
                 if embedding_result.face_detected and embedding_result.embedding is not None:
@@ -111,10 +114,12 @@ class CameraAgent:
                     logger.debug("no_face_in_full_frame",
                                track_id=track.track_id,
                                error=embedding_result.error)
+                    detected_in_person_crop = True
                     embedding_result = app.detect_and_embed_relaxed(person_crop, min_score=0.20)
                     if embedding_result.face_detected and embedding_result.embedding is not None:
                         logger.info("face_found_relaxed_crop", track_id=track.track_id)
                     else:
+                        detected_in_person_crop = False
                         embedding_result = app.detect_and_embed_relaxed(frame, min_score=0.20)
                         if embedding_result.face_detected and embedding_result.embedding is not None:
                             logger.info("face_found_relaxed_frame", track_id=track.track_id)
@@ -125,9 +130,19 @@ class CameraAgent:
             if embedding_result.embedding is None:
                 return
 
-            face_ratio = 0.0
+            # Convert bbox to frame coordinates if detected in person_crop
+            frame_bbox = None
             if embedding_result.bbox:
-                face_ratio = compute_face_ratio(embedding_result.bbox, track.person_box)
+                fx1, fy1, fx2, fy2 = embedding_result.bbox
+                if detected_in_person_crop:
+                    px1, py1, _, _ = track.person_box
+                    frame_bbox = (fx1 + int(px1), fy1 + int(py1), fx2 + int(px1), fy2 + int(py1))
+                else:
+                    frame_bbox = (fx1, fy1, fx2, fy2)
+
+            face_ratio = 0.0
+            if frame_bbox:
+                face_ratio = compute_face_ratio(frame_bbox, track.person_box)
 
             self.track_state.update_face_visibility(track.track_id, True, face_ratio)
 
@@ -138,8 +153,8 @@ class CameraAgent:
                            threshold=settings.EMBEDDING_DET_SCORE_MIN)
                 return
 
-            if embedding_result.bbox:
-                fx1, fy1, fx2, fy2 = embedding_result.bbox
+            if frame_bbox:
+                fx1, fy1, fx2, fy2 = frame_bbox
                 face_crop = frame[fy1:fy2, fx1:fx2]
             else:
                 face_crop = person_crop
@@ -204,7 +219,14 @@ class CameraAgent:
 
             if decision.should_alert and not track.alerted:
                 from agents.alert_agent import dispatch
-                dispatch(track, decision)
+                from utils.image_utils import upload_to_cloudinary, save_image
+                image_url = None
+                if track.best_full_frame is not None:
+                    save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
+                    image_url = upload_to_cloudinary(track.best_full_frame)
+                    if not image_url:
+                        image_url = f"captures/{track.track_id}.jpg"
+                dispatch(track, decision, image_url)
                 self.track_state.set_decision(track.track_id, decision.status, True)
             else:
                 self.track_state.set_decision(track.track_id, decision.status, False)

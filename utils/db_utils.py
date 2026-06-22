@@ -231,6 +231,11 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
 
     if push_ops:
         update_ops["$push"] = push_ops
+        if "embeddings" in push_ops:
+            update_ops["$push"]["embeddings"] = {
+                "$each": [push_ops["embeddings"]],
+                "$slice": -10
+            }
 
     collection.update_one({"person_id": person_id}, update_ops)
 

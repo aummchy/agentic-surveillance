@@ -181,7 +181,7 @@ The Policy Agent considers these rules (in priority order):
 | `PERSON_CONF_THRESHOLD` | `0.5` | YOLO confidence for person detection |
 | `TRACK_TIMEOUT_SECS` | `2.0` | Seconds before track expires |
 | `MAX_TRACK_SECS` | `300` | Maximum track lifetime (5 min) |
-| `DET_SCORE_MIN` | `0.30` | Minimum face detection score |
+| `DET_SCORE_MIN` | `0.50` | Minimum face detection score |
 | `EMBEDDING_DET_SCORE_MIN` | `0.40` | Minimum score for embedding |
 
 ### Recognition
@@ -190,6 +190,7 @@ The Policy Agent considers these rules (in priority order):
 |----------|---------|-------------|
 | `RECOGNITION_INTERVAL_FRAMES` | `30` | Run recognition every N frames |
 | `LOITER_SECS` | `30` | Seconds before masked unknown escalates |
+| `MIN_TRACK_FRAMES` | `30` | Min frames before hidden classification triggers |
 
 ### Alerting
 
@@ -217,9 +218,13 @@ surveillance-system/
 ├── .env                             # Your config (not in git)
 ├── .env.example                     # Config template
 ├── requirements.txt                 # Python dependencies
-├── yolov8n.pt                       # YOLO model weights
+│
+├── models/                          # Model weights (gitignored)
+│   ├── .gitkeep
+│   └── yolov8n.pt                   # YOLOv8 nano model
 │
 ├── logs/                            # System logs (gitignored)
+│   ├── .gitkeep
 │   └── surveillance.log             # Rotating file: 5MB × 5 backups
 │
 ├── agents/                          # Intelligent Agents
