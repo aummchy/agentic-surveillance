@@ -329,7 +329,9 @@ The React dashboard provides:
 | Camera window black | Change `CAMERA_INDEX` in `.env` |
 | No face embeddings | Lower `DET_SCORE_MIN` to `0.20` |
 | Dashboard shows nothing | Ensure FastAPI running on port 8000 |
+| Vite build error (`env/data.js`) | Run `npm install axios@1.7.9` — axios 1.7.10+ is incompatible with Vite's esbuild |
 | Slow performance | Use GPU: set `YOLO_DEVICE=0` |
+| No local camera window | The system streams via WebSocket — open `http://localhost:5173` in your browser to see the feed |
 
 ---
 

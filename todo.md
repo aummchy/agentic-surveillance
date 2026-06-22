@@ -2,6 +2,9 @@
 
 ## Status: Last reviewed 2026-06-22
 
+### Recently Fixed
+- [x] **Vite build error** — axios v1.18.0 incompatible with esbuild. Pinned to `axios@1.7.9` in `dashboard/frontend/`
+
 ---
 
 ## Bugs (fix immediately)
