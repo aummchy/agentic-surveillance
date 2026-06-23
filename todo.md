@@ -190,6 +190,42 @@ The `.env` file contains actual production credentials:
 
 ---
 
+## Performance Optimizations (2026-06-23)
+
+### 🔴 Critical
+
+| # | Issue | File:Line | Impact | Status |
+|---|-------|-----------|--------|--------|
+| 1 | **YOLO model loaded twice** — `detector.py` and `tracker.py` each maintain separate singleton. `detector.py` is dead code | `pipeline/detector.py:8-16`, `pipeline/tracker.py:8-16` | ~50-100MB wasted RAM | [ ] Remove `detector.py` or unify |
+| 2 | **Face detection runs 4x per track** — cascading retry pattern calls `app.get()` up to 4 times (crop → full frame → relaxed crop → relaxed full frame) | `agents/camera_agent.py:94-132`, `_finalize_track():250-305` | ~200ms blocking main loop per recognition | [ ] Run detector once, apply thresholds to results |
+| 3 | **`_python_cosine_scan()` loads ALL faces into memory** — full collection scan with no limit | `utils/db_utils.py:108-158` | O(N) memory + CPU for large collections | [ ] Add query limits, use Atlas index |
+| 4 | **N+1 query in `get_events_with_faces()`** — 1 query + N individual face lookups (up to 51 round-trips) | `utils/db_utils.py:386-414` | 250-500ms per API call | [ ] Batch with `$in` or `$lookup` aggregation |
+
+### 🟠 High Impact
+
+| # | Issue | File:Line | Impact | Status |
+|---|-------|-----------|--------|--------|
+| 5 | **`store_face()` 2 full collection scans before insert** — scans unknowns + all faces for dedup | `utils/db_utils.py:234-275` | 2 full scans per registration | [ ] Use Atlas Vector Search index |
+| 6 | **Synchronous MongoDB in async FastAPI routes** — blocking PyMongo in `async` handlers | `dashboard/backend/routes/*.py` | Blocks all concurrent requests | [ ] Wrap in `asyncio.to_thread()` or use `motor` |
+| 7 | **WebSocket broadcasting is serial** — sends to each client sequentially with 0.5s timeout | `dashboard/backend/routes/live.py:15-37` | 5 clients = 2.5s delay | [ ] Use `asyncio.gather()` |
+| 8 | **Synchronous alert dispatch** — SMTP/Twilio/HTTP calls block worker thread | `agents/alert_agent.py:26-64` | 1-5s per alert | [ ] Dispatch via thread pool, persistent SMTP |
+
+### 🟡 Medium Impact
+
+| # | Issue | File:Line | Impact | Status |
+|---|-------|-----------|--------|--------|
+| 9 | **JPEG encoding on camera thread** — `cv2.imencode()` adds 5-15ms per frame | `main.py:36-39` | Reduces achievable FPS | [ ] Offload to worker thread |
+| 10 | **`update_visit_memory()` redundant read** — read → modify → write → read again | `utils/db_utils.py:491-550` | 3 DB ops where 1 suffices | [ ] Use atomic `$inc`/`$push`, remove 2nd read |
+| 11 | **Full frame stored in Track objects** — ~921KB raw BGR per track | `pipeline/track_state.py:74-83` | 10 tracks = ~9MB | [ ] Store compressed JPEG or downscale |
+
+### 🟢 Low Impact
+
+| # | Issue | File:Line | Impact | Status |
+|---|-------|-----------|--------|--------|
+| 12 | **Duplicate WebSocket connections** — `App.jsx` and `LiveFeed.jsx` both open separate connections | `App.jsx:34-57`, `LiveFeed.jsx:22-70` | Double connection overhead | [ ] Consolidate into single shared connection |
+
+---
+
 ## Priority Order
 
 ### Phase 1 — Critical (broken features)
@@ -213,3 +249,11 @@ The `.env` file contains actual production credentials:
 12. ~~**Config defaults**~~ ✓ Fixed — MIN_TRACK_FRAMES=30
 13. ~~**Move `yolov8n.pt` to `models/`**~~ ✓ Fixed
 14. **Graceful camera release on unexpected exit** — *still needs doing*
+
+### Phase 5 — Performance
+15. **Remove dead `detector.py`** — *pending*
+16. **Optimize face detection cascade** — *pending*
+17. **Fix N+1 query pattern** — *pending*
+18. **Add MongoDB to async routes** — *pending*
+19. **Concurrent WebSocket broadcasting** — *pending*
+20. **Async alert dispatch** — *pending*
