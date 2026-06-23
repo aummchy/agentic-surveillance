@@ -20,6 +20,7 @@ class Track:
     decision: Optional[str] = None
     person_name: Optional[str] = None  # Name from match result
     alerted: bool = False
+    image_url: Optional[str] = None  # Cloudinary URL (set after upload)
     last_recognition_frame: int = 0
     pending_embedding: Optional[list] = None
     pending_match: Optional[dict] = None

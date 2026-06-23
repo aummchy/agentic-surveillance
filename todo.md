@@ -1,6 +1,6 @@
 # TODO — Visitor Surveillance System
 
-## Status: Last reviewed 2026-06-23 (24 issues fixed including track loop, repeated warnings, verified alerts, 12 performance optimizations, live annotation colors, shutdown handling, person name in bounding box, track timeout fix)
+## Status: Last reviewed 2026-06-23 (52 issues fixed: 24 original + 28 problem.md bugs fixed, 4 remaining)
 
 ### Recently Fixed (2026-06-23)
 
@@ -23,7 +23,17 @@
 - [x] **Logger TypeError** — Route files switched from stdlib `logging` to `structlog` to fix `Logger._log() got an unexpected keyword argument 'error'`
 - [x] **Person name in bounding box** — `Track.person_name` field stores name from match result; `draw_annotations()` displays name alongside ID in live feed
 
-### Recently Fixed
+### Remaining Issues from problem.md (4 of 32 remaining)
+
+#### High (1)
+- [ ] **#9 Progressive recognition blocks camera** — `camera_agent.py:83` `_progressive_recognition` runs synchronously (InsightFace + MongoDB + policy) blocking frame capture
+
+#### Medium (3)
+- [ ] **#14 Silent truncation at 500** — `db_utils.py:116` `SCAN_LIMIT=500` silently truncates results, no log warning
+- [ ] **#19 Full scan at startup** — `db_utils.py:641` `backfill_missing_embeddings` runs full collection scan on every startup
+- [ ] **#23 MongoDB on camera thread** — `camera_agent.py:200` `memory_agent.run()` blocks camera loop (tied to #9)
+
+### Recently Fixed (older)
 
 - [x] **Vite build error** — axios v1.18.0 incompatible with esbuild. Pinned to `axios@1.7.9` in `dashboard/frontend/`
 - [x] **`GET /api/events` 500 error** — `similarity_score: float` rejected null values from MongoDB. Fixed to `Optional[float]` in `dashboard/backend/models.py`

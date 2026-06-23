@@ -274,6 +274,9 @@ class PolicyAgent(BaseAgent):
 
 
 # Convenience function for backward compatibility
+_policy_agent_instance = None
+
+
 def decide(track: Track, match_result: MatchResult,
            recognition_result: dict = None, memory_context: dict = None) -> DecisionResult:
     """Make a decision using the Policy Agent.
@@ -281,7 +284,10 @@ def decide(track: Track, match_result: MatchResult,
     This function maintains backward compatibility with existing code
     while using the new Policy Agent internally.
     """
-    agent = PolicyAgent()
+    global _policy_agent_instance
+    if _policy_agent_instance is None:
+        _policy_agent_instance = PolicyAgent()
+    agent = _policy_agent_instance
 
     result = agent.run({
         "recognition_result": recognition_result or {},

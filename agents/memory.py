@@ -124,7 +124,7 @@ class MemoryAgent(BaseAgent):
         )
 
         # Determine if this is a returning visitor
-        is_known = visit_count > 0 and last_status in ["known", "verified", "authorized"]
+        is_known = visit_count > 0 and last_status in ["known", "verified", "authorized", "known_visitor"]
 
         # Build reason
         reason = self._build_reason(visit_count, days_since_last, is_typical_time, is_known)

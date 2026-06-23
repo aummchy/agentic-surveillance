@@ -115,7 +115,9 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
         name = getattr(track, 'person_name', None)
-        label = f"ID:{track.track_id}"
+        # Show short numeric ID (last part of composite ID)
+        short_id = track.track_id.rsplit("_", 1)[-1] if "_" in track.track_id else track.track_id
+        label = f"ID:{short_id}"
         if name:
             label += f" {name}"
 
@@ -147,6 +149,8 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
     return annotated
 
 
-def decode_image(image_bytes: bytes) -> np.ndarray:
+def decode_image(image_bytes: bytes, max_size_mb: int = 10) -> np.ndarray:
+    if len(image_bytes) > max_size_mb * 1024 * 1024:
+        raise ValueError(f"Image size {len(image_bytes) / 1024 / 1024:.1f}MB exceeds limit of {max_size_mb}MB")
     nparr = np.frombuffer(image_bytes, np.uint8)
     return cv2.imdecode(nparr, cv2.IMREAD_COLOR)

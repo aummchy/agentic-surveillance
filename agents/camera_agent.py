@@ -10,7 +10,7 @@ from pipeline.track_state import TrackState
 from pipeline.quality_agent import compute_quality
 from pipeline.face import compute_face_ratio
 from pipeline.models import Track
-from utils.image_utils import crop_person, crop_face_region, resize_image, draw_annotations
+from utils.image_utils import crop_person, resize_image, draw_annotations
 from utils.embedding_utils import get_insightface
 from agents.recognition import RecognitionAgent
 from agents.memory import MemoryAgent
@@ -34,6 +34,15 @@ class CameraAgent:
 
     def start(self):
         self._running = True
+
+        # Validate camera index
+        test_cap = cv2.VideoCapture(settings.CAMERA_INDEX)
+        if not test_cap.isOpened():
+            logger.error("camera_index_invalid", index=settings.CAMERA_INDEX)
+            test_cap.release()
+            return
+        test_cap.release()
+
         self._cap = cv2.VideoCapture(settings.CAMERA_INDEX)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.FRAME_WIDTH)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.FRAME_HEIGHT)
@@ -59,12 +68,29 @@ class CameraAgent:
         logger.info("camera_stopped")
 
     def _loop(self):
+        consecutive_failures = 0
+        max_failures = 30  # 3 seconds at 100ms sleep
         while self._running:
             ret, frame = self._cap.read()
             if not ret:
-                logger.warning("frame_read_failed")
-                time.sleep(0.1)
+                consecutive_failures += 1
+                if consecutive_failures >= max_failures:
+                    logger.error("camera_disconnected", failures=consecutive_failures)
+                    # Try to reconnect
+                    self._cap.release()
+                    time.sleep(1.0)
+                    self._cap = cv2.VideoCapture(settings.CAMERA_INDEX)
+                    if self._cap.isOpened():
+                        logger.info("camera_reconnected")
+                        consecutive_failures = 0
+                    else:
+                        logger.error("camera_reconnect_failed")
+                        time.sleep(2.0)
+                else:
+                    time.sleep(0.1)
                 continue
+
+            consecutive_failures = 0
 
             self._frame_count += 1
 
@@ -86,6 +112,10 @@ class CameraAgent:
             for track in expired:
                 if track.track_id not in self._recognizing_tracks:
                     self._finalize_track(track)
+
+            # Prune _finalized_track_ids to only keep active tracks
+            active_track_ids = {t.track_id for t in self.track_state.get_all()}
+            self._finalized_track_ids &= active_track_ids
 
             annotated = draw_annotations(frame, self.track_state.get_all())
             if self.on_frame_annotated:
@@ -114,7 +144,7 @@ class CameraAgent:
                     logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
                 else:
                     # Try relaxed threshold on crop
-                    best = crop_faces[0] if crop_faces[0]["det_score"] >= 0.20 else None
+                    best = crop_faces[0] if crop_faces[0]["det_score"] >= settings.DET_SCORE_RELAXED else None
                     if best:
                         logger.info("face_found_relaxed_crop", track_id=track.track_id, score=best["det_score"])
 
@@ -126,7 +156,7 @@ class CameraAgent:
                     logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
                 else:
                     # Try relaxed threshold on full frame
-                    best = frame_faces[0] if frame_faces[0]["det_score"] >= 0.20 else None
+                    best = frame_faces[0] if frame_faces[0]["det_score"] >= settings.DET_SCORE_RELAXED else None
                     if best:
                         logger.info("face_found_relaxed_frame", track_id=track.track_id, score=best["det_score"])
 
@@ -223,19 +253,18 @@ class CameraAgent:
 
             # Store person name on track for bounding box display
             if match_result.matched and match_result.name:
-                track.person_name = match_result.name
-            elif decision.status in ("unknown", "masked_unknown") and track.person_name is None:
-                track.person_name = None
+                self.track_state.set_person_name(track.track_id, match_result.name)
 
             if decision.should_alert and not track.alerted and track.track_id not in self._finalized_track_ids:
                 from agents.alert_agent import dispatch
                 from utils.image_utils import upload_to_cloudinary, save_image
-                image_url = None
-                if track.best_full_frame is not None:
+                image_url = track.image_url  # Reuse if already uploaded
+                if not image_url and track.best_full_frame is not None:
                     save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
                     image_url = upload_to_cloudinary(track.best_full_frame)
                     if not image_url:
                         image_url = f"captures/{track.track_id}.jpg"
+                    track.image_url = image_url
                 dispatch(track, decision, image_url)
                 self.track_state.set_decision(track.track_id, decision.status, True)
             else:
@@ -288,7 +317,7 @@ class CameraAgent:
                         best, source = hit, src
                         break
                     # Relaxed fallback
-                    if faces[0]["det_score"] >= 0.15:
+                    if faces[0]["det_score"] >= settings.DET_SCORE_RELAXED:
                         best, source = faces[0], f"relaxed_{src}"
                         break
 

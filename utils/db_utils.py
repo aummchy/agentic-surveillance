@@ -35,6 +35,10 @@ def get_events_collection() -> Collection:
     if _events_collection is None:
         db = get_client()[settings.MONGODB_DATABASE]
         _events_collection = db[settings.MONGODB_EVENTS_COLLECTION]
+        # Create indexes for efficient queries
+        _events_collection.create_index("track_id")
+        _events_collection.create_index("timestamp")
+        _events_collection.create_index("status")
     return _events_collection
 
 
@@ -74,7 +78,7 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
         ]
 
         if filter_role:
-            pipeline.insert(0, {"$match": {"role": filter_role}})
+            pipeline.append({"$match": {"role": filter_role}})
 
         results = list(collection.aggregate(pipeline, maxTimeMS=5000))
 
@@ -166,7 +170,7 @@ def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
     import numpy as np
     collection = get_faces_collection()
 
-    unknowns = list(collection.find({"role": "unknown"}, {"latest_embedding": 1, "person_id": 1}))
+    unknowns = list(collection.find({"role": "unknown"}, {"latest_embedding": 1, "person_id": 1}).limit(500))
 
     if not unknowns:
         return []
@@ -201,7 +205,7 @@ def find_similar_faces(embedding: list, threshold: float = None) -> list:
     all_faces = list(collection.find(
         {},
         {"latest_embedding": 1, "person_id": 1, "role": 1, "verified": 1, "name": 1}
-    ))
+    ).limit(500))
 
     if not all_faces:
         return []
@@ -256,7 +260,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
 
     # Check for similar verified/known faces
     for m in matches:
-        if m["similarity_score"] >= 0.35:
+        if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
             existing_id = m["person_id"]
             existing = collection.find_one({"person_id": existing_id}, {"role": 1, "verified": 1})
             if existing:
@@ -324,7 +328,8 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
                 "$slice": -10
             }
 
-    collection.update_one({"person_id": person_id}, update_ops)
+    result = collection.update_one({"person_id": person_id}, update_ops)
+    return result.modified_count > 0
 
 
 def verify_person(person_id: str, name: str, alert_level: str = "low",
@@ -359,7 +364,7 @@ def verify_person(person_id: str, name: str, alert_level: str = "low",
 def get_unknown_faces(limit: int = 50, offset: int = 0) -> list:
     collection = get_faces_collection()
 
-    query = {"verified": {"$ne": True}}
+    query = {"role": "unknown", "verified": {"$ne": True}}
     sort_order = [("created_at", -1)]
 
     total = collection.count_documents(query)
@@ -637,6 +642,8 @@ def check_atlas_search_index():
 def backfill_missing_embeddings():
     """Fix faces that have embeddings array but empty latest_embedding."""
     collection = get_faces_collection()
+    # Create index for efficient queries
+    collection.create_index("latest_embedding")
     count = 0
     for face in collection.find({"latest_embedding": {"$exists": False}}):
         embs = face.get("embeddings", [])

@@ -74,6 +74,10 @@ class TrackState:
 
     def set_best_face(self, composite_id: str, face_crop: np.ndarray,
                       face_score: float, full_frame: np.ndarray, face_ratio: float):
+        # Encode JPEG outside the lock (expensive operation)
+        _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        jpeg_bytes = jpeg_buf.tobytes()
+
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -82,9 +86,7 @@ class TrackState:
                     track.best_face_score = face_score
                     track.best_full_frame = full_frame
                     track.best_face_ratio = face_ratio
-                    # Store compressed JPEG to save ~90% memory per track
-                    _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    track.best_frame_jpeg = jpeg_buf.tobytes()
+                    track.best_frame_jpeg = jpeg_bytes
 
     def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False):
         with self._lock:
@@ -99,6 +101,12 @@ class TrackState:
             if track:
                 track.decision = decision
                 track.alerted = alerted
+
+    def set_person_name(self, composite_id: str, name: str):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.person_name = name
 
     def set_pending_recognition(self, composite_id: str, frame_num: int,
                                 embedding: list = None, match: dict = None):

@@ -8,11 +8,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
 
 
 def setup_file_logging():
     """Add rotating file handler for full system logs at DEBUG level."""
+    LOG_DIR.mkdir(exist_ok=True)
     file_handler = logging.handlers.RotatingFileHandler(
         LOG_DIR / "surveillance.log",
         maxBytes=5 * 1024 * 1024,  # 5 MB
@@ -102,7 +102,13 @@ def validate_config():
     if not (0 < det_min < 1):
         errors.append("DET_SCORE_MIN must be between 0 and 1")
 
-    emb_min = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.70"))
+    det_relaxed = float(os.getenv("DET_SCORE_RELAXED", "0.20"))
+    if not (0 < det_relaxed < 1):
+        errors.append("DET_SCORE_RELAXED must be between 0 and 1")
+    if det_relaxed > det_min:
+        errors.append("DET_SCORE_RELAXED must be <= DET_SCORE_MIN")
+
+    emb_min = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.40"))
     if not (0 < emb_min < 1):
         errors.append("EMBEDDING_DET_SCORE_MIN must be between 0 and 1")
 
@@ -135,6 +141,7 @@ PERSON_CONF_THRESHOLD = float(os.getenv("PERSON_CONF_THRESHOLD", "0.5"))
 TRACK_TIMEOUT_SECS = float(os.getenv("TRACK_TIMEOUT_SECS", "8.0"))
 MAX_TRACK_SECS = float(os.getenv("MAX_TRACK_SECS", "300"))
 DET_SCORE_MIN = float(os.getenv("DET_SCORE_MIN", "0.50"))
+DET_SCORE_RELAXED = float(os.getenv("DET_SCORE_RELAXED", "0.20"))
 EMBEDDING_DET_SCORE_MIN = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.40"))
 
 RECOGNITION_INTERVAL_FRAMES = int(os.getenv("RECOGNITION_INTERVAL_FRAMES", "20"))

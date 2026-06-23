@@ -210,16 +210,17 @@ This is a simple heuristic, not a dedicated mask-classification model, so it wor
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PERSON_CONF_THRESHOLD` | `0.5` | YOLO confidence for person detection |
-| `TRACK_TIMEOUT_SECS` | `8.0` | Seconds before track expires |
+| `TRACK_TIMEOUT_SECS` | `8.0` | Seconds of no detection before track expires (person left frame) |
 | `MAX_TRACK_SECS` | `300` | Maximum track lifetime (5 min) |
 | `DET_SCORE_MIN` | `0.50` | Minimum face detection score |
+| `DET_SCORE_RELAXED` | `0.20` | Relaxed face detection threshold for fallback |
 | `EMBEDDING_DET_SCORE_MIN` | `0.40` | Minimum score for embedding |
 
 ### Recognition
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RECOGNITION_INTERVAL_FRAMES` | `20` | Run recognition every N frames |
+| `RECOGNITION_INTERVAL_FRAMES` | `20` | Run face recognition every N frames per track |
 | `LOITER_SECS` | `30` | Seconds before masked unknown escalates |
 | `MIN_TRACK_FRAMES` | `30` | Min frames before hidden classification triggers |
 
@@ -390,6 +391,8 @@ The file log uses Python's `RotatingFileHandler` — max **5 MB** per file, **5 
 | `FutureWarning` from insightface | Harmless — `estimate` deprecated in InsightFace 0.26, will be removed in 2.2. Safe to ignore |
 | Slow performance | Use GPU: set `YOLO_DEVICE=0` |
 | No local camera window | The system streams via WebSocket — open `http://localhost:5173` in your browser to see the feed |
+| Camera reconnect loops | System auto-reconnects after 30 consecutive frame failures (~3s). Check USB connection if persistent |
+| Track shows UNVERIFIED briefly | Normal — recognition runs every 20 frames (~4s). Set `RECOGNITION_INTERVAL_FRAMES=10` for faster first recognition |
 
 ---
 

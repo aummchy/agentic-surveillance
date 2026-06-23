@@ -28,6 +28,7 @@ track_queue = None
 loop = None
 memory_agent = MemoryAgent()
 _encode_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="jpeg")
+_shutdown_event = threading.Event()
 
 
 def handle_track_finalized(track: Track):
@@ -44,7 +45,7 @@ def handle_frame_annotated(frame):
 
 
 def worker_process_tracks():
-    while True:
+    while not _shutdown_event.is_set():
         track = None
         try:
             track = track_queue.get(timeout=1.0)
@@ -60,13 +61,15 @@ def worker_process_tracks():
 
 def process_finalized_track(track: Track):
     try:
-        image_url = None
-        if track.best_full_frame is not None:
+        image_url = track.image_url  # Reuse if already uploaded during progressive recognition
+        if not image_url and track.best_full_frame is not None:
             save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
             image_url = upload_to_cloudinary(track.best_full_frame)
             if not image_url:
                 image_url = f"captures/{track.track_id}.jpg"
             logger.info("track_image_saved", track_id=track.track_id, url=image_url)
+        # Release raw frame to free memory (JPEG bytes retained)
+        track.best_full_frame = None
 
         if track.embedding is None:
             logger.info("track_no_embedding", track_id=track.track_id)
@@ -220,6 +223,15 @@ def main():
 
     logger.info("press_q_to_stop")
     camera.start()
+
+    # Graceful shutdown
+    _shutdown_event.set()
+    try:
+        track_queue.join()
+    except Exception:
+        pass
+    _encode_executor.shutdown(wait=False)
+    logger.info("shutdown_complete")
 
 
 if __name__ == "__main__":
