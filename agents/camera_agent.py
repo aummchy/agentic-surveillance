@@ -221,6 +221,12 @@ class CameraAgent:
             from agents.decision_agent import decide
             decision = decide(track, match_result, recognition_result, memory_context)
 
+            # Store person name on track for bounding box display
+            if match_result.matched and match_result.name:
+                track.person_name = match_result.name
+            elif decision.status in ("unknown", "masked_unknown") and track.person_name is None:
+                track.person_name = None
+
             if decision.should_alert and not track.alerted and track.track_id not in self._finalized_track_ids:
                 from agents.alert_agent import dispatch
                 from utils.image_utils import upload_to_cloudinary, save_image

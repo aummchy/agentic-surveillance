@@ -76,6 +76,9 @@ def process_finalized_track(track: Track):
         from agents.matching_agent import run_matching_from_embedding
         match_result = run_matching_from_embedding(track.embedding)
 
+        if match_result.matched and match_result.name:
+            track.person_name = match_result.name
+
         recognition_result = getattr(track, 'pending_recognition', None)
         memory_context = {}
         if match_result.matched:

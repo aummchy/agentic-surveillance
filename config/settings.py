@@ -30,6 +30,11 @@ def setup_logging():
     """Configure structlog with console (INFO+) and rotating file (DEBUG) output."""
     setup_file_logging()
 
+    # Silence noisy PyMongo/Motor driver logs — only propagate WARNING+
+    for name in ("pymongo", "pymongo.topology", "pymongo.pool",
+                 "pymongo.command", "pymongo.server", "motor"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
     # Console handler — INFO and above to reduce noise
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
@@ -85,7 +90,7 @@ def validate_config():
     if threshold > 0.45:
         errors.append(f"MATCH_THRESHOLD={threshold} exceeds maximum 0.45")
 
-    timeout = float(os.getenv("TRACK_TIMEOUT_SECS", "2.0"))
+    timeout = float(os.getenv("TRACK_TIMEOUT_SECS", "8.0"))
     if timeout <= 0:
         errors.append("TRACK_TIMEOUT_SECS must be > 0")
 
@@ -127,12 +132,12 @@ INSIGHTFACE_DET_SIZE = int(os.getenv("INSIGHTFACE_DET_SIZE", "640"))
 INSIGHTFACE_PROVIDER = os.getenv("INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
 
 PERSON_CONF_THRESHOLD = float(os.getenv("PERSON_CONF_THRESHOLD", "0.5"))
-TRACK_TIMEOUT_SECS = float(os.getenv("TRACK_TIMEOUT_SECS", "2.0"))
+TRACK_TIMEOUT_SECS = float(os.getenv("TRACK_TIMEOUT_SECS", "8.0"))
 MAX_TRACK_SECS = float(os.getenv("MAX_TRACK_SECS", "300"))
 DET_SCORE_MIN = float(os.getenv("DET_SCORE_MIN", "0.50"))
 EMBEDDING_DET_SCORE_MIN = float(os.getenv("EMBEDDING_DET_SCORE_MIN", "0.40"))
 
-RECOGNITION_INTERVAL_FRAMES = int(os.getenv("RECOGNITION_INTERVAL_FRAMES", "30"))
+RECOGNITION_INTERVAL_FRAMES = int(os.getenv("RECOGNITION_INTERVAL_FRAMES", "20"))
 
 QUALITY_BLUR_MAX = float(os.getenv("QUALITY_BLUR_MAX", "1000"))
 QUALITY_AREA_MAX = float(os.getenv("QUALITY_AREA_MAX", "10000"))

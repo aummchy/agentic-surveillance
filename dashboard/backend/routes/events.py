@@ -3,9 +3,9 @@ from typing import Optional
 from dashboard.backend.models import EventsResponse
 from utils.db_utils import get_events_with_faces
 import asyncio
-import logging
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
@@ -14,6 +14,8 @@ async def get_stats():
     try:
         from utils.db_utils import get_stats as fetch_stats
         return await asyncio.to_thread(fetch_stats)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("stats_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch stats")
@@ -33,6 +35,8 @@ async def list_events(
             status_filter=status
         )
         return result
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("list_events_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch events")
@@ -51,6 +55,8 @@ async def list_unknown_events(
             status_filter="unknown"
         )
         return result
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("list_unknown_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch unknown events")
@@ -77,6 +83,8 @@ async def list_alerts(
             return {"events": events, "total": total, "limit": limit, "offset": offset}
 
         return await asyncio.to_thread(_fetch)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("list_alerts_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch alerts")

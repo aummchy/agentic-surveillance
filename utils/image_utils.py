@@ -114,13 +114,16 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
 
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
+        name = getattr(track, 'person_name', None)
         label = f"ID:{track.track_id}"
+        if name:
+            label += f" {name}"
+
         if track.decision:
-            if track.decision == "verified" and decisions and track.track_id in decisions:
-                name = decisions[track.track_id].get("name", "")
-                label += f" [Verified: {name}]" if name else " [Verified]"
-            elif track.decision == "authorized":
+            if track.decision == "authorized":
                 label += " [AUTHORIZED]"
+            elif track.decision == "verified":
+                label += " [VERIFIED]"
             elif track.decision == "known_visitor":
                 label += " [KNOWN VISITOR]"
             elif track.decision == "blacklist":
@@ -129,6 +132,8 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
                 label += " [HIDDEN]"
             elif track.decision in ("unknown", "masked_unknown"):
                 label += " [UNVERIFIED]"
+            elif track.decision == "uncertain":
+                label += " [UNCERTAIN]"
             else:
                 label += f" [{track.decision}]"
         else:

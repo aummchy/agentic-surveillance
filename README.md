@@ -210,7 +210,7 @@ This is a simple heuristic, not a dedicated mask-classification model, so it wor
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PERSON_CONF_THRESHOLD` | `0.5` | YOLO confidence for person detection |
-| `TRACK_TIMEOUT_SECS` | `2.0` | Seconds before track expires |
+| `TRACK_TIMEOUT_SECS` | `8.0` | Seconds before track expires |
 | `MAX_TRACK_SECS` | `300` | Maximum track lifetime (5 min) |
 | `DET_SCORE_MIN` | `0.50` | Minimum face detection score |
 | `EMBEDDING_DET_SCORE_MIN` | `0.40` | Minimum score for embedding |
@@ -219,7 +219,7 @@ This is a simple heuristic, not a dedicated mask-classification model, so it wor
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RECOGNITION_INTERVAL_FRAMES` | `30` | Run recognition every N frames |
+| `RECOGNITION_INTERVAL_FRAMES` | `20` | Run recognition every N frames |
 | `LOITER_SECS` | `30` | Seconds before masked unknown escalates |
 | `MIN_TRACK_FRAMES` | `30` | Min frames before hidden classification triggers |
 

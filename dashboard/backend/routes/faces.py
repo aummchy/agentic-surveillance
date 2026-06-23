@@ -9,9 +9,9 @@ from utils.db_utils import (
     update_face, delete_face
 )
 import asyncio
-import logging
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
@@ -44,6 +44,8 @@ async def list_faces(
         else:
             result = await asyncio.to_thread(get_unknown_faces, limit=limit, offset=offset)
             return result
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("list_faces_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch faces")
@@ -58,6 +60,8 @@ async def get_face(person_id: str):
         return face
     except HTTPException:
         raise
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("get_face_failed", person_id=person_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch face")
@@ -84,6 +88,8 @@ async def verify(person_id: str, body: VerifyRequest):
         )
     except HTTPException:
         raise
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("verify_failed", person_id=person_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to verify person")
@@ -107,6 +113,8 @@ async def update(person_id: str, body: UpdateFaceRequest):
         return {"status": "updated", "person_id": person_id}
     except HTTPException:
         raise
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("update_face_failed", person_id=person_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to update face")
@@ -122,6 +130,8 @@ async def delete(person_id: str):
         return {"status": "deleted", "person_id": person_id}
     except HTTPException:
         raise
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
         logger.error("delete_face_failed", person_id=person_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to delete face")

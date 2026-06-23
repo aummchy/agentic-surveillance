@@ -18,6 +18,7 @@ class Track:
     is_masked: bool = False
     embedding: Optional[list] = None
     decision: Optional[str] = None
+    person_name: Optional[str] = None  # Name from match result
     alerted: bool = False
     last_recognition_frame: int = 0
     pending_embedding: Optional[list] = None

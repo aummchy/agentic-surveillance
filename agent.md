@@ -640,13 +640,13 @@ INSIGHTFACE_PROVIDER=CPUExecutionProvider
 
 # ── Detection / tracking ─────────────────────────────
 PERSON_CONF_THRESHOLD=0.5
-TRACK_TIMEOUT_SECS=2.0          # drop a track unseen this long
+TRACK_TIMEOUT_SECS=8.0          # drop a track unseen this long
 MAX_TRACK_SECS=300              # force-finalize track after this many seconds
 DET_SCORE_MIN=0.50              # face detection threshold (lower for detection)
 EMBEDDING_DET_SCORE_MIN=0.70    # quality gate before generating embeddings
 
 # ── Progressive recognition ─────────────────────────
-RECOGNITION_INTERVAL_FRAMES=30  # run face recog every N frames per track
+RECOGNITION_INTERVAL_FRAMES=20  # run face recog every N frames per track
 
 # ── Quality scoring ───────────────────────────────────
 QUALITY_BLUR_MAX=1000           # Laplacian variance cap for normalization

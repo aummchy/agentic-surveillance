@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query
 from agents.report import ReportAgent
 import asyncio
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 report_agent = ReportAgent()
@@ -9,24 +12,35 @@ report_agent = ReportAgent()
 @router.get("/reports/stats")
 async def get_stats():
     """Get dashboard statistics."""
-    result = await asyncio.to_thread(report_agent.run, {"report_type": "stats"})
-    return result.get("stats", {})
+    try:
+        result = await asyncio.to_thread(report_agent.run, {"report_type": "stats"})
+        return result.get("stats", {})
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
 
 
 @router.get("/reports/summary")
 async def get_summary(period: str = Query("daily", pattern="^(daily|weekly)$")):
     """Get daily or weekly summary."""
-    result = await asyncio.to_thread(report_agent.run, {"report_type": "summary", "period": period})
-    return result
+    try:
+        result = await asyncio.to_thread(report_agent.run, {"report_type": "summary", "period": period})
+        return result
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
 
 
 @router.get("/reports/person/{person_id}")
 async def get_person_report(person_id: str):
     """Get report for a specific person."""
-    result = await asyncio.to_thread(report_agent.run, {"report_type": "person", "person_id": person_id})
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
+    try:
+        result = await asyncio.to_thread(report_agent.run, {"report_type": "person", "person_id": person_id})
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
 
 
 @router.get("/reports/incidents")
@@ -54,4 +68,7 @@ async def get_recent_incidents(limit: int = Query(20, ge=1, le=100)):
             reports.append(result)
         return {"reports": reports, "total": len(reports)}
 
-    return await asyncio.to_thread(_fetch)
+    try:
+        return await asyncio.to_thread(_fetch)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Server shutting down")
