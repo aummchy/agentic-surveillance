@@ -330,7 +330,7 @@ instead of creating a duplicate.
   index on `camera_id`, `status`, `alert_level` for dashboard queries
 
 > **Atlas Vector Search index** (create manually in Atlas UI, name
-> `face_vector_index`): `path=latest_embedding`, `numDimensions=512`,
+> `vector_index`): `path=latest_embedding`, `numDimensions=512`,
 > `similarity=cosine`. The code must fall back to a Python cosine scan if the
 > index is missing (so the system runs before the index is set up).
 
@@ -394,7 +394,7 @@ The track-end finalization still runs and writes the audit event.
   (load once, never per-frame). `generate_embedding()` → 512-dim normed vector;
   use `DET_SCORE_MIN=0.50` for face detection, `EMBEDDING_DET_SCORE_MIN=0.70`
   as quality gate before generating embeddings.
-- `utils/db_utils.py`: `$vectorSearch` pipeline on `face_vector_index`, cosine,
+- `utils/db_utils.py`: `$vectorSearch` pipeline on `vector_index`, cosine,
   with a Python cosine-scan fallback. **Threshold conversion is critical:**
   `MATCH_THRESHOLD` is raw cosine (−1..1); Atlas `vectorSearchScore` is
   `(1 + cosine)/2`, so filter on `atlas_threshold = (1 + MATCH_THRESHOLD) / 2`.

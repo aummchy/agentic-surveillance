@@ -128,6 +128,11 @@ function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
                   {person.verified ? person.name : 'Unknown'}
                 </div>
                 <div className="person-id">ID: {person.person_id.split('_').slice(-1)[0]}</div>
+                {person.images && person.images[0] && person.images[0].id && (
+                  <div className="person-photo-id" style={{fontSize: '0.7em', color: '#888'}}>
+                    Photo: {person.images[0].id.slice(0, 8)}
+                  </div>
+                )}
                 <div className="person-time-row">
                   <span className="person-time">First: {formatTimeShort(person.created_at)}</span>
                   <span className="person-time-sep">|</span>

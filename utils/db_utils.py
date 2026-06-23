@@ -1,4 +1,5 @@
 import structlog
+import uuid
 from datetime import datetime
 from typing import Optional
 from pymongo import MongoClient
@@ -52,11 +53,13 @@ def get_memory_collection() -> Collection:
 def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> list:
     collection = get_faces_collection()
 
+    logger.info("vector_search_started", embedding_len=len(embedding), filter_role=filter_role)
+
     try:
         pipeline = [
             {
                 "$vectorSearch": {
-                    "index": "face_vector_index",
+                    "index": "vector_index",
                     "path": "latest_embedding",
                     "queryVector": embedding,
                     "numCandidates": limit * 10,
@@ -73,7 +76,7 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
         if filter_role:
             pipeline.insert(0, {"$match": {"role": filter_role}})
 
-        results = list(collection.aggregate(pipeline))
+        results = list(collection.aggregate(pipeline, maxTimeMS=5000))
 
         matches = []
         for r in results:
@@ -90,11 +93,16 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
                     "alert_level": r.get("alert_level", "low")
                 })
 
+        logger.info("atlas_search_result", match_count=len(matches),
+                     scores=[round(m["similarity_score"], 4) for m in matches])
         return matches
 
     except Exception as e:
         logger.warning("atlas_vector_search_failed", error=str(e))
-        return _python_cosine_scan(embedding, filter_role, limit)
+        results = _python_cosine_scan(embedding, filter_role, limit)
+        logger.info("python_scan_fallback_result", match_count=len(results),
+                     scores=[round(m["similarity_score"], 4) for m in results])
+        return results
 
 
 def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5) -> list:
@@ -110,6 +118,8 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
                                                "images": 1, "verified": 1,
                                                "alert_level": 1}))
 
+    logger.debug("python_cosine_scan", total_faces=len(all_faces), filter_role=filter_role)
+
     if not all_faces:
         return []
 
@@ -117,9 +127,15 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
     query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-6)
 
     scored = []
+    skipped_empty = 0
     for face in all_faces:
-        stored_emb = np.array(face.get("latest_embedding", []), dtype=np.float32)
-        if len(stored_emb) == 0:
+        stored_emb = face.get("latest_embedding", [])
+        if not stored_emb or len(stored_emb) == 0:
+            skipped_empty += 1
+            continue
+        stored_emb = np.array(stored_emb, dtype=np.float32)
+        if stored_emb.ndim != 1 or len(stored_emb) != len(query_emb):
+            skipped_empty += 1
             continue
         stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
         similarity = float(np.dot(query_emb, stored_emb))
@@ -133,6 +149,10 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
             "verified": face.get("verified", False),
             "alert_level": face.get("alert_level", "low")
         })
+
+    if skipped_empty > 0:
+        logger.warning("cosine_scan_skipped_faces", count=skipped_empty,
+                        reason="empty or invalid latest_embedding")
 
     scored.sort(key=lambda x: x["similarity_score"], reverse=True)
     return [s for s in scored[:limit] if compare_similarity(s["similarity_score"])]
@@ -169,6 +189,48 @@ def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
     return similar
 
 
+def find_similar_faces(embedding: list, threshold: float = None) -> list:
+    """Search ALL faces (not just unknowns) by embedding similarity."""
+    if threshold is None:
+        threshold = settings.DEDUP_SIMILARITY_THRESHOLD
+
+    import numpy as np
+    collection = get_faces_collection()
+
+    all_faces = list(collection.find(
+        {},
+        {"latest_embedding": 1, "person_id": 1, "role": 1, "verified": 1, "name": 1}
+    ))
+
+    if not all_faces:
+        return []
+
+    query_emb = np.array(embedding, dtype=np.float32)
+    query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-6)
+
+    similar = []
+    for face in all_faces:
+        stored_emb = face.get("latest_embedding", [])
+        if not stored_emb or len(stored_emb) == 0:
+            continue
+        stored_emb = np.array(stored_emb, dtype=np.float32)
+        if stored_emb.ndim != 1 or len(stored_emb) != len(query_emb):
+            continue
+        stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
+        similarity = float(np.dot(query_emb, stored_emb))
+        if similarity >= threshold:
+            similar.append({
+                "person_id": face.get("person_id"),
+                "similarity_score": similarity,
+                "verified": face.get("verified", False),
+                "role": face.get("role", "unknown"),
+                "name": face.get("name", "Unknown")
+            })
+
+    similar.sort(key=lambda x: x["similarity_score"], reverse=True)
+    return similar
+
+
 def store_face(person_id: str, name: str, role: str, embedding: list,
                image_url: str, tags: list = None, quality_scores: dict = None,
                camera_id: str = None) -> str:
@@ -177,7 +239,17 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
     existing = find_similar_unknowns(embedding)
     if existing:
         update_face(existing[0]["person_id"], image_url, embedding)
+        logger.info("store_face_merged_unknown", person_id=existing[0]["person_id"],
+                     similarity=existing[0]["similarity_score"])
         return existing[0]["person_id"]
+
+    all_similar = find_similar_faces(embedding, threshold=0.35)
+    if all_similar:
+        best = all_similar[0]
+        update_face(best["person_id"], image_url, embedding)
+        logger.info("store_face_merged_existing", person_id=best["person_id"],
+                     similarity=best["similarity_score"], verified=best["verified"])
+        return best["person_id"]
 
     doc = {
         "person_id": person_id,
@@ -186,7 +258,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
         "embeddings": [embedding],
         "latest_embedding": embedding,
         "embedding_model": "arcface",
-        "images": [{"url": image_url, "captured_at": datetime.utcnow()}],
+        "images": [{"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}],
         "source": {"camera_id": camera_id, "captured_at": datetime.utcnow()},
         "quality_scores": quality_scores or {},
         "tags": tags or [],
@@ -199,6 +271,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
     }
 
     collection.insert_one(doc)
+    logger.info("store_face_new", person_id=person_id, role=role)
     return person_id
 
 
@@ -224,7 +297,7 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
 
     push_ops = {}
     if image_url:
-        push_ops["images"] = {"url": image_url, "captured_at": datetime.utcnow()}
+        push_ops["images"] = {"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}
     if embedding:
         push_ops["embeddings"] = embedding
         update_ops["$set"]["latest_embedding"] = embedding
@@ -507,3 +580,50 @@ def get_memory_stats() -> dict:
             "last_status": {"$in": ["unknown", "masked_unknown"]}
         }),
     }
+
+
+def check_atlas_search_index():
+    """Check if Atlas Vector Search index exists and warn if not."""
+    try:
+        collection = get_faces_collection()
+        indexes = list(collection.list_search_indexes())
+        index_names = [idx.get("name") for idx in indexes]
+        if "vector_index" not in index_names:
+            logger.warning("atlas_search_index_missing",
+                           found_indexes=index_names,
+                           expected="vector_index",
+                           fallback="python_cosine_scan")
+        else:
+            logger.info("atlas_search_index_found", name="vector_index")
+    except Exception as e:
+        logger.warning("atlas_search_index_check_failed", error=str(e))
+
+
+def backfill_missing_embeddings():
+    """Fix faces that have embeddings array but empty latest_embedding."""
+    collection = get_faces_collection()
+    count = 0
+    for face in collection.find({"latest_embedding": {"$exists": False}}):
+        embs = face.get("embeddings", [])
+        if embs:
+            last_emb = embs[-1]
+            collection.update_one(
+                {"person_id": face["person_id"]},
+                {"$set": {"latest_embedding": last_emb}}
+            )
+            count += 1
+            logger.info("backfill_embedding", person_id=face["person_id"])
+    for face in collection.find({"latest_embedding": []}):
+        embs = face.get("embeddings", [])
+        if embs:
+            last_emb = embs[-1]
+            collection.update_one(
+                {"person_id": face["person_id"]},
+                {"$set": {"latest_embedding": last_emb}}
+            )
+            count += 1
+            logger.info("backfill_empty_embedding", person_id=face["person_id"])
+    if count > 0:
+        logger.info("backfill_complete", fixed_count=count)
+    else:
+        logger.info("backfill_not_needed")

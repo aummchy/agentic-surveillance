@@ -13,7 +13,7 @@ from agents.camera_agent import CameraAgent
 from agents.decision_agent import decide
 from agents.alert_agent import dispatch
 from agents.memory import MemoryAgent
-from utils.db_utils import store_face, log_event
+from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings
 from utils.image_utils import save_image, upload_to_cloudinary
 from pipeline.models import Track
 from dashboard.backend.routes.live import broadcast_frame, broadcast_alert
@@ -116,7 +116,7 @@ def process_finalized_track(track: Track):
             dispatch(track, decision, image_url)
             track.alerted = True
 
-        if decision.status in ("unknown", "masked_unknown"):
+        if decision.status in ("unknown", "masked_unknown") and not match_result.matched:
             alert_payload = {
                 "person_id": track.track_id,
                 "status": decision.status,
@@ -176,6 +176,12 @@ def main():
                 camera_id=settings.CAMERA_ID,
                 camera_index=settings.CAMERA_INDEX,
                 alert_channels=settings.ALERT_CHANNELS)
+
+    try:
+        check_atlas_search_index()
+        backfill_missing_embeddings()
+    except Exception as e:
+        logger.warning("startup_check_failed", error=str(e))
 
     track_queue = queue.Queue()
     worker_threads = []

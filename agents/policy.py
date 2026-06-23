@@ -172,7 +172,7 @@ class PolicyAgent(BaseAgent):
                 person_id=person_id,
                 name=name,
                 reason=f"Verified visitor: {name}",
-                should_alert=(alert_level_from_match != "none"),
+                should_alert=False,
                 should_register=False
             )
 

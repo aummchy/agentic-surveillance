@@ -69,7 +69,7 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=tru
 2. Create database: `surveillance`
 3. Create collections: `faces`, `events`, `visit_memory`
 4. Create Vector Search Index:
-   - Name: `face_vector_index`
+   - Name: `vector_index`
    - Collection: `faces`
    - Path: `latest_embedding`
    - Dimensions: `512`

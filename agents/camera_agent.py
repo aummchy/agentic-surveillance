@@ -29,6 +29,8 @@ class CameraAgent:
         self._stop_event = threading.Event()
         self.recognition_agent = RecognitionAgent()
         self.memory_agent = MemoryAgent()
+        self._recognizing_tracks = set()
+        self._finalized_track_ids = set()
 
     def start(self):
         self._running = True
@@ -82,13 +84,15 @@ class CameraAgent:
 
             expired = self.track_state.get_expired_tracks()
             for track in expired:
-                self._finalize_track(track)
+                if track.track_id not in self._recognizing_tracks:
+                    self._finalize_track(track)
 
             annotated = draw_annotations(frame, self.track_state.get_all())
             if self.on_frame_annotated:
                 self.on_frame_annotated(annotated)
 
     def _progressive_recognition(self, frame: np.ndarray, track: Track):
+        self._recognizing_tracks.add(track.track_id)
         try:
             person_crop = crop_person(frame, track.person_box)
             if person_crop.size == 0:
@@ -217,7 +221,7 @@ class CameraAgent:
             from agents.decision_agent import decide
             decision = decide(track, match_result, recognition_result, memory_context)
 
-            if decision.should_alert and not track.alerted:
+            if decision.should_alert and not track.alerted and track.track_id not in self._finalized_track_ids:
                 from agents.alert_agent import dispatch
                 from utils.image_utils import upload_to_cloudinary, save_image
                 image_url = None
@@ -229,7 +233,7 @@ class CameraAgent:
                 dispatch(track, decision, image_url)
                 self.track_state.set_decision(track.track_id, decision.status, True)
             else:
-                self.track_state.set_decision(track.track_id, decision.status, False)
+                self.track_state.set_decision(track.track_id, decision.status, track.alerted)
 
             self.track_state.set_pending_recognition(
                 track.track_id,
@@ -240,8 +244,11 @@ class CameraAgent:
 
         except Exception as e:
             logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e))
+        finally:
+            self._recognizing_tracks.discard(track.track_id)
 
     def _finalize_track(self, track: Track):
+        self._finalized_track_ids.add(track.track_id)
         try:
             self.track_state.classify_visibility(track.track_id)
 

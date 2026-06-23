@@ -1,6 +1,17 @@
 # TODO — Visitor Surveillance System
 
-## Status: Last reviewed 2026-06-22 (all 12 issues from diagnosis fixed)
+## Status: Last reviewed 2026-06-23 (19 issues fixed including track loop, repeated warnings, verified alerts)
+
+### Recently Fixed (2026-06-23)
+- [x] **Track finalization loop** — `camera_agent.py` now tracks `_recognizing_tracks` and `_finalized_track_ids` to prevent same track from being finalized/alarmed multiple times
+- [x] **Repeated warnings after verification** — `policy.py` Rule 3 now sets `should_alert=False` always for verified persons
+- [x] **Vector search always returning 0** — Added detailed logging to `vector_search()` and `_python_cosine_scan()`, plus Atlas index check and embedding backfill on startup
+- [x] **No dedup against verified faces** — Added `find_similar_faces()` that searches ALL roles, used in `store_face()` to prevent duplicate records for verified persons
+- [x] **No unique photo IDs** — Added UUID to each image in `store_face()` and `update_face()`
+- [x] **Duplicate alert broadcasts** — `main.py` now checks `not match_result.matched` before broadcasting unknown alerts
+- [x] **Track timeout too short** — `TRACK_TIMEOUT_SECS` increased from 2.0 to 5.0 in `.env`
+- [x] **Frontend photo ID** — `UnknownPersons.jsx` now shows first 8 chars of photo UUID
+- [x] **Startup health checks** — `main.py` calls `check_atlas_search_index()` and `backfill_missing_embeddings()` on boot
 
 ### Recently Fixed
 - [x] **Vite build error** — axios v1.18.0 incompatible with esbuild. Pinned to `axios@1.7.9` in `dashboard/frontend/`
