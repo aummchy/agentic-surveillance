@@ -2,6 +2,7 @@ import json
 import structlog
 import time
 import smtplib
+import concurrent.futures
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
@@ -11,6 +12,7 @@ from pipeline.models import Track, DecisionResult
 logger = structlog.get_logger(__name__)
 
 _alert_timestamps = {}
+_alert_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="alert")
 
 
 def should_send_alert(track_id: str, alert_level: str) -> bool:
@@ -46,22 +48,31 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
         "image_url": image_url
     }
 
-    success = True
-    for channel in settings.ALERT_CHANNELS:
+    # Console is instant, run synchronously
+    if "console" in settings.ALERT_CHANNELS:
         try:
-            if channel == "console":
-                _alert_console(payload)
-            elif channel == "email":
-                _alert_email(payload)
-            elif channel == "sms":
-                _alert_sms(payload)
-            elif channel == "webhook":
-                _alert_webhook(payload)
+            _alert_console(payload)
         except Exception as e:
-            logger.error("alert_channel_failed", channel=channel, error=str(e))
-            success = False
+            logger.error("alert_channel_failed", channel="console", error=str(e))
 
-    return success
+    # Network-bound alerts (email, SMS, webhook) run in thread pool
+    async_channels = [c for c in settings.ALERT_CHANNELS if c in ("email", "sms", "webhook")]
+    if async_channels:
+        def _send_async():
+            for channel in async_channels:
+                try:
+                    if channel == "email":
+                        _alert_email(payload)
+                    elif channel == "sms":
+                        _alert_sms(payload)
+                    elif channel == "webhook":
+                        _alert_webhook(payload)
+                except Exception as e:
+                    logger.error("alert_channel_failed", channel=channel, error=str(e))
+
+        _alert_executor.submit(_send_async)
+
+    return True
 
 
 def _alert_console(payload: dict):

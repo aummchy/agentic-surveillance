@@ -19,6 +19,7 @@ Camera → Detect Person → Track → Recognize → Decide → Alert → Report
 - Intelligent decisions based on multiple factors
 - Context-aware alerts (not just "unknown → alert")
 - Live dashboard with React + WebSocket
+- Live camera overlays: red for unverified, yellow for known visitors, green for verified, with masks always shown in red
 - Structured logging with structlog + rotating file logs
 
 ---
@@ -159,6 +160,36 @@ The Policy Agent considers these rules (in priority order):
 
 ---
 
+## Live Overlay Colors
+
+The live camera feed uses these border and label rules:
+
+| State | Border Color | Label |
+|-------|--------------|-------|
+| No decision yet / unknown | Red | `UNVERIFIED` |
+| Masked person (any state) | Red | Appends `MASK` |
+| Intentionally hidden | Red | `HIDDEN` |
+| Blacklisted | Red | `BLACKLIST` |
+| Known visitor | Yellow | `KNOWN VISITOR` |
+| Verified / authorized | Green | `Verified` or `AUTHORIZED` |
+
+Notes:
+- A masked person stays red even if they were previously verified.
+- `Known visitor` means the system has seen a matching person before, but the identity has not been operator-verified like a fully verified visitor.
+
+## How Mask Detection Works
+
+Mask detection uses a geometric heuristic from the 5 face landmarks returned by InsightFace/SCRFD:
+
+1. Find the eye midpoint, nose tip, and mouth center.
+2. Measure upper-face height: eye midpoint to nose tip.
+3. Measure lower-face height: nose tip to mouth center.
+4. If `lower_face_height / upper_face_height < 0.3`, the face is treated as masked.
+
+This is a simple heuristic, not a dedicated mask-classification model, so it works best for front-facing faces with stable landmarks.
+
+---
+
 ## Configuration Reference
 
 ### Required
@@ -241,7 +272,6 @@ surveillance-system/
 │
 ├── pipeline/                        # CV Pipeline
 │   ├── models.py                    # Dataclasses (Track, etc.)
-│   ├── detector.py                  # YOLOv8 detection
 │   ├── tracker.py                   # ByteTrack tracking
 │   ├── track_state.py               # Track lifecycle
 │   ├── face.py                      # Face detection/embedding
@@ -321,8 +351,8 @@ surveillance-system/
 
 The React dashboard provides:
 
-- **Live Feed** — Real-time camera via WebSocket
-- **Event Log** — Paginated events with filtering
+- **Live Feed** — Real-time camera via WebSocket with color-coded bounding boxes
+- **Event Log** — Paginated events with color-coded status badges (red = unverified, yellow = known visitor, green = verified)
 - **Unknown Persons** — Grid of detected person cards
 - **Verify Modal** — Assign names to unknown persons
 - **Bright, clean UI** — White background, blue accents, high contrast

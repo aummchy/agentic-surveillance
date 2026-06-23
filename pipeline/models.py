@@ -14,6 +14,7 @@ class Track:
     best_face_crop: Optional[np.ndarray] = None
     best_face_score: float = 0.0
     best_full_frame: Optional[np.ndarray] = None
+    best_frame_jpeg: Optional[bytes] = None  # Compressed JPEG (~50KB vs ~921KB raw)
     is_masked: bool = False
     embedding: Optional[list] = None
     decision: Optional[str] = None

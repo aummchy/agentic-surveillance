@@ -4,6 +4,7 @@ import threading
 import queue
 import cv2
 import asyncio
+import concurrent.futures
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,6 +27,7 @@ worker_pool = None
 track_queue = None
 loop = None
 memory_agent = MemoryAgent()
+_encode_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="jpeg")
 
 
 def handle_track_finalized(track: Track):
@@ -35,8 +37,10 @@ def handle_track_finalized(track: Track):
 
 def handle_frame_annotated(frame):
     if loop and loop.is_running():
-        _, buffer = cv2.imencode(".jpg", frame)
-        asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
+        def _encode_and_broadcast():
+            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
+        _encode_executor.submit(_encode_and_broadcast)
 
 
 def worker_process_tracks():

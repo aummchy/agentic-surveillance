@@ -12,8 +12,11 @@ function App() {
   const [stats, setStats] = useState({ total_unknown: 0, total_verified: 0, events_today: 0, unknown_today: 0 })
   const [notifications, setNotifications] = useState([])
   const [activeAlert, setActiveAlert] = useState(null)
+  const [liveFrame, setLiveFrame] = useState(null)
+  const [wsConnected, setWsConnected] = useState(false)
   const wsRef = useRef(null)
   const statsIntervalRef = useRef(null)
+  const reconnectRef = useRef(null)
 
   const fetchStats = useCallback(async () => {
     try {
@@ -31,30 +34,55 @@ function App() {
     return () => clearInterval(statsIntervalRef.current)
   }, [fetchStats, refreshKey])
 
-  useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`)
-    wsRef.current = ws
+  const connectWebSocket = useCallback(() => {
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`)
+      wsRef.current = ws
 
-    ws.onopen = () => console.log('App WebSocket connected')
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        if (msg.type === 'alert' && msg.data) {
-          const alertData = msg.data
-          setActiveAlert(alertData)
-          setNotifications(prev => [alertData, ...prev].slice(0, 20))
-          setRefreshKey(prev => prev + 1)
-          fetchStats()
-          setTimeout(() => setActiveAlert(null), 8000)
-        }
-      } catch (e) {}
+      ws.onopen = () => {
+        setWsConnected(true)
+        const pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+        }, 30000)
+        ws._pingInterval = pingInterval
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'frame' && msg.data) {
+            setLiveFrame(`data:image/jpeg;base64,${msg.data}`)
+          } else if (msg.type === 'alert' && msg.data) {
+            const alertData = msg.data
+            setActiveAlert(alertData)
+            setNotifications(prev => [alertData, ...prev].slice(0, 20))
+            setRefreshKey(prev => prev + 1)
+            fetchStats()
+            setTimeout(() => setActiveAlert(null), 8000)
+          }
+        } catch (e) {}
+      }
+
+      ws.onerror = () => setWsConnected(false)
+
+      ws.onclose = () => {
+        setWsConnected(false)
+        clearInterval(ws._pingInterval)
+        reconnectRef.current = setTimeout(connectWebSocket, 3000)
+      }
+    } catch (e) {
+      reconnectRef.current = setTimeout(connectWebSocket, 3000)
     }
-    ws.onerror = () => {}
-    ws.onclose = () => {}
-
-    return () => ws.close()
   }, [fetchStats])
+
+  useEffect(() => {
+    connectWebSocket()
+    return () => {
+      if (wsRef.current) wsRef.current.close()
+      if (reconnectRef.current) clearTimeout(reconnectRef.current)
+    }
+  }, [connectWebSocket])
 
   const handleVerify = (person) => {
     setSelectedPerson(person)
@@ -124,7 +152,7 @@ function App() {
 
       <main className="main-content">
         <section className="panel live-feed">
-          <LiveFeed activeAlert={activeAlert} />
+          <LiveFeed frame={liveFrame} connected={wsConnected} activeAlert={activeAlert} />
         </section>
 
         <section className="panel">

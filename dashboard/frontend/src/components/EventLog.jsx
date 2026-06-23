@@ -49,24 +49,24 @@ function EventLog({ refreshKey }) {
 
   const getStatusClass = (status) => {
     switch (status) {
-      case 'unknown': return 'status-unknown'
+      case 'unknown': return 'status-unverified'
       case 'verified': return 'status-verified'
       case 'authorized': return 'status-authorized'
-      case 'known_visitor': return 'status-authorized'
-      case 'masked_unknown': return 'status-masked_unknown'
+      case 'known_visitor': return 'status-known_visitor'
+      case 'masked_unknown': return 'status-masked'
       case 'blacklist': return 'status-blacklist'
-      case 'intentionally_hidden': return 'status-blacklist'
-      default: return 'status-unknown'
+      case 'intentionally_hidden': return 'status-hidden'
+      default: return 'status-unverified'
     }
   }
 
   const getStatusLabel = (status) => {
     switch (status) {
-      case 'unknown': return 'Unknown'
+      case 'unknown': return 'Unverified'
       case 'verified': return 'Verified'
       case 'authorized': return 'Authorized'
       case 'known_visitor': return 'Known Visitor'
-      case 'masked_unknown': return 'Masked Unknown'
+      case 'masked_unknown': return 'Masked Unverified'
       case 'blacklist': return 'Blacklist'
       case 'intentionally_hidden': return 'Hidden'
       default: return status
@@ -75,15 +75,16 @@ function EventLog({ refreshKey }) {
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'unknown': return '\u26A0'
       case 'verified': return '\u2713'
       case 'authorized': return '\u2713'
-      case 'known_visitor': return '\u2713'
-      case 'masked_unknown': return '\u26A0'
+      case 'known_visitor': return '\u2605'
       case 'blacklist': return '\u2716'
-      case 'intentionally_hidden': return '\u26A0'
-      return '\u2022'
+      default: return '\u26A0'
     }
+  }
+
+  const isUnverified = (status) => {
+    return ['unknown', 'masked_unknown', 'blacklist', 'intentionally_hidden'].includes(status)
   }
 
   return (
@@ -123,7 +124,7 @@ function EventLog({ refreshKey }) {
       ) : (
         <div className="events-list">
           {events.map((event) => (
-            <div key={event._id} className={`event-item ${event.status === 'unknown' ? 'event-item-alert' : ''}`}>
+            <div key={event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
               {event.image_url || event.person_image ? (
                 <img
                   src={event.image_url || event.person_image}

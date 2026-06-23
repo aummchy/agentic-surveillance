@@ -12,7 +12,7 @@ def get_model() -> YOLO:
     global _model
     if _model is None:
         _model = YOLO(settings.YOLO_MODEL)
-        logger.info("yolo_model_loaded_tracking", model=settings.YOLO_MODEL)
+        logger.info("yolo_model_loaded", model=settings.YOLO_MODEL)
     return _model
 
 

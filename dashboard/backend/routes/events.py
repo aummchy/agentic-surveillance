@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
 from dashboard.backend.models import EventsResponse
 from utils.db_utils import get_events_with_faces
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ router = APIRouter()
 async def get_stats():
     try:
         from utils.db_utils import get_stats as fetch_stats
-        return fetch_stats()
+        return await asyncio.to_thread(fetch_stats)
     except Exception as e:
         logger.error("stats_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch stats")
@@ -25,7 +26,8 @@ async def list_events(
     offset: int = Query(0, ge=0)
 ):
     try:
-        result = get_events_with_faces(
+        result = await asyncio.to_thread(
+            get_events_with_faces,
             limit=limit,
             offset=offset,
             status_filter=status
@@ -42,7 +44,8 @@ async def list_unknown_events(
     offset: int = Query(0, ge=0)
 ):
     try:
-        result = get_events_with_faces(
+        result = await asyncio.to_thread(
+            get_events_with_faces,
             limit=limit,
             offset=offset,
             status_filter="unknown"
@@ -60,19 +63,20 @@ async def list_alerts(
 ):
     try:
         from utils.db_utils import get_events_collection
-        collection = get_events_collection()
 
-        query = {"alert_level": {"$in": ["high", "critical"]}}
-        total = collection.count_documents(query)
-        events = list(collection.find(query)
-                     .sort("timestamp", -1)
-                     .skip(offset)
-                     .limit(limit))
+        def _fetch():
+            collection = get_events_collection()
+            query = {"alert_level": {"$in": ["high", "critical"]}}
+            total = collection.count_documents(query)
+            events = list(collection.find(query)
+                         .sort("timestamp", -1)
+                         .skip(offset)
+                         .limit(limit))
+            for event in events:
+                event["_id"] = str(event["_id"])
+            return {"events": events, "total": total, "limit": limit, "offset": offset}
 
-        for event in events:
-            event["_id"] = str(event["_id"])
-
-        return {"events": events, "total": total, "limit": limit, "offset": offset}
+        return await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.error("list_alerts_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to fetch alerts")

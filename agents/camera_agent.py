@@ -8,7 +8,7 @@ from config import settings
 from pipeline.tracker import track_persons
 from pipeline.track_state import TrackState
 from pipeline.quality_agent import compute_quality
-from pipeline.face import detect_and_embed, compute_face_ratio
+from pipeline.face import compute_face_ratio
 from pipeline.models import Track
 from utils.image_utils import crop_person, crop_face_region, resize_image, draw_annotations
 from utils.embedding_utils import get_insightface
@@ -101,43 +101,43 @@ class CameraAgent:
 
             app = get_insightface()
 
-            # Track which image the face was detected in for coordinate conversion
+            # Run detection once per image, apply thresholds in Python
             detected_in_person_crop = True
-            embedding_result = app.detect_and_embed(person_crop)
+            crop_faces = app.detect_faces_raw(person_crop, min_score=0.0)
+            frame_faces = app.detect_faces_raw(frame, min_score=0.0) if not crop_faces else []
 
-            if not embedding_result.face_detected or embedding_result.embedding is None:
-                logger.debug("no_face_in_crop",
-                           track_id=track.track_id,
-                           error=embedding_result.error)
-                detected_in_person_crop = False
-                embedding_result = app.detect_and_embed(frame)
-
-                if embedding_result.face_detected and embedding_result.embedding is not None:
-                    logger.debug("face_found_in_full_frame", track_id=track.track_id)
+            best = None
+            if crop_faces:
+                # Try standard threshold on crop
+                best = next((f for f in crop_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
+                if best:
+                    logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
                 else:
-                    logger.debug("no_face_in_full_frame",
-                               track_id=track.track_id,
-                               error=embedding_result.error)
-                    detected_in_person_crop = True
-                    embedding_result = app.detect_and_embed_relaxed(person_crop, min_score=0.20)
-                    if embedding_result.face_detected and embedding_result.embedding is not None:
-                        logger.info("face_found_relaxed_crop", track_id=track.track_id)
-                    else:
-                        detected_in_person_crop = False
-                        embedding_result = app.detect_and_embed_relaxed(frame, min_score=0.20)
-                        if embedding_result.face_detected and embedding_result.embedding is not None:
-                            logger.info("face_found_relaxed_frame", track_id=track.track_id)
-                        else:
-                            logger.debug("no_face_relaxed", track_id=track.track_id)
-                            return
+                    # Try relaxed threshold on crop
+                    best = crop_faces[0] if crop_faces[0]["det_score"] >= 0.20 else None
+                    if best:
+                        logger.info("face_found_relaxed_crop", track_id=track.track_id, score=best["det_score"])
 
-            if embedding_result.embedding is None:
+            if not best and frame_faces:
+                detected_in_person_crop = False
+                # Try standard threshold on full frame
+                best = next((f for f in frame_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
+                if best:
+                    logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
+                else:
+                    # Try relaxed threshold on full frame
+                    best = frame_faces[0] if frame_faces[0]["det_score"] >= 0.20 else None
+                    if best:
+                        logger.info("face_found_relaxed_frame", track_id=track.track_id, score=best["det_score"])
+
+            if not best:
+                logger.debug("no_face_anywhere", track_id=track.track_id)
                 return
 
             # Convert bbox to frame coordinates if detected in person_crop
             frame_bbox = None
-            if embedding_result.bbox:
-                fx1, fy1, fx2, fy2 = embedding_result.bbox
+            if best["bbox"]:
+                fx1, fy1, fx2, fy2 = best["bbox"]
                 if detected_in_person_crop:
                     px1, py1, _, _ = track.person_box
                     frame_bbox = (fx1 + int(px1), fy1 + int(py1), fx2 + int(px1), fy2 + int(py1))
@@ -150,10 +150,10 @@ class CameraAgent:
 
             self.track_state.update_face_visibility(track.track_id, True, face_ratio)
 
-            if embedding_result.embedding_score < settings.EMBEDDING_DET_SCORE_MIN:
+            if best["det_score"] < settings.EMBEDDING_DET_SCORE_MIN:
                 logger.debug("embedding_score_below_threshold",
                            track_id=track.track_id,
-                           score=embedding_result.embedding_score,
+                           score=best["det_score"],
                            threshold=settings.EMBEDDING_DET_SCORE_MIN)
                 return
 
@@ -184,11 +184,11 @@ class CameraAgent:
                     face_ratio
                 )
 
-            embedding_list = embedding_result.embedding.tolist()
+            embedding_list = best["embedding"].tolist()
             self.track_state.set_embedding(
                 track.track_id,
                 embedding_list,
-                embedding_result.is_masked
+                best["is_masked"]
             )
 
             from agents.matching_agent import run_matching_from_embedding
@@ -208,7 +208,7 @@ class CameraAgent:
             track_duration = time.time() - track.first_seen
             recognition_result = self.recognition_agent.run({
                 "similarity": match_result.similarity_score if match_result.matched else 0.0,
-                "is_masked": embedding_result.is_masked,
+                "is_masked": best["is_masked"],
                 "face_quality": quality.overall_score if hasattr(quality, 'overall_score') else 0.0,
                 "track_duration": track_duration,
                 "memory_context": memory_context,
@@ -255,49 +255,42 @@ class CameraAgent:
             if track.embedding is None:
                 app = get_insightface()
 
+                # Run detection once per image instead of cascading 4 times
+                crop_faces = []
                 if track.best_face_crop is not None:
                     try:
                         resized = resize_image(track.best_face_crop)
-                        embedding_result = app.detect_and_embed(resized)
-                        if embedding_result.face_detected and embedding_result.embedding is not None:
-                            track.embedding = embedding_result.embedding.tolist()
-                            track.is_masked = embedding_result.is_masked
-                            logger.debug("final_embed_best_face_crop", track_id=track.track_id)
+                        crop_faces = app.detect_faces_raw(resized, min_score=0.0)
                     except Exception as e:
-                        logger.debug("best_face_crop_embed_failed", track_id=track.track_id, error=str(e))
+                        logger.debug("best_face_crop_detect_failed", track_id=track.track_id, error=str(e))
 
+                frame_faces = []
                 if track.embedding is None and track.best_full_frame is not None:
                     try:
-                        embedding_result = app.detect_and_embed(track.best_full_frame)
-                        if embedding_result.face_detected and embedding_result.embedding is not None:
-                            track.embedding = embedding_result.embedding.tolist()
-                            track.is_masked = embedding_result.is_masked
-                            logger.debug("final_embed_best_full_frame", track_id=track.track_id)
+                        frame_faces = app.detect_faces_raw(track.best_full_frame, min_score=0.0)
                     except Exception as e:
-                        logger.debug("best_full_frame_embed_failed", track_id=track.track_id, error=str(e))
+                        logger.debug("best_full_frame_detect_failed", track_id=track.track_id, error=str(e))
 
-                if track.embedding is None and track.best_face_crop is not None:
-                    try:
-                        resized = resize_image(track.best_face_crop)
-                        embedding_result = app.detect_and_embed_relaxed(resized, min_score=0.15)
-                        if embedding_result.face_detected and embedding_result.embedding is not None:
-                            track.embedding = embedding_result.embedding.tolist()
-                            track.is_masked = embedding_result.is_masked
-                            logger.info("final_embed_relaxed_crop", track_id=track.track_id)
-                    except Exception as e:
-                        logger.debug("relaxed_crop_embed_failed", track_id=track.track_id, error=str(e))
+                # Pick best face: standard threshold first, then relaxed
+                best = None
+                source = None
+                for faces, src in [(crop_faces, "crop"), (frame_faces, "frame")]:
+                    if not faces:
+                        continue
+                    hit = next((f for f in faces if f["det_score"] >= settings.EMBEDDING_DET_SCORE_MIN), None)
+                    if hit:
+                        best, source = hit, src
+                        break
+                    # Relaxed fallback
+                    if faces[0]["det_score"] >= 0.15:
+                        best, source = faces[0], f"relaxed_{src}"
+                        break
 
-                if track.embedding is None and track.best_full_frame is not None:
-                    try:
-                        embedding_result = app.detect_and_embed_relaxed(track.best_full_frame, min_score=0.15)
-                        if embedding_result.face_detected and embedding_result.embedding is not None:
-                            track.embedding = embedding_result.embedding.tolist()
-                            track.is_masked = embedding_result.is_masked
-                            logger.info("final_embed_relaxed_frame", track_id=track.track_id)
-                    except Exception as e:
-                        logger.debug("relaxed_frame_embed_failed", track_id=track.track_id, error=str(e))
-
-                if track.embedding is None:
+                if best:
+                    track.embedding = best["embedding"].tolist()
+                    track.is_masked = best["is_masked"]
+                    logger.debug("final_embed_done", track_id=track.track_id, source=source, score=best["det_score"])
+                else:
                     logger.info("no_embedding_after_retries",
                               track_id=track.track_id,
                               visibility=track.visibility,

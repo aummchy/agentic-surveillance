@@ -25,15 +25,20 @@ async def broadcast_frame(frame_data: bytes):
         "data": base64.b64encode(frame_data).decode("utf-8")
     })
 
-    disconnected = set()
-    for client in connected_clients:
+    async def _send(client):
         try:
             await asyncio.wait_for(client.send_text(message), timeout=0.5)
-        except asyncio.TimeoutError:
-            logger.debug("client_slow", action="dropping_frame")
-        except Exception:
-            disconnected.add(client)
+            return client, True
+        except (asyncio.TimeoutError, Exception):
+            return client, False
 
+    results = await asyncio.gather(*[_send(c) for c in connected_clients], return_exceptions=True)
+    disconnected = set()
+    for result in results:
+        if isinstance(result, tuple):
+            client, ok = result
+            if not ok:
+                disconnected.add(client)
     connected_clients.difference_update(disconnected)
 
 
@@ -46,15 +51,20 @@ async def broadcast_event(event: dict):
         "data": event
     })
 
-    disconnected = set()
-    for client in connected_clients:
+    async def _send(client):
         try:
             await asyncio.wait_for(client.send_text(message), timeout=1.0)
-        except asyncio.TimeoutError:
-            logger.debug("client_slow", action="dropping_event")
-        except Exception:
-            disconnected.add(client)
+            return client, True
+        except (asyncio.TimeoutError, Exception):
+            return client, False
 
+    results = await asyncio.gather(*[_send(c) for c in connected_clients], return_exceptions=True)
+    disconnected = set()
+    for result in results:
+        if isinstance(result, tuple):
+            client, ok = result
+            if not ok:
+                disconnected.add(client)
     connected_clients.difference_update(disconnected)
 
 
@@ -67,15 +77,20 @@ async def broadcast_alert(alert_data: dict):
         "data": alert_data
     })
 
-    disconnected = set()
-    for client in connected_clients:
+    async def _send(client):
         try:
             await asyncio.wait_for(client.send_text(message), timeout=1.0)
-        except asyncio.TimeoutError:
-            logger.debug("client_slow", action="dropping_alert")
-        except Exception:
-            disconnected.add(client)
+            return client, True
+        except (asyncio.TimeoutError, Exception):
+            return client, False
 
+    results = await asyncio.gather(*[_send(c) for c in connected_clients], return_exceptions=True)
+    disconnected = set()
+    for result in results:
+        if isinstance(result, tuple):
+            client, ok = result
+            if not ok:
+                disconnected.add(client)
     connected_clients.difference_update(disconnected)
 
 

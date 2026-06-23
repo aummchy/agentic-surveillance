@@ -104,17 +104,13 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
     annotated = frame.copy()
     for track in tracks:
         x1, y1, x2, y2 = map(int, track.person_box)
-        color = (0, 255, 0)
-        if track.is_masked:
-            color = (0, 0, 255)
-        if track.decision in ("masked_unknown", "intentionally_hidden", "blacklist"):
-            color = (0, 0, 255)
-        elif track.decision == "authorized":
-            color = (0, 255, 0)
-        elif track.decision == "verified":
+        color = (0, 0, 255)
+        if track.decision in ("authorized", "verified"):
             color = (0, 255, 0)
         elif track.decision == "known_visitor":
-            color = (255, 165, 0)
+            color = (0, 255, 255)
+        if track.is_masked or track.decision in ("masked_unknown", "intentionally_hidden", "blacklist"):
+            color = (0, 0, 255)
 
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
@@ -123,8 +119,20 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
             if track.decision == "verified" and decisions and track.track_id in decisions:
                 name = decisions[track.track_id].get("name", "")
                 label += f" [Verified: {name}]" if name else " [Verified]"
+            elif track.decision == "authorized":
+                label += " [AUTHORIZED]"
+            elif track.decision == "known_visitor":
+                label += " [KNOWN VISITOR]"
+            elif track.decision == "blacklist":
+                label += " [BLACKLIST]"
+            elif track.decision == "intentionally_hidden":
+                label += " [HIDDEN]"
+            elif track.decision in ("unknown", "masked_unknown"):
+                label += " [UNVERIFIED]"
             else:
                 label += f" [{track.decision}]"
+        else:
+            label += " [UNVERIFIED]"
         if track.is_masked:
             label += " MASK"
 

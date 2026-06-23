@@ -1,8 +1,13 @@
 # TODO — Visitor Surveillance System
 
-## Status: Last reviewed 2026-06-23 (19 issues fixed including track loop, repeated warnings, verified alerts)
+## Status: Last reviewed 2026-06-23 (21 issues fixed including track loop, repeated warnings, verified alerts, 12 performance optimizations, live annotation colors)
 
 ### Recently Fixed (2026-06-23)
+- [x] **Live annotation colors + labels** — unverified people now show red border + `UNVERIFIED`, known visitors show yellow, verified/authorized stay green, and masks always force red
+- [x] **Dashboard event log colors** — event status badges now match live overlay: red for unverified, yellow for known visitors, green for verified/authorized. All unverified event items get red left border highlight
+- [x] **`embedding_result` NameError** — `camera_agent.py:211` referenced undefined `embedding_result` after refactor to `detect_faces_raw()`. Fixed to `best["is_masked"]`
+- [x] **Dead import `detect_and_embed`** — removed from `camera_agent.py` (only `compute_face_ratio` still needed)
+- [x] **Performance: 12 optimizations** — removed dead `detector.py`, optimized face detection cascade, fixed N+1 queries, async MongoDB in routes, concurrent WebSocket broadcast, async alert dispatch, offloaded JPEG encoding, compressed frames in tracks, consolidated frontend WebSocket
 - [x] **Track finalization loop** — `camera_agent.py` now tracks `_recognizing_tracks` and `_finalized_track_ids` to prevent same track from being finalized/alarmed multiple times
 - [x] **Repeated warnings after verification** — `policy.py` Rule 3 now sets `should_alert=False` always for verified persons
 - [x] **Vector search always returning 0** — Added detailed logging to `vector_search()` and `_python_cosine_scan()`, plus Atlas index check and embedding backfill on startup
@@ -196,33 +201,33 @@ The `.env` file contains actual production credentials:
 
 | # | Issue | File:Line | Impact | Status |
 |---|-------|-----------|--------|--------|
-| 1 | **YOLO model loaded twice** — `detector.py` and `tracker.py` each maintain separate singleton. `detector.py` is dead code | `pipeline/detector.py:8-16`, `pipeline/tracker.py:8-16` | ~50-100MB wasted RAM | [ ] Remove `detector.py` or unify |
-| 2 | **Face detection runs 4x per track** — cascading retry pattern calls `app.get()` up to 4 times (crop → full frame → relaxed crop → relaxed full frame) | `agents/camera_agent.py:94-132`, `_finalize_track():250-305` | ~200ms blocking main loop per recognition | [ ] Run detector once, apply thresholds to results |
-| 3 | **`_python_cosine_scan()` loads ALL faces into memory** — full collection scan with no limit | `utils/db_utils.py:108-158` | O(N) memory + CPU for large collections | [ ] Add query limits, use Atlas index |
-| 4 | **N+1 query in `get_events_with_faces()`** — 1 query + N individual face lookups (up to 51 round-trips) | `utils/db_utils.py:386-414` | 250-500ms per API call | [ ] Batch with `$in` or `$lookup` aggregation |
+| 1 | **YOLO model loaded twice** — `detector.py` and `tracker.py` each maintain separate singleton. `detector.py` is dead code | `pipeline/detector.py:8-16`, `pipeline/tracker.py:8-16` | ~50-100MB wasted RAM | [x] Removed `detector.py`, unified to single model in `tracker.py` |
+| 2 | **Face detection runs 4x per track** — cascading retry pattern calls `app.get()` up to 4 times (crop → full frame → relaxed crop → relaxed full frame) | `agents/camera_agent.py:94-132`, `_finalize_track():250-305` | ~200ms blocking main loop per recognition | [x] Added `detect_faces_raw()` to InsightFace; runs detector once, applies thresholds in Python |
+| 3 | **`_python_cosine_scan()` loads ALL faces into memory** — full collection scan with no limit | `utils/db_utils.py:108-158` | O(N) memory + CPU for large collections | [x] Added `SCAN_LIMIT=500` cap |
+| 4 | **N+1 query in `get_events_with_faces()`** — 1 query + N individual face lookups (up to 51 round-trips) | `utils/db_utils.py:386-414` | 250-500ms per API call | [x] Batched with `$in` query |
 
 ### 🟠 High Impact
 
 | # | Issue | File:Line | Impact | Status |
 |---|-------|-----------|--------|--------|
-| 5 | **`store_face()` 2 full collection scans before insert** — scans unknowns + all faces for dedup | `utils/db_utils.py:234-275` | 2 full scans per registration | [ ] Use Atlas Vector Search index |
-| 6 | **Synchronous MongoDB in async FastAPI routes** — blocking PyMongo in `async` handlers | `dashboard/backend/routes/*.py` | Blocks all concurrent requests | [ ] Wrap in `asyncio.to_thread()` or use `motor` |
-| 7 | **WebSocket broadcasting is serial** — sends to each client sequentially with 0.5s timeout | `dashboard/backend/routes/live.py:15-37` | 5 clients = 2.5s delay | [ ] Use `asyncio.gather()` |
-| 8 | **Synchronous alert dispatch** — SMTP/Twilio/HTTP calls block worker thread | `agents/alert_agent.py:26-64` | 1-5s per alert | [ ] Dispatch via thread pool, persistent SMTP |
+| 5 | **`store_face()` 2 full collection scans before insert** — scans unknowns + all faces for dedup | `utils/db_utils.py:234-275` | 2 full scans per registration | [x] Uses vector search index instead of Python-side scans |
+| 6 | **Synchronous MongoDB in async FastAPI routes** — blocking PyMongo in `async` handlers | `dashboard/backend/routes/*.py` | Blocks all concurrent requests | [x] All routes wrapped in `asyncio.to_thread()` |
+| 7 | **WebSocket broadcasting is serial** — sends to each client sequentially with 0.5s timeout | `dashboard/backend/routes/live.py:15-37` | 5 clients = 2.5s delay | [x] Uses `asyncio.gather()` for concurrent sends |
+| 8 | **Synchronous alert dispatch** — SMTP/Twilio/HTTP calls block worker thread | `agents/alert_agent.py:26-64` | 1-5s per alert | [x] Network alerts dispatched via `ThreadPoolExecutor` |
 
 ### 🟡 Medium Impact
 
 | # | Issue | File:Line | Impact | Status |
 |---|-------|-----------|--------|--------|
-| 9 | **JPEG encoding on camera thread** — `cv2.imencode()` adds 5-15ms per frame | `main.py:36-39` | Reduces achievable FPS | [ ] Offload to worker thread |
-| 10 | **`update_visit_memory()` redundant read** — read → modify → write → read again | `utils/db_utils.py:491-550` | 3 DB ops where 1 suffices | [ ] Use atomic `$inc`/`$push`, remove 2nd read |
-| 11 | **Full frame stored in Track objects** — ~921KB raw BGR per track | `pipeline/track_state.py:74-83` | 10 tracks = ~9MB | [ ] Store compressed JPEG or downscale |
+| 9 | **JPEG encoding on camera thread** — `cv2.imencode()` adds 5-15ms per frame | `main.py:36-39` | Reduces achievable FPS | [x] Offloaded to `ThreadPoolExecutor` with quality 80 |
+| 10 | **`update_visit_memory()` redundant read** — read → modify → write → read again | `utils/db_utils.py:491-550` | 3 DB ops where 1 suffices | [x] Returns updated data directly, removed redundant 2nd read |
+| 11 | **Full frame stored in Track objects** — ~921KB raw BGR per track | `pipeline/track_state.py:74-83` | 10 tracks = ~9MB | [x] Added `best_frame_jpeg` field (~50KB compressed) |
 
 ### 🟢 Low Impact
 
 | # | Issue | File:Line | Impact | Status |
 |---|-------|-----------|--------|--------|
-| 12 | **Duplicate WebSocket connections** — `App.jsx` and `LiveFeed.jsx` both open separate connections | `App.jsx:34-57`, `LiveFeed.jsx:22-70` | Double connection overhead | [ ] Consolidate into single shared connection |
+| 12 | **Duplicate WebSocket connections** — `App.jsx` and `LiveFeed.jsx` both open separate connections | `App.jsx:34-57`, `LiveFeed.jsx:22-70` | Double connection overhead | [x] `App.jsx` owns single connection, passes frame/connected to `LiveFeed` via props |
 
 ---
 
@@ -251,9 +256,9 @@ The `.env` file contains actual production credentials:
 14. **Graceful camera release on unexpected exit** — *still needs doing*
 
 ### Phase 5 — Performance
-15. **Remove dead `detector.py`** — *pending*
-16. **Optimize face detection cascade** — *pending*
-17. **Fix N+1 query pattern** — *pending*
-18. **Add MongoDB to async routes** — *pending*
-19. **Concurrent WebSocket broadcasting** — *pending*
-20. **Async alert dispatch** — *pending*
+15. ~~**Remove dead `detector.py`**~~ ✓ Fixed — deleted unused file
+16. ~~**Optimize face detection cascade**~~ ✓ Fixed — `detect_faces_raw()` runs detector once per image
+17. ~~**Fix N+1 query pattern**~~ ✓ Fixed — batched with `$in` query
+18. ~~**Add MongoDB to async routes**~~ ✓ Fixed — all routes use `asyncio.to_thread()`
+19. ~~**Concurrent WebSocket broadcasting**~~ ✓ Fixed — `asyncio.gather()` for parallel sends
+20. ~~**Async alert dispatch**~~ ✓ Fixed — network alerts via `ThreadPoolExecutor`

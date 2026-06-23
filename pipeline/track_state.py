@@ -1,5 +1,6 @@
 import threading
 import time
+import cv2
 import numpy as np
 from typing import Dict, Optional, Callable
 from config import settings
@@ -81,6 +82,9 @@ class TrackState:
                     track.best_face_score = face_score
                     track.best_full_frame = full_frame
                     track.best_face_ratio = face_ratio
+                    # Store compressed JPEG to save ~90% memory per track
+                    _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    track.best_frame_jpeg = jpeg_buf.tobytes()
 
     def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False):
         with self._lock:

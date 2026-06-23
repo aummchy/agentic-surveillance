@@ -570,11 +570,13 @@ body {
   margin-top: 0.15rem;
 }
 
-.status-unknown { background: #fef3c7; color: #92400e; }
+.status-unverified { background: #fee2e2; color: #991b1b; }
 .status-verified { background: #dcfce7; color: #166534; }
 .status-authorized { background: #dbeafe; color: #1e40af; }
-.status-masked_unknown { background: #fee2e2; color: #991b1b; }
+.status-known_visitor { background: #fef9c3; color: #854d0e; }
+.status-masked { background: #fee2e2; color: #991b1b; }
 .status-blacklist { background: #fecaca; color: #991b1b; }
+.status-hidden { background: #fee2e2; color: #991b1b; }
 
 /* ── Modal ──────────────────────────────────────────────────── */
 .modal-overlay {

@@ -113,10 +113,11 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
     if filter_role:
         query["role"] = filter_role
 
+    SCAN_LIMIT = 500
     all_faces = list(collection.find(query, {"latest_embedding": 1, "person_id": 1,
                                                "name": 1, "role": 1, "tags": 1,
                                                "images": 1, "verified": 1,
-                                               "alert_level": 1}))
+                                               "alert_level": 1}).limit(SCAN_LIMIT))
 
     logger.debug("python_cosine_scan", total_faces=len(all_faces), filter_role=filter_role)
 
@@ -236,20 +237,33 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
                camera_id: str = None) -> str:
     collection = get_faces_collection()
 
-    existing = find_similar_unknowns(embedding)
-    if existing:
-        update_face(existing[0]["person_id"], image_url, embedding)
-        logger.info("store_face_merged_unknown", person_id=existing[0]["person_id"],
-                     similarity=existing[0]["similarity_score"])
-        return existing[0]["person_id"]
+    # Try vector search first (fast, index-backed), fall back to scan
+    try:
+        matches = vector_search(embedding, limit=3)
+    except Exception:
+        matches = []
 
-    all_similar = find_similar_faces(embedding, threshold=0.35)
-    if all_similar:
-        best = all_similar[0]
-        update_face(best["person_id"], image_url, embedding)
-        logger.info("store_face_merged_existing", person_id=best["person_id"],
-                     similarity=best["similarity_score"], verified=best["verified"])
-        return best["person_id"]
+    # Check for similar unknowns
+    for m in matches:
+        if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
+            existing_id = m["person_id"]
+            existing = collection.find_one({"person_id": existing_id}, {"role": 1})
+            if existing and existing.get("role") == "unknown":
+                update_face(existing_id, image_url, embedding)
+                logger.info("store_face_merged_unknown", person_id=existing_id,
+                             similarity=m["similarity_score"])
+                return existing_id
+
+    # Check for similar verified/known faces
+    for m in matches:
+        if m["similarity_score"] >= 0.35:
+            existing_id = m["person_id"]
+            existing = collection.find_one({"person_id": existing_id}, {"role": 1, "verified": 1})
+            if existing:
+                update_face(existing_id, image_url, embedding)
+                logger.info("store_face_merged_existing", person_id=existing_id,
+                             similarity=m["similarity_score"], verified=existing.get("verified", False))
+                return existing_id
 
     doc = {
         "person_id": person_id,
@@ -398,18 +412,26 @@ def get_events_with_faces(limit: int = 50, offset: int = 0,
                   .skip(offset)
                   .limit(limit))
 
+    # Batch face lookups instead of N+1
+    person_ids = [e.get("person_id") for e in events if e.get("person_id")]
+    face_map = {}
+    if person_ids:
+        faces = faces_collection.find(
+            {"person_id": {"$in": person_ids}},
+            {"person_id": 1, "name": 1, "verified": 1, "images": 1}
+        )
+        for face in faces:
+            face_map[face["person_id"]] = face
+
     for event in events:
         event["_id"] = str(event["_id"])
-        if event.get("person_id"):
-            face = faces_collection.find_one(
-                {"person_id": event["person_id"]},
-                {"name": 1, "verified": 1, "images": 1}
-            )
-            if face:
-                event["person_name"] = face.get("name")
-                event["person_verified"] = face.get("verified", False)
-                event["person_image"] = (face.get("images", [{}])[0].get("url")
-                                        if face.get("images") else None)
+        pid = event.get("person_id")
+        if pid and pid in face_map:
+            face = face_map[pid]
+            event["person_name"] = face.get("name")
+            event["person_verified"] = face.get("verified", False)
+            event["person_image"] = (face.get("images", [{}])[0].get("url")
+                                    if face.get("images") else None)
 
     return {"events": events, "total": total, "limit": limit, "offset": offset}
 
@@ -547,7 +569,20 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
     
     collection.update_one({"person_id": person_id}, update_ops, upsert=True)
     
-    return get_or_create_memory(person_id)
+    # Return updated memory directly instead of re-querying
+    return {
+        "person_id": person_id,
+        "visit_count": new_count,
+        "last_seen": now,
+        "last_camera": camera_id,
+        "last_status": status,
+        "avg_similarity": avg_sim,
+        "similarity_history": sim_history,
+        "status_history": status_history,
+        "typical_hours": typical_hours,
+        "typical_cameras": typical_cameras,
+        "updated_at": now
+    }
 
 
 def get_visit_history(person_id: str) -> dict:

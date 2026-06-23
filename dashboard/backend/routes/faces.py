@@ -8,6 +8,7 @@ from utils.db_utils import (
     get_unknown_faces, get_face_by_id, verify_person,
     update_face, delete_face
 )
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,22 +23,26 @@ async def list_faces(
 ):
     try:
         if status == "unknown":
-            result = get_unknown_faces(limit=limit, offset=offset)
+            result = await asyncio.to_thread(get_unknown_faces, limit=limit, offset=offset)
             return result
         elif status == "verified":
             from utils.db_utils import get_faces_collection
-            collection = get_faces_collection()
-            query = {"verified": True}
-            total = collection.count_documents(query)
-            faces = list(collection.find(query, {"latest_embedding": 0})
-                        .sort("verified_at", -1)
-                        .skip(offset)
-                        .limit(limit))
-            for face in faces:
-                face["_id"] = str(face["_id"])
-            return {"faces": faces, "total": total, "limit": limit, "offset": offset}
+
+            def _fetch():
+                collection = get_faces_collection()
+                query = {"verified": True}
+                total = collection.count_documents(query)
+                faces = list(collection.find(query, {"latest_embedding": 0})
+                            .sort("verified_at", -1)
+                            .skip(offset)
+                            .limit(limit))
+                for face in faces:
+                    face["_id"] = str(face["_id"])
+                return {"faces": faces, "total": total, "limit": limit, "offset": offset}
+
+            return await asyncio.to_thread(_fetch)
         else:
-            result = get_unknown_faces(limit=limit, offset=offset)
+            result = await asyncio.to_thread(get_unknown_faces, limit=limit, offset=offset)
             return result
     except Exception as e:
         logger.error("list_faces_failed", error=str(e))
@@ -47,7 +52,7 @@ async def list_faces(
 @router.get("/{person_id}", response_model=FaceResponse)
 async def get_face(person_id: str):
     try:
-        face = get_face_by_id(person_id)
+        face = await asyncio.to_thread(get_face_by_id, person_id)
         if not face:
             raise HTTPException(status_code=404, detail="Person not found")
         return face
@@ -61,7 +66,8 @@ async def get_face(person_id: str):
 @router.post("/{person_id}/verify", response_model=VerifyResponse)
 async def verify(person_id: str, body: VerifyRequest):
     try:
-        success = verify_person(
+        success = await asyncio.to_thread(
+            verify_person,
             person_id=person_id,
             name=body.name,
             alert_level=body.alert_level.value,
@@ -86,11 +92,12 @@ async def verify(person_id: str, body: VerifyRequest):
 @router.put("/{person_id}")
 async def update(person_id: str, body: UpdateFaceRequest):
     try:
-        face = get_face_by_id(person_id)
+        face = await asyncio.to_thread(get_face_by_id, person_id)
         if not face:
             raise HTTPException(status_code=404, detail="Person not found")
 
-        update_face(
+        await asyncio.to_thread(
+            update_face,
             person_id=person_id,
             name=body.name,
             tags=body.tags,
@@ -108,7 +115,7 @@ async def update(person_id: str, body: UpdateFaceRequest):
 @router.delete("/{person_id}")
 async def delete(person_id: str):
     try:
-        success = delete_face(person_id)
+        success = await asyncio.to_thread(delete_face, person_id)
         if not success:
             raise HTTPException(status_code=404, detail="Person not found")
 

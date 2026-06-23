@@ -192,6 +192,29 @@ class InsightFaceSingleton:
         ratio = lower_face_height / upper_face_height
         return ratio < 0.3
 
+    def detect_faces_raw(self, image: np.ndarray, min_score: float = 0.0) -> list:
+        """Run face detection once and return all faces above min_score.
+        Each result is a dict with keys: det_score, embedding, bbox, is_masked."""
+        try:
+            faces = self.app.get(image)
+            if not faces:
+                return []
+            results = []
+            for f in faces:
+                if f.det_score < min_score:
+                    continue
+                results.append({
+                    "det_score": float(f.det_score),
+                    "embedding": f.normed_embedding,
+                    "bbox": tuple(map(int, f.bbox)),
+                    "is_masked": self._detect_mask_geometric(f.landmark),
+                })
+            results.sort(key=lambda x: x["det_score"], reverse=True)
+            return results
+        except Exception as e:
+            logger.error("detect_faces_raw_failed", error=str(e))
+            return []
+
     def compare_embeddings(self, emb1: np.ndarray, emb2: np.ndarray) -> float:
         emb1 = emb1 / (np.linalg.norm(emb1) + 1e-6)
         emb2 = emb2 / (np.linalg.norm(emb2) + 1e-6)
