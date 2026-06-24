@@ -45,6 +45,7 @@ class UnknownFacesResponse(BaseModel):
 
 
 class EventResponse(BaseModel):
+    id: Optional[str] = Field(None, alias="_id")
     track_id: str
     camera_id: str
     timestamp: datetime
@@ -60,6 +61,8 @@ class EventResponse(BaseModel):
     image_url: Optional[str] = None
     reason: str = ""
     alerted: bool = False
+
+    model_config = {"populate_by_name": True}
 
 
 class EventsResponse(BaseModel):

@@ -264,54 +264,10 @@ class PolicyAgent(BaseAgent):
         # ═══════════════════════════════════════════════════════
         # RULE 9: Unknown during office hours (default)
         # ═══════════════════════════════════════════════════════
-        return DecisionResult(
-            status="unknown",
-            alert_level="medium",
-            reason="Unknown person detected",
-            should_alert=True,
-            should_register=True
-        )
-
-
-# Convenience function for backward compatibility
-_policy_agent_instance = None
-
-
-def decide(track: Track, match_result: MatchResult,
-           recognition_result: dict = None, memory_context: dict = None) -> DecisionResult:
-    """Make a decision using the Policy Agent.
-
-    This function maintains backward compatibility with existing code
-    while using the new Policy Agent internally.
-    """
-    global _policy_agent_instance
-    if _policy_agent_instance is None:
-        _policy_agent_instance = PolicyAgent()
-    agent = _policy_agent_instance
-
-    result = agent.run({
-        "recognition_result": recognition_result or {},
-        "memory_context": memory_context or {},
-        "match_result": {
-            "matched": match_result.matched,
-            "person_id": match_result.person_id,
-            "name": match_result.name,
-            "role": match_result.role,
-            "tags": match_result.tags,
-            "similarity_score": match_result.similarity_score,
-            "verified": match_result.verified,
-            "alert_level": match_result.alert_level,
-        },
-        "track": track,
-        "camera_id": settings.CAMERA_ID,
-    })
-
-    return DecisionResult(
-        status=result["status"],
-        alert_level=result["alert_level"],
-        person_id=result["person_id"],
-        name=result["name"],
-        reason=result["reason"],
-        should_alert=result["should_alert"],
-        should_register=result["should_register"],
-    )
+            return DecisionResult(
+                status="unknown",
+                alert_level="medium",
+                reason="Unknown person detected",
+                should_alert=True,
+                should_register=True
+            )

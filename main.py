@@ -14,10 +14,11 @@ from agents.camera_agent import CameraAgent
 from agents.decision_agent import decide
 from agents.alert_agent import dispatch
 from agents.memory import MemoryAgent
-from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings
+from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings, close_client
 from utils.image_utils import save_image, upload_to_cloudinary
 from pipeline.models import Track
 from dashboard.backend.routes.live import broadcast_frame, broadcast_alert
+from agents.alert_agent import shutdown as alert_shutdown
 
 import structlog
 
@@ -53,7 +54,7 @@ def worker_process_tracks():
         except queue.Empty:
             continue
         except Exception as e:
-            logger.error("worker_failed", track_id=track.track_id if track else None, error=str(e))
+            logger.error("worker_failed", track_id=track.track_id if track else None, error=str(e), exc_info=True)
         finally:
             if track is not None:
                 track_queue.task_done()
@@ -114,7 +115,7 @@ def process_finalized_track(track: Track):
                     camera_id=settings.CAMERA_ID
                 )
             except Exception as e:
-                logger.error("store_face_failed", track_id=track.track_id, error=str(e))
+                logger.error("store_face_failed", track_id=track.track_id, error=str(e), exc_info=True)
 
         if match_result.matched:
             memory_agent.record_visit(
@@ -129,11 +130,12 @@ def process_finalized_track(track: Track):
             dispatch(track, decision, image_url)
             track.alerted = True
 
-        if decision.status in ("unknown", "masked_unknown") and not match_result.matched:
+        # Broadcast alert to dashboard for all alert-worthy detections
+        if decision.should_alert:
             alert_payload = {
                 "person_id": track.track_id,
                 "status": decision.status,
-                "name": "Unknown",
+                "name": decision.name or "Unknown",
                 "image_url": image_url,
                 "timestamp": datetime.utcnow().isoformat(),
                 "camera_id": settings.CAMERA_ID,
@@ -152,7 +154,12 @@ def process_finalized_track(track: Track):
         logger.info("track_finalized", track_id=track.track_id, status=decision.status, alert_level=decision.alert_level)
 
     except Exception as e:
-        logger.error("track_processing_failed", track_id=track.track_id, error=str(e))
+        logger.error("track_processing_failed", track_id=track.track_id, error=str(e), exc_info=True)
+        # Always log an event so the track is not silently lost
+        try:
+            _log_event(track, "error", "none", False, 0.0, getattr(track, 'image_url', None))
+        except Exception:
+            logger.error("event_log_failed_after_error", track_id=track.track_id, exc_info=True)
 
 
 def _log_event(track: Track, status: str, alert_level: str,
@@ -229,11 +236,14 @@ def main():
 
     # Graceful shutdown
     _shutdown_event.set()
+    server.should_exit = True
     try:
         track_queue.join()
     except Exception:
         pass
     _encode_executor.shutdown(wait=False)
+    alert_shutdown()
+    close_client()
     logger.info("shutdown_complete")
 
 

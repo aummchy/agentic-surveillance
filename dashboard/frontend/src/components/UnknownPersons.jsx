@@ -5,7 +5,6 @@ function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
   const [unknowns, setUnknowns] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('unknown')
-  const [seenIds, setSeenIds] = useState(new Set())
 
   useEffect(() => {
     fetchPersons()

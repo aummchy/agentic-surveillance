@@ -56,11 +56,25 @@ class TrackState:
             to_remove = []
             for cid, track in self._tracks.items():
                 if track.is_expired(settings.TRACK_TIMEOUT_SECS) or track.is_max_lifetime_exceeded():
+                    self._classify_visibility_inplace(track)
                     expired.append(track)
                     to_remove.append(cid)
             for cid in to_remove:
                 del self._tracks[cid]
         return expired
+
+    def _classify_visibility_inplace(self, track: Track):
+        """Classify visibility directly on the track object (no dict lookup)."""
+        if track.max_face_ratio >= settings.VISIBLE_FACE_RATIO:
+            track.visibility = "visible"
+        elif track.max_face_ratio >= settings.PARTIAL_FACE_RATIO:
+            track.visibility = "partial"
+        elif track.is_masked or track.face_detected_once:
+            track.visibility = "partial"
+        elif not track.face_detected_once and track.total_frames_seen >= settings.MIN_TRACK_FRAMES:
+            track.visibility = "hidden"
+        else:
+            track.visibility = "unknown"
 
     def update_face_visibility(self, composite_id: str, face_detected: bool, face_ratio: float):
         with self._lock:

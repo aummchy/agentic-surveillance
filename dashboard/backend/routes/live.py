@@ -32,7 +32,7 @@ async def broadcast_frame(frame_data: bytes):
         except (asyncio.TimeoutError, Exception):
             return client, False
 
-    results = await asyncio.gather(*[_send(c) for c in connected_clients], return_exceptions=True)
+    results = await asyncio.gather(*[_send(c) for c in list(connected_clients)], return_exceptions=True)
     disconnected = set()
     for result in results:
         if isinstance(result, tuple):
@@ -58,7 +58,7 @@ async def broadcast_event(event: dict):
         except (asyncio.TimeoutError, Exception):
             return client, False
 
-    results = await asyncio.gather(*[_send(c) for c in connected_clients], return_exceptions=True)
+    results = await asyncio.gather(*[_send(c) for c in list(connected_clients)], return_exceptions=True)
     disconnected = set()
     for result in results:
         if isinstance(result, tuple):
@@ -84,7 +84,7 @@ async def broadcast_alert(alert_data: dict):
         except (asyncio.TimeoutError, Exception):
             return client, False
 
-    results = await asyncio.gather(*[_send(c) for c in connected_clients], return_exceptions=True)
+    results = await asyncio.gather(*[_send(c) for c in list(connected_clients)], return_exceptions=True)
     disconnected = set()
     for result in results:
         if isinstance(result, tuple):

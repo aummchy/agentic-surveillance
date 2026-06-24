@@ -41,9 +41,24 @@ async def list_faces(
                 return {"faces": faces, "total": total, "limit": limit, "offset": offset}
 
             return await asyncio.to_thread(_fetch)
+        elif status == "all" or status is None:
+            from utils.db_utils import get_faces_collection
+
+            def _fetch_all():
+                collection = get_faces_collection()
+                query = {}
+                total = collection.count_documents(query)
+                faces = list(collection.find(query, {"latest_embedding": 0})
+                            .sort("created_at", -1)
+                            .skip(offset)
+                            .limit(limit))
+                for face in faces:
+                    face["_id"] = str(face["_id"])
+                return {"faces": faces, "total": total, "limit": limit, "offset": offset}
+
+            return await asyncio.to_thread(_fetch_all)
         else:
-            result = await asyncio.to_thread(get_unknown_faces, limit=limit, offset=offset)
-            return result
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}. Use 'unknown', 'verified', or 'all'")
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:

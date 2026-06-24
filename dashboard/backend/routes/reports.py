@@ -46,13 +46,24 @@ async def get_person_report(person_id: str):
 @router.get("/reports/incidents")
 async def get_recent_incidents(limit: int = Query(20, ge=1, le=100)):
     """Get recent incident reports."""
-    from utils.db_utils import get_events_with_faces
+    from utils.db_utils import get_events_with_faces, get_memory_collection
 
     def _fetch():
         events_data = get_events_with_faces(limit=limit)
         events = events_data.get("events", [])
+
+        # Batch-fetch all visit histories in one query (fix N+1)
+        person_ids = list({e.get("person_id") for e in events if e.get("person_id")})
+        memory_map = {}
+        if person_ids:
+            memory_col = get_memory_collection()
+            for mem in memory_col.find({"person_id": {"$in": person_ids}}):
+                memory_map[mem["person_id"]] = mem
+
         reports = []
         for event in events:
+            person_id = event.get("person_id")
+            visit_history = memory_map.get(person_id, {}) if person_id else {}
             result = report_agent.run({
                 "report_type": "incident",
                 "track_id": event.get("track_id"),
@@ -62,8 +73,9 @@ async def get_recent_incidents(limit: int = Query(20, ge=1, le=100)):
                 "reason": event.get("reason"),
                 "timestamp": event.get("timestamp"),
                 "image_url": event.get("image_url"),
-                "person_id": event.get("person_id"),
+                "person_id": person_id,
                 "name": event.get("person_name") or event.get("name"),
+                "visit_history": visit_history,
             })
             reports.append(result)
         return {"reports": reports, "total": len(reports)}

@@ -22,6 +22,14 @@ def get_client() -> MongoClient:
     return _client
 
 
+def close_client():
+    """Close MongoDB client on shutdown."""
+    global _client
+    if _client is not None:
+        _client.close()
+        _client = None
+
+
 def get_faces_collection() -> Collection:
     global _faces_collection
     if _faces_collection is None:

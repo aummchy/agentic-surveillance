@@ -32,6 +32,7 @@ class CameraAgent:
         self.memory_agent = MemoryAgent()
         self._recognizing_tracks = set()
         self._finalized_track_ids = set()
+        self._track_sets_lock = threading.Lock()
         self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="recognition"
         )
@@ -117,20 +118,23 @@ class CameraAgent:
 
             expired = self.track_state.get_expired_tracks()
             for track in expired:
-                if track.track_id not in self._recognizing_tracks and track.track_id not in self._finalized_track_ids:
-                    self._finalized_track_ids.add(track.track_id)
-                    self._recognition_executor.submit(self._finalize_track, track)
+                with self._track_sets_lock:
+                    if track.track_id not in self._recognizing_tracks and track.track_id not in self._finalized_track_ids:
+                        self._finalized_track_ids.add(track.track_id)
+                        self._recognition_executor.submit(self._finalize_track, track)
 
             # Prune _finalized_track_ids to only keep active tracks
             active_track_ids = {t.track_id for t in self.track_state.get_all()}
-            self._finalized_track_ids &= active_track_ids
+            with self._track_sets_lock:
+                self._finalized_track_ids &= active_track_ids
 
             annotated = draw_annotations(frame, self.track_state.get_all())
             if self.on_frame_annotated:
                 self.on_frame_annotated(annotated)
 
     def _progressive_recognition(self, frame: np.ndarray, track: Track):
-        self._recognizing_tracks.add(track.track_id)
+        with self._track_sets_lock:
+            self._recognizing_tracks.add(track.track_id)
         try:
             person_crop = crop_person(frame, track.person_box)
             if person_crop.size == 0:
@@ -263,18 +267,21 @@ class CameraAgent:
             if match_result.matched and match_result.name:
                 self.track_state.set_person_name(track.track_id, match_result.name)
 
-            if decision.should_alert and not track.alerted and track.track_id not in self._finalized_track_ids:
-                from agents.alert_agent import dispatch
-                from utils.image_utils import upload_to_cloudinary, save_image
-                image_url = track.image_url  # Reuse if already uploaded
-                if not image_url and track.best_full_frame is not None:
-                    save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
-                    image_url = upload_to_cloudinary(track.best_full_frame)
-                    if not image_url:
-                        image_url = f"captures/{track.track_id}.jpg"
-                    track.image_url = image_url
-                dispatch(track, decision, image_url)
-                self.track_state.set_decision(track.track_id, decision.status, True)
+            if decision.should_alert and not track.alerted:
+                with self._track_sets_lock:
+                    already_finalized = track.track_id in self._finalized_track_ids
+                if not already_finalized:
+                    from agents.alert_agent import dispatch
+                    from utils.image_utils import upload_to_cloudinary, save_image
+                    image_url = track.image_url  # Reuse if already uploaded
+                    if not image_url and track.best_full_frame is not None:
+                        save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
+                        image_url = upload_to_cloudinary(track.best_full_frame)
+                        if not image_url:
+                            image_url = f"captures/{track.track_id}.jpg"
+                        track.image_url = image_url
+                    dispatch(track, decision, image_url)
+                    self.track_state.set_decision(track.track_id, decision.status, True)
             else:
                 self.track_state.set_decision(track.track_id, decision.status, track.alerted)
 
@@ -289,13 +296,14 @@ class CameraAgent:
             self.track_state.set_pending_match_result(track.track_id, match_result)
 
         except Exception as e:
-            logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e))
+            logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e), exc_info=True)
         finally:
-            self._recognizing_tracks.discard(track.track_id)
+            with self._track_sets_lock:
+                self._recognizing_tracks.discard(track.track_id)
 
     def _finalize_track(self, track: Track):
         try:
-            self.track_state.classify_visibility(track.track_id)
+            # Visibility already classified in get_expired_tracks() before removal
 
             if track.embedding is None:
                 app = get_insightface()
@@ -342,8 +350,9 @@ class CameraAgent:
                               frames_seen=track.total_frames_seen,
                               face_detected=track.face_detected_once)
 
+        except Exception as e:
+            logger.error("track_finalization_failed", track_id=track.track_id, error=str(e), exc_info=True)
+        finally:
+            # Always finalize the track so at least an event is logged
             if self.on_track_finalized:
                 self.on_track_finalized(track)
-
-        except Exception as e:
-            logger.error("track_finalization_failed", track_id=track.track_id, error=str(e))

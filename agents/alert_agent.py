@@ -2,6 +2,7 @@ import json
 import structlog
 import time
 import smtplib
+import threading
 import concurrent.futures
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -14,6 +15,7 @@ logger = structlog.get_logger(__name__)
 _alert_timestamps = {}
 _alert_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="alert")
 _last_prune_time = 0.0
+_alert_lock = threading.Lock()
 
 
 def _prune_stale_alerts():
@@ -35,10 +37,11 @@ def should_send_alert(track_id: str, alert_level: str) -> bool:
     _prune_stale_alerts()
     key = f"{track_id}:{alert_level}"
     now = time.time()
-    last = _alert_timestamps.get(key, 0)
-    if now - last < settings.ALERT_COOLDOWN_SECS:
-        return False
-    _alert_timestamps[key] = now
+    with _alert_lock:
+        last = _alert_timestamps.get(key, 0)
+        if now - last < settings.ALERT_COOLDOWN_SECS:
+            return False
+        _alert_timestamps[key] = now
     return True
 
 
@@ -191,3 +194,8 @@ def _alert_webhook(payload: dict):
     except Exception as e:
         logger.error("webhook_alert_failed", error=str(e))
         raise
+
+
+def shutdown():
+    """Shut down the alert executor on process exit."""
+    _alert_executor.shutdown(wait=False)
