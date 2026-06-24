@@ -25,6 +25,7 @@ class Track:
     pending_embedding: Optional[list] = None
     pending_match: Optional[dict] = None
     pending_recognition: Optional[dict] = None  # Phase 2.1: Recognition Agent output
+    pending_match_result: Optional[MatchResult] = None  # Full match result from progressive recognition
     total_frames_seen: int = 0
     frames_with_detectable_face: int = 0
     face_detected_once: bool = False

@@ -119,6 +119,12 @@ class TrackState:
                 if match:
                     track.pending_match = match
 
+    def set_pending_match_result(self, composite_id: str, match_result):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.pending_match_result = match_result
+
     def classify_visibility(self, composite_id: str) -> str:
         with self._lock:
             track = self._tracks.get(composite_id)

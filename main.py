@@ -76,8 +76,11 @@ def process_finalized_track(track: Track):
             _log_event(track, "unknown", "none", False, 0.0, image_url)
             return
 
-        from agents.matching_agent import run_matching_from_embedding
-        match_result = run_matching_from_embedding(track.embedding)
+        # Reuse match result from progressive recognition if available
+        match_result = getattr(track, 'pending_match_result', None)
+        if match_result is None:
+            from agents.matching_agent import run_matching_from_embedding
+            match_result = run_matching_from_embedding(track.embedding)
 
         if match_result.matched and match_result.name:
             track.person_name = match_result.name

@@ -13,9 +13,26 @@ logger = structlog.get_logger(__name__)
 
 _alert_timestamps = {}
 _alert_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="alert")
+_last_prune_time = 0.0
+
+
+def _prune_stale_alerts():
+    """Remove entries older than 2x cooldown to prevent unbounded growth."""
+    global _last_prune_time
+    now = time.time()
+    if now - _last_prune_time < settings.ALERT_COOLDOWN_SECS * 2:
+        return
+    _last_prune_time = now
+    cutoff = now - settings.ALERT_COOLDOWN_SECS * 2
+    stale_keys = [k for k, ts in _alert_timestamps.items() if ts < cutoff]
+    for k in stale_keys:
+        del _alert_timestamps[k]
+    if stale_keys:
+        logger.debug("alert_timestamps_pruned", count=len(stale_keys))
 
 
 def should_send_alert(track_id: str, alert_level: str) -> bool:
+    _prune_stale_alerts()
     key = f"{track_id}:{alert_level}"
     now = time.time()
     last = _alert_timestamps.get(key, 0)

@@ -117,8 +117,9 @@ class CameraAgent:
 
             expired = self.track_state.get_expired_tracks()
             for track in expired:
-                if track.track_id not in self._recognizing_tracks:
-                    self._finalize_track(track)
+                if track.track_id not in self._recognizing_tracks and track.track_id not in self._finalized_track_ids:
+                    self._finalized_track_ids.add(track.track_id)
+                    self._recognition_executor.submit(self._finalize_track, track)
 
             # Prune _finalized_track_ids to only keep active tracks
             active_track_ids = {t.track_id for t in self.track_state.get_all()}
@@ -284,13 +285,15 @@ class CameraAgent:
                 {"matched": match_result.matched, "person_id": match_result.person_id}
             )
 
+            # Store full match result for finalization to reuse
+            self.track_state.set_pending_match_result(track.track_id, match_result)
+
         except Exception as e:
             logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e))
         finally:
             self._recognizing_tracks.discard(track.track_id)
 
     def _finalize_track(self, track: Track):
-        self._finalized_track_ids.add(track.track_id)
         try:
             self.track_state.classify_visibility(track.track_id)
 
