@@ -3,6 +3,7 @@ import LiveFeed from './components/LiveFeed'
 import UnknownPersons from './components/UnknownPersons'
 import EventLog from './components/EventLog'
 import VerifyModal from './components/VerifyModal'
+import ChatPanel from './components/ChatPanel'
 
 function App() {
   const [selectedPerson, setSelectedPerson] = useState(null)
@@ -132,7 +133,11 @@ function App() {
         <div className="notification-popup" key={activeAlert.timestamp}>
           <div className="notification-header">
             <span className="notification-icon">&#9888;</span>
-            <span className="notification-title">Unknown Person Detected</span>
+            <span className="notification-title">
+              {activeAlert.alert_level === 'critical' ? 'CRITICAL Alert' :
+               activeAlert.alert_level === 'high' ? 'High Alert' :
+               activeAlert.status === 'masked_unknown' ? 'Masked Unknown Detected' : 'Unknown Person Detected'}
+            </span>
             <button className="notification-close" onClick={() => setActiveAlert(null)}>&times;</button>
           </div>
           <div className="notification-body">
@@ -144,7 +149,11 @@ function App() {
                 {new Date(activeAlert.timestamp).toLocaleTimeString()}
               </div>
               <div className="notification-camera">{activeAlert.camera_id}</div>
-              <div className="notification-reason">{activeAlert.reason}</div>
+              {activeAlert.nl_summary ? (
+                <div className="notification-nl-summary">{activeAlert.nl_summary}</div>
+              ) : (
+                <div className="notification-reason">{activeAlert.reason}</div>
+              )}
             </div>
           </div>
         </div>
@@ -166,6 +175,10 @@ function App() {
         <section className="panel">
           <EventLog refreshKey={refreshKey} />
         </section>
+
+        <section className="panel chat-section">
+          <ChatPanel />
+        </section>
       </main>
 
       {notifications.length > 0 && (
@@ -180,8 +193,16 @@ function App() {
                 {n.image_url && <img src={n.image_url} alt="" className="notif-thumb" />}
               </div>
               <div className="notif-info">
-                <div className="notif-label">{n.status === 'masked_unknown' ? 'Masked Unknown' : 'Unknown'}</div>
-                <div className="notif-time">{new Date(n.timestamp).toLocaleTimeString()}</div>
+                <div className="notif-label">
+                  {n.status === 'masked_unknown' ? 'Masked Unknown' :
+                   n.alert_level === 'critical' ? 'CRITICAL' :
+                   n.alert_level === 'high' ? 'High Alert' : 'Unknown'}
+                </div>
+                {n.nl_summary ? (
+                  <div className="notif-nl-summary">{n.nl_summary}</div>
+                ) : (
+                  <div className="notif-time">{new Date(n.timestamp).toLocaleTimeString()}</div>
+                )}
               </div>
             </div>
           ))}

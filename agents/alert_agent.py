@@ -9,6 +9,7 @@ from email.mime.multipart import MIMEMultipart
 import requests
 from config import settings
 from pipeline.models import Track, DecisionResult
+from utils import llm_client
 
 logger = structlog.get_logger(__name__)
 
@@ -65,13 +66,23 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
         "is_masked": track.is_masked,
         "timestamp": time.time(),
         "camera_id": settings.CAMERA_ID,
-        "image_url": image_url
+        "image_url": image_url,
+        "memory_context": getattr(track, "pending_memory_context", None) or {},
     }
+
+    # Generate NL summary via LLM (non-blocking, falls back to None)
+    if not decision.nl_summary:
+        try:
+            nl = llm_client.generate_nl_summary(payload)
+            if nl:
+                decision.nl_summary = nl
+        except Exception:
+            pass
 
     # Console is instant, run synchronously
     if "console" in settings.ALERT_CHANNELS:
         try:
-            _alert_console(payload)
+            _alert_console(payload, decision)
         except Exception as e:
             logger.error("alert_channel_failed", channel="console", error=str(e))
 
@@ -82,9 +93,9 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
             for channel in async_channels:
                 try:
                     if channel == "email":
-                        _alert_email(payload)
+                        _alert_email(payload, decision)
                     elif channel == "sms":
-                        _alert_sms(payload)
+                        _alert_sms(payload, decision)
                     elif channel == "webhook":
                         _alert_webhook(payload)
                 except Exception as e:
@@ -95,10 +106,9 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
     return True
 
 
-def _alert_console(payload: dict):
+def _alert_console(payload: dict, decision: DecisionResult = None):
     level = payload["alert_level"].upper()
     status = payload["status"]
-    reason = payload["reason"]
     track_id = payload["track_id"]
 
     emoji_map = {
@@ -111,13 +121,16 @@ def _alert_console(payload: dict):
     prefix = emoji_map.get(level, "")
 
     print(f"\n{prefix} ALERT [{level}] {status} | Track: {track_id}")
-    print(f"    Reason: {reason}")
+    if decision and decision.nl_summary:
+        print(f"    {decision.nl_summary}")
+    else:
+        print(f"    Reason: {payload['reason']}")
     if payload.get("name"):
         print(f"    Person: {payload['name']}")
     print()
 
 
-def _alert_email(payload: dict):
+def _alert_email(payload: dict, decision: DecisionResult = None):
     if not all([settings.SMTP_HOST, settings.SMTP_USER, settings.SMTP_PASS, settings.ALERT_EMAIL_TO]):
         return
 
@@ -133,13 +146,17 @@ Status: {payload['status']}
 Alert Level: {payload['alert_level']}
 Track ID: {payload['track_id']}
 Camera: {payload['camera_id']}
-Reason: {payload['reason']}
 Masked: {payload['is_masked']}
 Time: {payload['timestamp']}
 
 Person ID: {payload.get('person_id', 'N/A')}
 Name: {payload.get('name', 'N/A')}
 """
+    if decision and decision.nl_summary:
+        body += f"\nSummary: {decision.nl_summary}\n"
+    else:
+        body += f"\nReason: {payload['reason']}\n"
+
     if payload.get("image_url"):
         body += f"\nImage: {payload['image_url']}"
 
@@ -156,7 +173,7 @@ Name: {payload.get('name', 'N/A')}
         raise
 
 
-def _alert_sms(payload: dict):
+def _alert_sms(payload: dict, decision: DecisionResult = None):
     if not all([settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN, settings.ALERT_SMS_TO]):
         return
 
@@ -164,7 +181,10 @@ def _alert_sms(payload: dict):
         from twilio.rest import Client
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
 
-        body = f"[{payload['alert_level'].upper()}] {payload['status']}: {payload['reason']}"
+        if decision and decision.nl_summary:
+            body = f"[{payload['alert_level'].upper()}] {decision.nl_summary}"
+        else:
+            body = f"[{payload['alert_level'].upper()}] {payload['status']}: {payload['reason']}"
         if payload.get("name"):
             body += f" Person: {payload['name']}"
 

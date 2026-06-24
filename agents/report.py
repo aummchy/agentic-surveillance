@@ -32,6 +32,7 @@ from utils.db_utils import (
     get_events_with_faces, get_stats, get_visit_history,
     get_memory_collection, get_events_collection
 )
+from utils import llm_client
 
 logger = structlog.get_logger(__name__)
 
@@ -94,10 +95,30 @@ class ReportAgent(BaseAgent):
         visit_count = memory_context.get("visit_count", 0)
         last_seen = memory_context.get("last_seen")
 
-        # Build report
+        # Build template-based content first (fallback)
         title = self._build_title(status, name, camera_id)
         summary = self._build_summary(status, name, camera_id, timestamp, visit_count, last_seen)
         recommendation = self._build_recommendation(status, alert_level, visit_count)
+
+        # Try LLM-enhanced report (non-blocking, falls back to templates)
+        llm_result = llm_client.generate_incident_summary({
+            "status": status,
+            "alert_level": alert_level,
+            "name": name,
+            "camera_id": camera_id,
+            "reason": reason,
+            "visit_count": visit_count,
+            "timestamp": timestamp,
+        })
+
+        if llm_result:
+            lines = llm_result.strip().split("\n")
+            for i, line in enumerate(lines):
+                lower = line.lower().strip()
+                if lower.startswith("summary:"):
+                    summary = line.split(":", 1)[1].strip()
+                elif lower.startswith("recommendation:"):
+                    recommendation = line.split(":", 1)[1].strip()
 
         return {
             "report_type": "incident",
@@ -154,11 +175,19 @@ class ReportAgent(BaseAgent):
 
         peak_hour = max(hour_counts.items(), key=lambda x: x[1])[0] if hour_counts else "N/A"
 
+        # Template-based summary (fallback)
+        summary = (f"Processed {stats.get('events_today', 0)} events today. "
+                   f"{stats.get('unknown_today', 0)} unknown persons detected.")
+
+        # Try LLM-enhanced executive summary
+        llm_summary = llm_client.generate_executive_summary(stats, events)
+        if llm_summary:
+            summary = llm_summary
+
         return {
             "report_type": "summary",
             "title": f"{period.title()} Surveillance Summary",
-            "summary": f"Processed {stats.get('events_today', 0)} events today. "
-                      f"{stats.get('unknown_today', 0)} unknown persons detected.",
+            "summary": summary,
             "period": period,
             "stats": stats,
             "status_breakdown": status_counts,

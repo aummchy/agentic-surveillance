@@ -27,6 +27,7 @@ main.py
 ├── CameraAgent         — capture loop, ByteTrack, progressive recognition (every 20 frames)
 ├── track_queue         — Queue decouples camera from blocking I/O (2 worker threads)
 ├── uvicorn/FastAPI     — started in a daemon thread sharing the same asyncio event loop
+├── Ollama LLM          — Gemma 3 4B / Qwen 3.5 4B for NL summaries + chat
 └── On track finalized:
     MatchingAgent → MemoryAgent → RecognitionAgent → PolicyAgent → AlertAgent → DB/Cloudinary
 ```
@@ -40,6 +41,7 @@ main.py
 | **Policy** | `agents/policy.py` | Applies prioritized rules → status, alert_level, should_alert, should_register |
 | **Alert** | `agents/alert_agent.py` | Dispatches to console/email/SMS/webhook with cooldown |
 | **Matching** | `agents/matching_agent.py` | MongoDB Atlas Vector Search → cosine similarity match |
+| **LLM** | `utils/llm_client.py` | Ollama HTTP client for NL summaries, reports, and chat |
 
 `decision_agent.py` is a thin wrapper that delegates to `PolicyAgent` (kept for backward compatibility).
 
@@ -90,6 +92,8 @@ Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.25). Higher values reject genuine sam
 - **Mask detection** uses a geometric heuristic: `lower_face_height / upper_face_height < 0.3` (5-point landmarks). Not a classifier — works best on front-facing faces.
 - **`FutureWarning` from insightface** (`estimate` deprecated in 0.26) is harmless.
 - Logs split: console shows `INFO+`, full debug (face quality scores, detection scores, recognition details) goes to `logs/surveillance.log` (5 MB × 5 rotating backups).
+- **LLM (Ollama) must be running** for chat and NL summaries. System falls back to template strings if unavailable. Swap model via `OLLAMA_MODEL` env var.
+- **LLM runs off critical path.** `dispatch()` calls LLM only after alert decision is made. Report generation runs on demand. Camera loop never blocks on LLM.
 
 ## MongoDB document schemas
 
@@ -113,3 +117,6 @@ Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.25). Higher values reject genuine sam
 | `YOLO_DEVICE` | `cpu` | Set `0` for GPU |
 | `INSIGHTFACE_PROVIDER` | `CPUExecutionProvider` | Set `CUDAExecutionProvider` for GPU |
 | `CLOUDINARY_*` | — | Optional image archival |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `gemma3:4b` | Swap to `qwen3.5:4b` for better reasoning |
+| `OLLAMA_TIMEOUT` | `120` | LLM request timeout (seconds) |

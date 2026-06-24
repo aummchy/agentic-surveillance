@@ -92,6 +92,8 @@ Dashboard          (live view, visitor log, alerts, audit trail)
 | Frontend | **React** (Vite) OR **Streamlit** | Streamlit for speed; React for a real UI |
 | Alerting | **smtplib / Twilio / webhook** | Pluggable; see §8 |
 | Runtime | **onnxruntime** | InsightFace inference backend (CPU by default) |
+| Local LLM | **Ollama** + **Gemma 3 4B** / **Qwen 3.5 4B** | NL summaries, report generation, conversational chat |
+| HTTP client | **httpx** | Async Ollama API calls |
 
 > **GPU note.** Everything runs on CPU. If a CUDA GPU is available, set
 > InsightFace providers to `CUDAExecutionProvider` and YOLO `device=0` — the
@@ -127,6 +129,9 @@ uvicorn[standard]>=0.27.0
 # Alerting
 twilio>=8.0.0              # Optional SMS
 requests>=2.31.0          # Webhook alerts
+
+# LLM
+httpx>=0.27.0             # Ollama HTTP client
 
 # Config
 python-dotenv>=1.0.0
@@ -166,11 +171,16 @@ surveillance-system/
 ├── utils/
 │   ├── image_utils.py            # blur/brightness/crop/resize/save/draw
 │   ├── embedding_utils.py        # InsightFace singleton, embed, compare
+│   ├── llm_client.py             # Ollama HTTP client (Gemma/Qwen)
 │   └── db_utils.py               # MongoDB CRUD + vector search + audit log
 │
 ├── dashboard/
 │   ├── backend/                  # FastAPI app (REST + WebSocket live feed)
+│   │   └── routes/
+│   │       └── chat.py           # POST /api/chat, GET /api/chat/health
 │   └── frontend/                 # React (Vite) or Streamlit app
+│       └── src/components/
+│           └── ChatPanel.jsx     # Conversational AI chat UI
 │
 ├── models/                       # downloaded weights (gitignored)
 │   ├── yolov8n.pt
@@ -684,6 +694,11 @@ CAMERA_INDEX=0
 FRAME_WIDTH=640
 FRAME_HEIGHT=480
 CAMERA_ID=cam_01
+
+# ── Local LLM (Ollama) ──────────────────────────────
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=gemma3:4b          # swap to qwen3.5:4b for better reasoning
+OLLAMA_TIMEOUT=120              # seconds
 ```
 
 ---
@@ -708,6 +723,10 @@ CAMERA_ID=cam_01
    live WebSocket feed, operator review/enroll.
 8. **Hardening.** Single-load models (no per-frame reload), alert debounce,
    secret hygiene, graceful camera release on exit.
+9. **LLM integration.** Ollama HTTP client (`utils/llm_client.py`), NL alert
+   summaries in `alert_agent.py`, enhanced reports in `report.py`, conversational
+   chat endpoint (`dashboard/backend/routes/chat.py`), `ChatPanel.jsx` frontend.
+   All LLM calls have template fallback. Model swap via `OLLAMA_MODEL` env var.
 
 ---
 
@@ -776,3 +795,10 @@ CAMERA_ID=cam_01
 15. Track IDs are unique across camera restarts (composite key).
 16. Auto-registered unknowns are deduplicated — same person appearing multiple
     times does not create duplicate face records.
+17. LLM generates natural-language alert summaries visible in console, email, SMS,
+    WebSocket broadcasts, and dashboard notifications — with template fallback if
+    Ollama is unavailable.
+18. Chat endpoint (`POST /api/chat`) answers natural-language questions about
+    surveillance data (stats, recent events, unknown persons, visit history) with
+    LLM-polished responses — with template fallback if Ollama is unavailable.
+19. LLM model can be swapped via single env var change (`OLLAMA_MODEL`).

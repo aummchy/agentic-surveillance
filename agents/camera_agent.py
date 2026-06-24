@@ -136,6 +136,13 @@ class CameraAgent:
         with self._track_sets_lock:
             self._recognizing_tracks.add(track.track_id)
         try:
+            # Skip InsightFace if already matched with high confidence
+            if track.pending_match_result and track.pending_match_result.similarity_score > 0.80:
+                logger.debug("skip_recognition_high_confidence",
+                           track_id=track.track_id,
+                           similarity=track.pending_match_result.similarity_score)
+                return
+
             person_crop = crop_person(frame, track.person_box)
             if person_crop.size == 0:
                 logger.debug("empty_person_crop", track_id=track.track_id)
@@ -295,6 +302,10 @@ class CameraAgent:
             # Store full match result for finalization to reuse
             self.track_state.set_pending_match_result(track.track_id, match_result)
 
+            # Store memory context for finalization to reuse
+            if memory_context:
+                self.track_state.set_pending_memory_context(track.track_id, memory_context)
+
         except Exception as e:
             logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e), exc_info=True)
         finally:
@@ -317,8 +328,9 @@ class CameraAgent:
                     except Exception as e:
                         logger.debug("best_face_crop_detect_failed", track_id=track.track_id, error=str(e))
 
+                # Skip full frame detection if crop already found a face
                 frame_faces = []
-                if track.embedding is None and track.best_full_frame is not None:
+                if not crop_faces and track.best_full_frame is not None:
                     try:
                         frame_faces = app.detect_faces_raw(track.best_full_frame, min_score=0.0)
                     except Exception as e:

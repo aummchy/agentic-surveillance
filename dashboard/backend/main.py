@@ -1,7 +1,7 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dashboard.backend.routes import faces, events, live, reports
+from dashboard.backend.routes import faces, events, live, reports, chat
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(faces.router, prefix="/api/faces", tags=["faces"])
 app.include_router(events.router, prefix="/api/events", tags=["events"])
 app.include_router(reports.router, prefix="/api", tags=["reports"])
+app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(live.router, prefix="/ws", tags=["websocket"])
 
 

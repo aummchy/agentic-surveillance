@@ -139,6 +139,12 @@ class TrackState:
             if track:
                 track.pending_match_result = match_result
 
+    def set_pending_memory_context(self, composite_id: str, memory_context: dict):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.pending_memory_context = memory_context
+
     def classify_visibility(self, composite_id: str) -> str:
         with self._lock:
             track = self._tracks.get(composite_id)

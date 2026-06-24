@@ -1,6 +1,6 @@
 # Surveillance System — Agentic AI
 
-AI-powered real-time person detection, tracking, and facial recognition with **5 intelligent agents** working together.
+AI-powered real-time person detection, tracking, and facial recognition with **6 intelligent agents** working together — plus local LLM for NL summaries and conversational dashboard.
 
 ---
 
@@ -18,7 +18,8 @@ Camera → Detect Person → Track → Recognize → Decide → Alert → Report
 - Face recognition with memory of past visits
 - Intelligent decisions based on multiple factors
 - Context-aware alerts (not just "unknown → alert")
-- Live dashboard with React + WebSocket
+- **Local LLM integration** (Gemma 3 4B / Qwen 3.5 4B via Ollama) for NL alert summaries, report generation, and conversational dashboard
+- Live dashboard with React + WebSocket + **AI chat interface**
 - Live camera overlays: red for unverified, yellow for known visitors, green for verified, with masks always shown in red
 - Structured logging with structlog + rotating file logs
 
@@ -198,6 +199,14 @@ This is a simple heuristic, not a dedicated mask-classification model, so it wor
 |----------|-------------|
 | `MONGODB_URI` | MongoDB Atlas connection string |
 
+### Local LLM (Ollama)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `gemma3:4b` | Model name (swap to `qwen3.5:4b` for better reasoning) |
+| `OLLAMA_TIMEOUT` | `120` | Request timeout in seconds |
+
 ### Face Matching
 
 | Variable | Default | Description |
@@ -281,6 +290,7 @@ surveillance-system/
 ├── utils/                           # Utilities
 │   ├── db_utils.py                  # MongoDB + memory CRUD
 │   ├── embedding_utils.py           # InsightFace singleton
+│   ├── llm_client.py                # Ollama HTTP client (Gemma/Qwen)
 │   └── image_utils.py               # Image processing
 │
 ├── config/
@@ -294,7 +304,8 @@ surveillance-system/
     │       ├── faces.py             # Face CRUD endpoints
     │       ├── events.py            # Event endpoints
     │       ├── reports.py           # Report endpoints
-    │       └── live.py              # WebSocket live feed
+    │       ├── live.py              # WebSocket live feed
+    │       └── chat.py              # AI chat endpoint
     └── frontend/
         ├── package.json
         ├── vite.config.js
@@ -305,7 +316,8 @@ surveillance-system/
                 ├── LiveFeed.jsx     # WebSocket camera feed
                 ├── EventLog.jsx     # Event log
                 ├── UnknownPersons.jsx # Person cards
-                └── VerifyModal.jsx  # Verification dialog
+                ├── VerifyModal.jsx  # Verification dialog
+                └── ChatPanel.jsx    # Conversational AI chat
 ```
 
 ---
@@ -340,6 +352,13 @@ surveillance-system/
 | GET | `/api/reports/person/{person_id}` | Person visit history |
 | GET | `/api/reports/incidents` | Recent incidents |
 
+### Chat
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/chat` | Ask questions about surveillance data |
+| GET | `/api/chat/health` | Check LLM status |
+
 ### WebSocket
 
 | Protocol | Path | Description |
@@ -356,6 +375,8 @@ The React dashboard provides:
 - **Event Log** — Paginated events with color-coded status badges (red = unverified, yellow = known visitor, green = verified)
 - **Unknown Persons** — Grid of detected person cards
 - **Verify Modal** — Assign names to unknown persons
+- **AI Chat** — Ask questions about surveillance data in natural language
+- **NL Summaries** — Human-readable alert summaries in notifications and event details
 - **Bright, clean UI** — White background, blue accents, high contrast
 
 ---
@@ -393,6 +414,9 @@ The file log uses Python's `RotatingFileHandler` — max **5 MB** per file, **5 
 | No local camera window | The system streams via WebSocket — open `http://localhost:5173` in your browser to see the feed |
 | Camera reconnect loops | System auto-reconnects after 30 consecutive frame failures (~3s). Check USB connection if persistent |
 | Track shows UNVERIFIED briefly | Normal — recognition runs every 20 frames (~4s). Set `RECOGNITION_INTERVAL_FRAMES=10` for faster first recognition |
+| LLM not responding | Check Ollama is running: `ollama serve`. Verify model installed: `ollama list`. System falls back to template summaries if LLM unavailable |
+| Chat returns static responses | LLM offline — check `GET /api/chat/health`. System uses template fallback for reports and alerts |
+| Swap LLM model | Change `OLLAMA_MODEL` in `.env` (e.g., `qwen3.5:4b`). Both Gemma 3 4B and Qwen 3.5 4B tested and working |
 
 ---
 

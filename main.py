@@ -15,10 +15,11 @@ from agents.decision_agent import decide
 from agents.alert_agent import dispatch
 from agents.memory import MemoryAgent
 from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings, close_client
-from utils.image_utils import save_image, upload_to_cloudinary
+from utils.image_utils import save_image, upload_to_cloudinary, upload_jpeg_to_cloudinary
 from pipeline.models import Track
 from dashboard.backend.routes.live import broadcast_frame, broadcast_alert
 from agents.alert_agent import shutdown as alert_shutdown
+from utils.llm_client import shutdown as llm_shutdown, is_available as llm_available
 
 import structlog
 
@@ -64,10 +65,18 @@ def process_finalized_track(track: Track):
     try:
         image_url = track.image_url  # Reuse if already uploaded during progressive recognition
         if not image_url and track.best_full_frame is not None:
-            save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
-            image_url = upload_to_cloudinary(track.best_full_frame)
-            if not image_url:
-                image_url = f"captures/{track.track_id}.jpg"
+            # Use pre-encoded JPEG bytes if available (avoids re-encoding from numpy)
+            if track.best_frame_jpeg:
+                image_url = upload_jpeg_to_cloudinary(track.best_frame_jpeg)
+                if not image_url:
+                    # Fallback: save the JPEG bytes directly
+                    save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
+                    image_url = f"captures/{track.track_id}.jpg"
+            else:
+                save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
+                image_url = upload_to_cloudinary(track.best_full_frame)
+                if not image_url:
+                    image_url = f"captures/{track.track_id}.jpg"
             logger.info("track_image_saved", track_id=track.track_id, url=image_url)
         # Release raw frame to free memory (JPEG bytes retained)
         track.best_full_frame = None
@@ -87,8 +96,9 @@ def process_finalized_track(track: Track):
             track.person_name = match_result.name
 
         recognition_result = getattr(track, 'pending_recognition', None)
-        memory_context = {}
-        if match_result.matched:
+        # Reuse cached memory context from progressive recognition if available
+        memory_context = getattr(track, 'pending_memory_context', None)
+        if memory_context is None and match_result.matched:
             memory_context = memory_agent.run({
                 "person_id": match_result.person_id,
                 "camera_id": settings.CAMERA_ID,
@@ -112,7 +122,8 @@ def process_finalized_track(track: Track):
                     embedding=track.embedding,
                     image_url=image_url,
                     tags=tags,
-                    camera_id=settings.CAMERA_ID
+                    camera_id=settings.CAMERA_ID,
+                    skip_search=True  # Already have match result from progressive recognition
                 )
             except Exception as e:
                 logger.error("store_face_failed", track_id=track.track_id, error=str(e), exc_info=True)
@@ -140,7 +151,8 @@ def process_finalized_track(track: Track):
                 "timestamp": datetime.utcnow().isoformat(),
                 "camera_id": settings.CAMERA_ID,
                 "reason": decision.reason,
-                "alert_level": decision.alert_level
+                "alert_level": decision.alert_level,
+                "nl_summary": decision.nl_summary or "",
             }
             if loop and loop.is_running():
                 asyncio.run_coroutine_threadsafe(broadcast_alert(alert_payload), loop)
@@ -197,6 +209,13 @@ def main():
                 camera_index=settings.CAMERA_INDEX,
                 alert_channels=settings.ALERT_CHANNELS)
 
+    # Check LLM availability
+    if llm_available():
+        logger.info("llm_connected", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL)
+    else:
+        logger.warning("llm_unavailable", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL,
+                       note="Alerts and reports will use template strings. Start Ollama to enable LLM features.")
+
     try:
         check_atlas_search_index()
         backfill_missing_embeddings()
@@ -243,6 +262,7 @@ def main():
         pass
     _encode_executor.shutdown(wait=False)
     alert_shutdown()
+    llm_shutdown()
     close_client()
     logger.info("shutdown_complete")
 

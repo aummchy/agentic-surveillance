@@ -46,6 +46,23 @@ def upload_to_cloudinary(image: np.ndarray, folder: str = "surveillance") -> str
         return None
 
 
+def upload_jpeg_to_cloudinary(jpeg_bytes: bytes, folder: str = "surveillance") -> str | None:
+    """Upload pre-encoded JPEG bytes to Cloudinary (avoids re-encoding from numpy)."""
+    if not _init_cloudinary():
+        return None
+    try:
+        import cloudinary.uploader
+        result = cloudinary.uploader.upload(
+            jpeg_bytes,
+            folder=folder,
+            resource_type="image"
+        )
+        return result.get("secure_url")
+    except Exception as e:
+        logger.error("cloudinary_upload_failed", error=str(e))
+        return None
+
+
 def compute_blur_score(image: np.ndarray) -> float:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())

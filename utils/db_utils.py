@@ -255,36 +255,38 @@ def find_similar_faces(embedding: list, threshold: float = None) -> list:
 
 def store_face(person_id: str, name: str, role: str, embedding: list,
                image_url: str, tags: list = None, quality_scores: dict = None,
-               camera_id: str = None) -> str:
+               camera_id: str = None, skip_search: bool = False) -> str:
     collection = get_faces_collection()
 
-    # Try vector search first (fast, index-backed), fall back to scan
-    try:
-        matches = vector_search(embedding, limit=3)
-    except Exception:
-        matches = []
+    # Skip vector search if caller already has match results (avoids redundant query)
+    if not skip_search:
+        # Try vector search first (fast, index-backed), fall back to scan
+        try:
+            matches = vector_search(embedding, limit=3)
+        except Exception:
+            matches = []
 
-    # Check for similar unknowns
-    for m in matches:
-        if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
-            existing_id = m["person_id"]
-            existing = collection.find_one({"person_id": existing_id}, {"role": 1})
-            if existing and existing.get("role") == "unknown":
-                update_face(existing_id, image_url, embedding)
-                logger.info("store_face_merged_unknown", person_id=existing_id,
-                             similarity=m["similarity_score"])
-                return existing_id
+        # Check for similar unknowns
+        for m in matches:
+            if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
+                existing_id = m["person_id"]
+                existing = collection.find_one({"person_id": existing_id}, {"role": 1})
+                if existing and existing.get("role") == "unknown":
+                    update_face(existing_id, image_url, embedding)
+                    logger.info("store_face_merged_unknown", person_id=existing_id,
+                                 similarity=m["similarity_score"])
+                    return existing_id
 
-    # Check for similar verified/known faces
-    for m in matches:
-        if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
-            existing_id = m["person_id"]
-            existing = collection.find_one({"person_id": existing_id}, {"role": 1, "verified": 1})
-            if existing:
-                update_face(existing_id, image_url, embedding)
-                logger.info("store_face_merged_existing", person_id=existing_id,
-                             similarity=m["similarity_score"], verified=existing.get("verified", False))
-                return existing_id
+        # Check for similar verified/known faces
+        for m in matches:
+            if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
+                existing_id = m["person_id"]
+                existing = collection.find_one({"person_id": existing_id}, {"role": 1, "verified": 1})
+                if existing:
+                    update_face(existing_id, image_url, embedding)
+                    logger.info("store_face_merged_existing", person_id=existing_id,
+                                 similarity=m["similarity_score"], verified=existing.get("verified", False))
+                    return existing_id
 
     doc = {
         "person_id": person_id,

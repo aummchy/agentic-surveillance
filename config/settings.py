@@ -176,3 +176,8 @@ CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
 FRAME_WIDTH = int(os.getenv("FRAME_WIDTH", "640"))
 FRAME_HEIGHT = int(os.getenv("FRAME_HEIGHT", "480"))
 CAMERA_ID = os.getenv("CAMERA_ID", "cam_01")
+
+# LLM (Ollama)
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "30"))
