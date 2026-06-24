@@ -3,6 +3,7 @@ import time
 import structlog
 import threading
 import queue
+import concurrent.futures
 import numpy as np
 from config import settings
 from pipeline.tracker import track_persons
@@ -31,6 +32,9 @@ class CameraAgent:
         self.memory_agent = MemoryAgent()
         self._recognizing_tracks = set()
         self._finalized_track_ids = set()
+        self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="recognition"
+        )
 
     def start(self):
         self._running = True
@@ -63,6 +67,7 @@ class CameraAgent:
     def stop(self):
         self._running = False
         self._stop_event.set()
+        self._recognition_executor.shutdown(wait=False)
         if self._cap:
             self._cap.release()
         logger.info("camera_stopped")
@@ -103,10 +108,12 @@ class CameraAgent:
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
-                    logger.debug("progressive_recognition",
+                    logger.debug("progressive_recognition_scheduled",
                                track_id=track.track_id,
                                frame=self._frame_count)
-                    self._progressive_recognition(frame, track)
+                    self._recognition_executor.submit(
+                        self._progressive_recognition, frame.copy(), track
+                    )
 
             expired = self.track_state.get_expired_tracks()
             for track in expired:

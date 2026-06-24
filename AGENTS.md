@@ -70,14 +70,9 @@ main.py (entry point, wires everything)
 - **One decision per track.** Recognition + decision runs once when track ends (or progressively every 20 frames). Not per-frame.
 - **Composite track IDs.** Format: `{camera_id}_{session_epoch}_{byte_track_id}` — unique across camera restarts.
 
-## Known issues (4 remaining)
+## Known issues (0 remaining)
 
-| # | Issue | Location |
-|---|-------|----------|
-| 9 | Progressive recognition blocks camera loop (sync InsightFace + MongoDB on camera thread) | `camera_agent.py:79-83` |
-| 14 | `_python_cosine_scan` silently caps at 500 records with no log warning | `db_utils.py:116` |
-| 19 | `backfill_missing_embeddings` full collection scan on every startup | `db_utils.py:641` |
-| 23 | `memory_agent.run()` blocks camera thread (MongoDB query) | `camera_agent.py:200` |
+All 32 issues from the problem report have been fixed.
 
 ## Gotchas
 

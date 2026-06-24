@@ -118,10 +118,19 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
         query["role"] = filter_role
 
     SCAN_LIMIT = 500
+    total_count = collection.count_documents(query)
     all_faces = list(collection.find(query, {"latest_embedding": 1, "person_id": 1,
                                                "name": 1, "role": 1, "tags": 1,
                                                "images": 1, "verified": 1,
                                                "alert_level": 1}).limit(SCAN_LIMIT))
+
+    if total_count > SCAN_LIMIT:
+        logger.warning("python_cosine_scan_truncated",
+                       total_faces=total_count,
+                       scanned=SCAN_LIMIT,
+                       skipped=total_count - SCAN_LIMIT,
+                       filter_role=filter_role,
+                       note="Results may miss best match. Consider enabling Atlas Vector Search.")
 
     logger.debug("python_cosine_scan", total_faces=len(all_faces), filter_role=filter_role)
 
@@ -639,13 +648,46 @@ def check_atlas_search_index():
         logger.warning("atlas_search_index_check_failed", error=str(e))
 
 
+_backfill_done = False
+
+
 def backfill_missing_embeddings():
-    """Fix faces that have embeddings array but empty latest_embedding."""
+    """Fix faces that have embeddings array but empty latest_embedding.
+
+    Uses quick count checks to avoid full collection scans when unnecessary.
+    Runs at most once per process lifetime.
+    """
+    global _backfill_done
+    if _backfill_done:
+        logger.debug("backfill_already_run_this_session")
+        return
+
     collection = get_faces_collection()
-    # Create index for efficient queries
+
+    # Quick exit: count documents needing backfill (uses index if available)
+    missing_count = collection.count_documents(
+        {"$or": [
+            {"latest_embedding": {"$exists": False}},
+            {"latest_embedding": []}
+        ]}
+    )
+
+    if missing_count == 0:
+        logger.info("backfill_not_needed")
+        _backfill_done = True
+        return
+
+    logger.info("backfill_started", faces_to_fix=missing_count)
     collection.create_index("latest_embedding")
+
     count = 0
-    for face in collection.find({"latest_embedding": {"$exists": False}}):
+    for face in collection.find(
+        {"$or": [
+            {"latest_embedding": {"$exists": False}},
+            {"latest_embedding": []}
+        ]},
+        {"person_id": 1, "embeddings": 1}
+    ):
         embs = face.get("embeddings", [])
         if embs:
             last_emb = embs[-1]
@@ -655,17 +697,9 @@ def backfill_missing_embeddings():
             )
             count += 1
             logger.info("backfill_embedding", person_id=face["person_id"])
-    for face in collection.find({"latest_embedding": []}):
-        embs = face.get("embeddings", [])
-        if embs:
-            last_emb = embs[-1]
-            collection.update_one(
-                {"person_id": face["person_id"]},
-                {"$set": {"latest_embedding": last_emb}}
-            )
-            count += 1
-            logger.info("backfill_empty_embedding", person_id=face["person_id"])
+
+    _backfill_done = True
     if count > 0:
         logger.info("backfill_complete", fixed_count=count)
     else:
-        logger.info("backfill_not_needed")
+        logger.info("backfill_complete_no_fixes_needed")

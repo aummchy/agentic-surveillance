@@ -2,7 +2,7 @@
 
 Codebase audit performed 2026-06-23. Issues are grouped by severity and verified against actual source lines.
 
-**Status: 28 of 32 issues FIXED. 4 remaining (issues #9, #14, #19, #23).**
+**Status: 32 of 32 issues FIXED. 0 remaining.**
 
 ---
 
@@ -66,7 +66,7 @@ Changed `0.35` to `settings.DEDUP_SIMILARITY_THRESHOLD`.
 
 ---
 
-### 9. `_progressive_recognition` blocks the camera capture loop **REMAINING**
+### 9. `_progressive_recognition` blocks the camera capture loop **FIXED 2026-06-24**
 **File:** `agents/camera_agent.py:79-83`
 
 ```python
@@ -108,7 +108,7 @@ Both functions now have `.limit(500)` on their MongoDB queries.
 
 ---
 
-### 14. `_python_cosine_scan` silently caps at 500 records **REMAINING**
+### 14. `_python_cosine_scan` silently caps at 500 records **FIXED 2026-06-24**
 **File:** `utils/db_utils.py:116`
 
 ```python
@@ -148,7 +148,7 @@ Set is now pruned each frame: `self._finalized_track_ids &= active_track_ids`.
 
 ---
 
-### 19. `backfill_missing_embeddings` scans collection with no index at every startup **REMAINING**
+### 19. `backfill_missing_embeddings` scans collection with no index at every startup **FIXED 2026-06-24**
 **File:** `utils/db_utils.py:641`
 
 ```python
@@ -180,7 +180,7 @@ Query changed from `{"verified": {"$ne": True}}` to `{"role": "unknown", "verifi
 
 ---
 
-### 23. `memory_agent.run()` called on camera thread, not worker **REMAINING**
+### 23. `memory_agent.run()` called on camera thread, not worker **FIXED 2026-06-24**
 **File:** `agents/camera_agent.py:200-205`
 
 ```python
@@ -277,21 +277,21 @@ Added `"known_visitor"` to the `is_known` check list. Rule 4 is now reachable.
 | ~~6~~ | `db_utils.py:77` | ~~**High**~~ | ~~Atlas pipeline rejected~~ **FIXED** |
 | ~~7~~ | `db_utils.py:259` | ~~**High**~~ | ~~Hardcoded threshold~~ **FIXED** |
 | ~~8~~ | `settings.py:105,138` | ~~**High**~~ | ~~Config default mismatch~~ **FIXED** |
-| 9 | `camera_agent.py:79-83` | **High** | Blocking camera loop |
+| 9 | `camera_agent.py:79-83` | ~~**High**~~ | ~~Blocking camera loop~~ **FIXED** |
 | ~~10~~ | `camera_agent.py:236`, `main.py:66` | ~~**High**~~ | ~~Duplicate uploads~~ **FIXED** |
 | ~~11~~ | `camera_agent.py:230`, `main.py:122` | ~~**High**~~ | ~~Duplicate alerts~~ **FIXED** |
 | ~~12~~ | `track_state.py:83-87` | ~~**High**~~ | ~~Memory waste~~ **FIXED** |
 | ~~13~~ | `db_utils.py:168,201` | ~~**Medium**~~ | ~~Unbounded memory~~ **FIXED** |
-| 14 | `db_utils.py:116` | **Medium** | Silent result truncation |
+| ~~14~~ | `db_utils.py:116` | ~~**Medium**~~ | ~~Silent result truncation~~ **FIXED** |
 | ~~15~~ | `camera_agent.py:63-67` | ~~**Medium**~~ | ~~No reconnect logic~~ **FIXED** |
 | ~~16~~ | `camera_agent.py:33,257` | ~~**Medium**~~ | ~~Set grows without bound~~ **FIXED** |
 | ~~17~~ | `policy.py:284` | ~~**Medium**~~ | ~~Wasteful instantiation~~ **FIXED** |
 | ~~18~~ | `db_utils.py` | ~~**Medium**~~ | ~~Missing DB indexes~~ **FIXED** |
-| 19 | `db_utils.py:641` | **Medium** | Full scan at startup |
+| ~~19~~ | `db_utils.py:641` | ~~**Medium**~~ | ~~Full scan at startup~~ **FIXED** |
 | ~~20~~ | `camera_agent.py:13` | ~~**Medium**~~ | ~~Dead import/function~~ **FIXED** |
 | ~~21~~ | `camera_agent.py:117,129,291` | ~~**Medium**~~ | ~~Inconsistent thresholds~~ **FIXED** |
 | ~~22~~ | `db_utils.py:359` | ~~**Medium**~~ | ~~Misleading function name~~ **FIXED** |
-| 23 | `camera_agent.py:200` | **Medium** | MongoDB on camera thread |
+| ~~23~~ | `camera_agent.py:200` | ~~**Medium**~~ | ~~MongoDB on camera thread~~ **FIXED** |
 | ~~24~~ | `camera_agent.py:224` | ~~**Low**~~ | ~~Dead code~~ **FIXED** |
 | ~~25~~ | `models.py:20`, `camera_agent.py:228` | ~~**Low**~~ | ~~Variable shadowing~~ **FIXED** |
 | ~~26~~ | `db_utils.py:327` | ~~**Low**~~ | ~~Silent update failure~~ **FIXED** |
