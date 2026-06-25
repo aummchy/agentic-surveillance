@@ -48,9 +48,15 @@ function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
     return `${Math.floor(diffHrs / 24)}d ago`
   }
 
+  const getImageUrl = (url) => {
+    if (!url) return null
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
+    return `http://localhost:8000/${url}`
+  }
+
   const getLatestImage = (person) => {
     if (person.images && person.images.length > 0) {
-      return person.images[person.images.length - 1].url
+      return getImageUrl(person.images[person.images.length - 1].url)
     }
     return null
   }

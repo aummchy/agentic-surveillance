@@ -34,10 +34,17 @@ def _prune_stale_alerts():
         logger.debug("alert_timestamps_pruned", count=len(stale_keys))
 
 
-def should_send_alert(track_id: str, alert_level: str) -> bool:
+_UNVERIFIED_STATUSES = {"unknown", "masked_unknown", "uncertain", "intentionally_hidden"}
+
+
+def should_send_alert(track_id: str, alert_level: str, status: str = None) -> bool:
     _prune_stale_alerts()
-    key = f"{track_id}:{alert_level}"
     now = time.time()
+    # Global dedup for unverified/unknown alerts — only one at a time
+    if status in _UNVERIFIED_STATUSES:
+        key = "global:unverified"
+    else:
+        key = f"{track_id}:{alert_level}"
     with _alert_lock:
         last = _alert_timestamps.get(key, 0)
         if now - last < settings.ALERT_COOLDOWN_SECS:
@@ -53,8 +60,8 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
     if track.alerted:
         return True
 
-    if not should_send_alert(track.track_id, decision.alert_level):
-        return True
+    if not should_send_alert(track.track_id, decision.alert_level, decision.status):
+        return False
 
     payload = {
         "track_id": track.track_id,
@@ -70,37 +77,38 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
         "memory_context": getattr(track, "pending_memory_context", None) or {},
     }
 
-    # Generate NL summary via LLM (non-blocking, falls back to None)
-    if not decision.nl_summary:
-        try:
-            nl = llm_client.generate_nl_summary(payload)
-            if nl:
-                decision.nl_summary = nl
-        except Exception:
-            pass
-
-    # Console is instant, run synchronously
+    # Console is instant, run synchronously (no LLM blocking)
     if "console" in settings.ALERT_CHANNELS:
         try:
             _alert_console(payload, decision)
         except Exception as e:
             logger.error("alert_channel_failed", channel="console", error=str(e))
 
-    # Network-bound alerts (email, SMS, webhook) run in thread pool
+    # Network-bound alerts + LLM summary run in thread pool (non-blocking)
+    # LLM call moved here so it never blocks console or the main pipeline
     async_channels = [c for c in settings.ALERT_CHANNELS if c in ("email", "sms", "webhook")]
-    if async_channels:
-        def _send_async():
-            for channel in async_channels:
-                try:
-                    if channel == "email":
-                        _alert_email(payload, decision)
-                    elif channel == "sms":
-                        _alert_sms(payload, decision)
-                    elif channel == "webhook":
-                        _alert_webhook(payload)
-                except Exception as e:
-                    logger.error("alert_channel_failed", channel=channel, error=str(e))
 
+    def _send_async():
+        if not decision.nl_summary:
+            try:
+                nl = llm_client.generate_nl_summary(payload)
+                if nl:
+                    decision.nl_summary = nl
+            except Exception:
+                pass
+
+        for channel in async_channels:
+            try:
+                if channel == "email":
+                    _alert_email(payload, decision)
+                elif channel == "sms":
+                    _alert_sms(payload, decision)
+                elif channel == "webhook":
+                    _alert_webhook(payload)
+            except Exception as e:
+                logger.error("alert_channel_failed", channel=channel, error=str(e))
+
+    if async_channels or not decision.nl_summary:
         _alert_executor.submit(_send_async)
 
     return True

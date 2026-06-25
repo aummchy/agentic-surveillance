@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 import threading
 import queue
 import cv2
@@ -29,8 +30,9 @@ worker_pool = None
 track_queue = None
 loop = None
 memory_agent = MemoryAgent()
-_encode_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="jpeg")
+_encode_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="jpeg")
 _shutdown_event = threading.Event()
+_broadcast_frame_counter = 0
 
 
 def handle_track_finalized(track: Track):
@@ -39,9 +41,11 @@ def handle_track_finalized(track: Track):
 
 
 def handle_frame_annotated(frame):
+    global _broadcast_frame_counter
     if loop and loop.is_running():
+        _broadcast_frame_counter += 1
         def _encode_and_broadcast():
-            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
             asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
         _encode_executor.submit(_encode_and_broadcast)
 
@@ -82,28 +86,54 @@ def process_finalized_track(track: Track):
         track.best_full_frame = None
 
         if track.embedding is None:
-            logger.info("track_no_embedding", track_id=track.track_id)
+            logger.info("track_no_embedding", track_id=track.track_id,
+                        face_detected=track.face_detected_once,
+                        frames_seen=track.total_frames_seen,
+                        visibility=track.visibility)
             _log_event(track, "unknown", "none", False, 0.0, image_url)
             return
 
+        logger.info("track_embedding_present",
+                    track_id=track.track_id,
+                    embedding_len=len(track.embedding),
+                    is_masked=track.is_masked,
+                    face_detected=track.face_detected_once,
+                    frames_seen=track.total_frames_seen)
+
         # Reuse match result from progressive recognition if available
         match_result = getattr(track, 'pending_match_result', None)
-        if match_result is None:
+        fresh_match = match_result is None
+        if fresh_match:
             from agents.matching_agent import run_matching_from_embedding
             match_result = run_matching_from_embedding(track.embedding)
 
         if match_result.matched and match_result.name:
             track.person_name = match_result.name
 
-        recognition_result = getattr(track, 'pending_recognition', None)
-        # Reuse cached memory context from progressive recognition if available
-        memory_context = getattr(track, 'pending_memory_context', None)
+        # Reuse recognition only if match was also reused (same embedding).
+        # If match is fresh (embedding regenerated at finalization), re-compute recognition.
+        recognition_result = getattr(track, 'pending_recognition', None) if not fresh_match else None
+        # Reuse cached memory context only if match was reused
+        memory_context = getattr(track, 'pending_memory_context', None) if not fresh_match else None
         if memory_context is None and match_result.matched:
             memory_context = memory_agent.run({
                 "person_id": match_result.person_id,
                 "camera_id": settings.CAMERA_ID,
                 "similarity": match_result.similarity_score,
                 "status": "known" if match_result.matched else "unknown",
+            })
+
+        # Re-compute recognition if not reused (fresh match or stale recognition)
+        if recognition_result is None:
+            from agents.recognition import RecognitionAgent
+            rec_agent = RecognitionAgent()
+            track_duration = time.time() - track.first_seen
+            recognition_result = rec_agent.run({
+                "similarity": match_result.similarity_score if match_result.matched else 0.0,
+                "is_masked": track.is_masked,
+                "face_quality": track.best_face_score if track.best_face_score > 0 else 0.0,
+                "track_duration": track_duration,
+                "memory_context": memory_context or {},
             })
 
         decision = decide(track, match_result, recognition_result, memory_context)
@@ -115,7 +145,7 @@ def process_finalized_track(track: Track):
             tags = ["auto_registered"] if decision.status in ("unknown", "masked_unknown") else []
 
             try:
-                store_face(
+                stored_id = store_face(
                     person_id=person_id,
                     name=name,
                     role=role,
@@ -123,8 +153,14 @@ def process_finalized_track(track: Track):
                     image_url=image_url,
                     tags=tags,
                     camera_id=settings.CAMERA_ID,
-                    skip_search=True  # Already have match result from progressive recognition
+                    skip_search=True
                 )
+                logger.info("store_face_success",
+                            track_id=track.track_id,
+                            stored_person_id=stored_id,
+                            role=role,
+                            name=name,
+                            embedding_len=len(track.embedding))
             except Exception as e:
                 logger.error("store_face_failed", track_id=track.track_id, error=str(e), exc_info=True)
 
@@ -137,12 +173,14 @@ def process_finalized_track(track: Track):
                 is_masked=track.is_masked
             )
 
+        # Dispatch external alerts (email/sms/console) — respects global dedup
+        alert_dispatched = False
         if decision.should_alert and not track.alerted:
-            dispatch(track, decision, image_url)
+            alert_dispatched = dispatch(track, decision, image_url)
             track.alerted = True
 
-        # Broadcast alert to dashboard for all alert-worthy detections
-        if decision.should_alert:
+        # Broadcast alert to dashboard only when actually dispatched (no dedup bypass)
+        if decision.should_alert and alert_dispatched:
             alert_payload = {
                 "person_id": track.track_id,
                 "status": decision.status,

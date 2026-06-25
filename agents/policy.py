@@ -75,7 +75,7 @@ class PolicyAgent(BaseAgent):
         camera_id = input_data.get("camera_id", settings.CAMERA_ID)
 
         # Get current time context
-        now = datetime.now()
+        now = datetime.utcnow()
         current_hour = now.hour
         is_office_hours = 9 <= current_hour <= 17
         is_weekday = now.weekday() < 5  # Monday=0, Friday=4
@@ -115,7 +115,6 @@ class PolicyAgent(BaseAgent):
         # Extract recognition info
         rec_status = recognition.get("status", "unknown")
         confidence = recognition.get("confidence", 0)
-        similarity = recognition.get("similarity", 0)
         is_masked = recognition.get("is_masked", False)
 
         # Extract match info
@@ -125,6 +124,9 @@ class PolicyAgent(BaseAgent):
         tags = match_data.get("tags", [])
         verified = match_data.get("verified", False)
         alert_level_from_match = match_data.get("alert_level", "low")
+        # Use match_data similarity_score as the authoritative source (not recognition.similarity
+        # which can be 0 when recognition_result is None or stale during finalization)
+        similarity = match_data.get("similarity_score", 0)
 
         # Extract memory info
         visit_count = memory.get("visit_count", 0)
@@ -168,7 +170,7 @@ class PolicyAgent(BaseAgent):
         if verified:
             return DecisionResult(
                 status="verified",
-                alert_level=alert_level_from_match,
+                alert_level="none",
                 person_id=person_id,
                 name=name,
                 reason=f"Verified visitor: {name}",
@@ -195,14 +197,24 @@ class PolicyAgent(BaseAgent):
         # RULE 5: Matched but not verified (new or uncertain)
         # ═══════════════════════════════════════════════════════
         if matched:
-            # Check confidence level
-            if confidence >= 80:
+            # Check similarity or confidence — high similarity alone is sufficient
+            if similarity >= 0.85 or confidence >= 80:
                 return DecisionResult(
                     status="known_visitor",
                     alert_level="low",
                     person_id=person_id,
                     name=name,
-                    reason=f"Known visitor: {name}. High confidence match.",
+                    reason=f"Known visitor: {name}. High confidence match (similarity={similarity:.2%}).",
+                    should_alert=False,
+                    should_register=False
+                )
+            elif similarity >= settings.MATCH_THRESHOLD:
+                return DecisionResult(
+                    status="known_visitor",
+                    alert_level="low",
+                    person_id=person_id,
+                    name=name,
+                    reason=f"Known visitor: {name}. Match above threshold (similarity={similarity:.2%}).",
                     should_alert=False,
                     should_register=False
                 )
@@ -264,10 +276,10 @@ class PolicyAgent(BaseAgent):
         # ═══════════════════════════════════════════════════════
         # RULE 9: Unknown during office hours (default)
         # ═══════════════════════════════════════════════════════
-            return DecisionResult(
-                status="unknown",
-                alert_level="medium",
-                reason="Unknown person detected",
-                should_alert=True,
-                should_register=True
-            )
+        return DecisionResult(
+            status="unknown",
+            alert_level="medium",
+            reason="Unknown person detected",
+            should_alert=True,
+            should_register=True
+        )

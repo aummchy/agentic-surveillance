@@ -117,22 +117,38 @@ def save_image(image: np.ndarray, path: str) -> bool:
         return False
 
 
+def _put_label_with_bg(img, text, pos, font_scale, color, thickness=1, bg_color=(0, 0, 0)):
+    """Draw text with a filled background rectangle for readability."""
+    (tx, ty) = pos
+    (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+    # Ensure label stays within frame bounds
+    ty = max(th + 4, ty)
+    cv2.rectangle(img, (tx, ty - th - 4), (tx + tw + 4, ty + 2), bg_color, -1)
+    cv2.putText(img, text, (tx + 2, ty - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
+
+
 def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) -> np.ndarray:
+    if not tracks:
+        return frame
     annotated = frame.copy()
     for track in tracks:
         x1, y1, x2, y2 = map(int, track.person_box)
         color = (0, 0, 255)
-        if track.decision in ("authorized", "verified"):
+        border_thickness = 2
+        is_verified = track.decision in ("authorized", "verified")
+
+        if is_verified:
             color = (0, 255, 0)
+            border_thickness = 3
         elif track.decision == "known_visitor":
             color = (0, 255, 255)
+            border_thickness = 2
         if track.is_masked or track.decision in ("masked_unknown", "intentionally_hidden", "blacklist"):
             color = (0, 0, 255)
 
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, border_thickness)
 
         name = getattr(track, 'person_name', None)
-        # Show short numeric ID (last part of composite ID)
         short_id = track.track_id.rsplit("_", 1)[-1] if "_" in track.track_id else track.track_id
         label = f"ID:{short_id}"
         if name:
@@ -160,8 +176,10 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
         if track.is_masked:
             label += " MASK"
 
-        cv2.putText(annotated, label, (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        if is_verified:
+            _put_label_with_bg(annotated, label, (x1, y1 - 8), 0.55, (255, 255, 255), 2, (0, 140, 0))
+        else:
+            _put_label_with_bg(annotated, label, (x1, y1 - 8), 0.45, color, 1, (0, 0, 0))
 
     return annotated
 

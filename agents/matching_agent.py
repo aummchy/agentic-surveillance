@@ -1,7 +1,10 @@
+import structlog
 import numpy as np
 from pipeline.models import MatchResult, EmbeddingResult
 from utils.db_utils import vector_search
 from utils.embedding_utils import get_insightface
+
+logger = structlog.get_logger(__name__)
 
 
 def run_matching(embedding_result: EmbeddingResult) -> MatchResult:
@@ -39,6 +42,14 @@ def run_matching_from_embedding(embedding: list) -> MatchResult:
         return MatchResult(matched=False)
 
     best = matches[0]
+    logger.info("match_found",
+                person_id=best.get("person_id"),
+                name=best.get("name"),
+                role=best.get("role"),
+                tags=best.get("tags", []),
+                similarity=round(best.get("similarity_score", 0.0), 4),
+                verified=best.get("verified", False),
+                alert_level=best.get("alert_level", "low"))
     return MatchResult(
         person_id=best.get("person_id"),
         name=best.get("name"),

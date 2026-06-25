@@ -73,6 +73,12 @@ function EventLog({ refreshKey }) {
     }
   }
 
+  const getImageUrl = (url) => {
+    if (!url) return null
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
+    return `http://localhost:8000/${url}`
+  }
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'verified': return '\u2713'
@@ -125,9 +131,9 @@ function EventLog({ refreshKey }) {
         <div className="events-list">
           {events.map((event) => (
             <div key={event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
-              {event.image_url || event.person_image ? (
+              {getImageUrl(event.image_url || event.person_image) ? (
                 <img
-                  src={event.image_url || event.person_image}
+                  src={getImageUrl(event.image_url || event.person_image)}
                   alt="Event"
                   className="event-image"
                 />

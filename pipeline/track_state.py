@@ -88,19 +88,23 @@ class TrackState:
 
     def set_best_face(self, composite_id: str, face_crop: np.ndarray,
                       face_score: float, full_frame: np.ndarray, face_ratio: float):
-        # Encode JPEG outside the lock (expensive operation)
-        _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if not track or face_score <= track.best_face_score + 0.1:
+                return
+
+        # Encode JPEG outside the lock (expensive operation) — only if score improved significantly
+        _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         jpeg_bytes = jpeg_buf.tobytes()
 
         with self._lock:
             track = self._tracks.get(composite_id)
-            if track:
-                if face_score > track.best_face_score:
-                    track.best_face_crop = face_crop
-                    track.best_face_score = face_score
-                    track.best_full_frame = full_frame
-                    track.best_face_ratio = face_ratio
-                    track.best_frame_jpeg = jpeg_bytes
+            if track and face_score > track.best_face_score:
+                track.best_face_crop = face_crop
+                track.best_face_score = face_score
+                track.best_full_frame = full_frame
+                track.best_face_ratio = face_ratio
+                track.best_frame_jpeg = jpeg_bytes
 
     def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False):
         with self._lock:

@@ -109,12 +109,18 @@ class CameraAgent:
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
-                    logger.debug("progressive_recognition_scheduled",
-                               track_id=track.track_id,
-                               frame=self._frame_count)
-                    self._recognition_executor.submit(
-                        self._progressive_recognition, frame.copy(), track
-                    )
+                    # Skip recognition if already matched with high confidence
+                    if track.pending_match_result and track.pending_match_result.similarity_score > 0.85:
+                        logger.debug("skip_recognition_already_matched",
+                                   track_id=track.track_id,
+                                   similarity=track.pending_match_result.similarity_score)
+                    else:
+                        logger.debug("progressive_recognition_scheduled",
+                                   track_id=track.track_id,
+                                   frame=self._frame_count)
+                        self._recognition_executor.submit(
+                            self._progressive_recognition, frame.copy(), track
+                        )
 
             expired = self.track_state.get_expired_tracks()
             for track in expired:
@@ -123,12 +129,14 @@ class CameraAgent:
                         self._finalized_track_ids.add(track.track_id)
                         self._recognition_executor.submit(self._finalize_track, track)
 
+            all_tracks = self.track_state.get_all()
+
             # Prune _finalized_track_ids to only keep active tracks
-            active_track_ids = {t.track_id for t in self.track_state.get_all()}
+            active_track_ids = {t.track_id for t in all_tracks}
             with self._track_sets_lock:
                 self._finalized_track_ids &= active_track_ids
 
-            annotated = draw_annotations(frame, self.track_state.get_all())
+            annotated = draw_annotations(frame, all_tracks)
             if self.on_frame_annotated:
                 self.on_frame_annotated(annotated)
 
@@ -150,25 +158,26 @@ class CameraAgent:
 
             app = get_insightface()
 
-            # Run detection once per image, apply thresholds in Python
-            detected_in_person_crop = True
-            crop_faces = app.detect_faces_raw(person_crop, min_score=0.0)
-            frame_faces = app.detect_faces_raw(frame, min_score=0.0) if not crop_faces else []
+            # Run detection on crop with reasonable threshold first
+            crop_faces = app.detect_faces_raw(person_crop, min_score=settings.DET_SCORE_RELAXED)
+            frame_faces = [] if crop_faces else app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED)
 
             best = None
+            detected_in_person_crop = False
             if crop_faces:
                 # Try standard threshold on crop
                 best = next((f for f in crop_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
                 if best:
+                    detected_in_person_crop = True
                     logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
                 else:
                     # Try relaxed threshold on crop
                     best = crop_faces[0] if crop_faces[0]["det_score"] >= settings.DET_SCORE_RELAXED else None
                     if best:
+                        detected_in_person_crop = True
                         logger.info("face_found_relaxed_crop", track_id=track.track_id, score=best["det_score"])
 
             if not best and frame_faces:
-                detected_in_person_crop = False
                 # Try standard threshold on full frame
                 best = next((f for f in frame_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
                 if best:
@@ -243,15 +252,21 @@ class CameraAgent:
             from agents.matching_agent import run_matching_from_embedding
             match_result = run_matching_from_embedding(embedding_list)
 
-            # Phase 2.2: Use Memory Agent for context
+            # Phase 2.2: Use Memory Agent for context (skip for high-confidence matches)
             memory_context = {}
             if match_result.matched and match_result.person_id:
-                memory_context = self.memory_agent.run({
-                    "person_id": match_result.person_id,
-                    "camera_id": settings.CAMERA_ID,
-                    "similarity": match_result.similarity_score,
-                    "status": "known" if match_result.matched else "unknown",
-                })
+                if match_result.similarity_score > 0.80:
+                    logger.debug("skip_memory_high_confidence",
+                               track_id=track.track_id,
+                               similarity=match_result.similarity_score)
+                    memory_context = {"skip_reason": "high_confidence", "confidence_boost": 0}
+                else:
+                    memory_context = self.memory_agent.run({
+                        "person_id": match_result.person_id,
+                        "camera_id": settings.CAMERA_ID,
+                        "similarity": match_result.similarity_score,
+                        "status": "known" if match_result.matched else "unknown",
+                    })
 
             # Phase 2.1: Use Recognition Agent with memory context
             track_duration = time.time() - track.first_seen
@@ -274,13 +289,16 @@ class CameraAgent:
             if match_result.matched and match_result.name:
                 self.track_state.set_person_name(track.track_id, match_result.name)
 
-            if decision.should_alert and not track.alerted:
+            # Only dispatch CRITICAL alerts (blacklist) during progressive recognition.
+            # All other alerts are deferred to finalization to avoid premature alerts
+            # for verified/known users when early recognition attempts produce low similarity.
+            if decision.should_alert and decision.alert_level == "critical" and not track.alerted:
                 with self._track_sets_lock:
                     already_finalized = track.track_id in self._finalized_track_ids
                 if not already_finalized:
                     from agents.alert_agent import dispatch
                     from utils.image_utils import upload_to_cloudinary, save_image
-                    image_url = track.image_url  # Reuse if already uploaded
+                    image_url = track.image_url
                     if not image_url and track.best_full_frame is not None:
                         save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
                         image_url = upload_to_cloudinary(track.best_full_frame)
@@ -289,8 +307,17 @@ class CameraAgent:
                         track.image_url = image_url
                     dispatch(track, decision, image_url)
                     self.track_state.set_decision(track.track_id, decision.status, True)
+                    logger.info("progressive_critical_alert",
+                                track_id=track.track_id,
+                                alert_level=decision.alert_level,
+                                status=decision.status)
             else:
                 self.track_state.set_decision(track.track_id, decision.status, track.alerted)
+                if decision.should_alert:
+                    logger.debug("progressive_alert_deferred_to_finalization",
+                                 track_id=track.track_id,
+                                 alert_level=decision.alert_level,
+                                 status=decision.status)
 
             self.track_state.set_pending_recognition(
                 track.track_id,
@@ -324,7 +351,7 @@ class CameraAgent:
                 if track.best_face_crop is not None:
                     try:
                         resized = resize_image(track.best_face_crop)
-                        crop_faces = app.detect_faces_raw(resized, min_score=0.0)
+                        crop_faces = app.detect_faces_raw(resized, min_score=settings.DET_SCORE_RELAXED)
                     except Exception as e:
                         logger.debug("best_face_crop_detect_failed", track_id=track.track_id, error=str(e))
 
@@ -332,7 +359,7 @@ class CameraAgent:
                 frame_faces = []
                 if not crop_faces and track.best_full_frame is not None:
                     try:
-                        frame_faces = app.detect_faces_raw(track.best_full_frame, min_score=0.0)
+                        frame_faces = app.detect_faces_raw(track.best_full_frame, min_score=settings.DET_SCORE_RELAXED)
                     except Exception as e:
                         logger.debug("best_full_frame_detect_failed", track_id=track.track_id, error=str(e))
 

@@ -10,10 +10,17 @@ router = APIRouter()
 
 connected_clients: Set[WebSocket] = set()
 MAX_FRAME_SIZE = 1024 * 1024  # 1MB max frame size
+_frame_counter = 0
+FRAME_SKIP = 2  # broadcast every Nth frame to reduce load
 
 
 async def broadcast_frame(frame_data: bytes):
+    global _frame_counter
     if not connected_clients:
+        return
+
+    _frame_counter += 1
+    if _frame_counter % FRAME_SKIP != 0:
         return
 
     if len(frame_data) > MAX_FRAME_SIZE:
@@ -27,7 +34,7 @@ async def broadcast_frame(frame_data: bytes):
 
     async def _send(client):
         try:
-            await asyncio.wait_for(client.send_text(message), timeout=0.5)
+            await asyncio.wait_for(client.send_text(message), timeout=1.0)
             return client, True
         except (asyncio.TimeoutError, Exception):
             return client, False

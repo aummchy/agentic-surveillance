@@ -14,9 +14,13 @@ Usage:
 import json
 import structlog
 import httpx
+import time
 from typing import Optional, Dict, Any
 
 from config import settings
+
+_avail_cache_ts = 0.0
+_avail_cache_val = False
 
 logger = structlog.get_logger(__name__)
 
@@ -328,13 +332,19 @@ Executive summary:"""
 
 
 def is_available() -> bool:
-    """Check if Ollama is reachable."""
+    """Check if Ollama is reachable (cached for 10s)."""
+    global _avail_cache_ts, _avail_cache_val
+    now = time.monotonic()
+    if now - _avail_cache_ts < 10.0:
+        return _avail_cache_val
     try:
         client = _get_client()
         resp = client.get("/api/tags", timeout=3.0)
-        return resp.status_code == 200
+        _avail_cache_val = resp.status_code == 200
     except Exception:
-        return False
+        _avail_cache_val = False
+    _avail_cache_ts = now
+    return _avail_cache_val
 
 
 def shutdown():

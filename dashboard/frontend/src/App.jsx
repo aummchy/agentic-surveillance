@@ -13,6 +13,12 @@ function App() {
   const [stats, setStats] = useState({ total_unknown: 0, total_verified: 0, events_today: 0, unknown_today: 0 })
   const [notifications, setNotifications] = useState([])
   const [activeAlert, setActiveAlert] = useState(null)
+
+  const getImageUrl = (url) => {
+    if (!url) return null
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
+    return `http://localhost:8000/${url}`
+  }
   const [liveFrame, setLiveFrame] = useState(null)
   const [wsConnected, setWsConnected] = useState(false)
   const wsRef = useRef(null)
@@ -142,7 +148,7 @@ function App() {
           </div>
           <div className="notification-body">
             {activeAlert.image_url && (
-              <img src={activeAlert.image_url} alt="Unknown" className="notification-image" />
+              <img src={getImageUrl(activeAlert.image_url)} alt="Unknown" className="notification-image" />
             )}
             <div className="notification-details">
               <div className="notification-time">
@@ -190,7 +196,7 @@ function App() {
           {notifications.map((n, i) => (
             <div key={n.timestamp + i} className="notification-sidebar-item" onClick={() => dismissNotification(i)}>
               <div className="notif-img-wrap">
-                {n.image_url && <img src={n.image_url} alt="" className="notif-thumb" />}
+                {n.image_url && <img src={getImageUrl(n.image_url)} alt="" className="notif-thumb" />}
               </div>
               <div className="notif-info">
                 <div className="notif-label">
