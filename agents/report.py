@@ -89,8 +89,8 @@ class ReportAgent(BaseAgent):
         if person_id:
             try:
                 memory_context = get_visit_history(person_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("visit_history_fetch_failed", person_id=person_id, error=str(e))
 
         visit_count = memory_context.get("visit_count", 0)
         last_seen = memory_context.get("last_seen")

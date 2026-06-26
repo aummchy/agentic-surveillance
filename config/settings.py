@@ -159,6 +159,11 @@ VISIBLE_FACE_RATIO = float(os.getenv("VISIBLE_FACE_RATIO", "0.025"))
 PARTIAL_FACE_RATIO = float(os.getenv("PARTIAL_FACE_RATIO", "0.010"))
 MIN_TRACK_FRAMES = int(os.getenv("MIN_TRACK_FRAMES", "30"))
 
+# Office hours (policy agent)
+OFFICE_HOURS_START = int(os.getenv("OFFICE_HOURS_START", "9"))
+OFFICE_HOURS_END = int(os.getenv("OFFICE_HOURS_END", "17"))
+OFFICE_DAYS = [int(d.strip()) for d in os.getenv("OFFICE_DAYS", "0,1,2,3,4").split(",")]
+
 ALERT_CHANNELS = [ch.strip() for ch in os.getenv("ALERT_CHANNELS", "console").split(",")]
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
 ALERT_COOLDOWN_SECS = float(os.getenv("ALERT_COOLDOWN_SECS", "60"))

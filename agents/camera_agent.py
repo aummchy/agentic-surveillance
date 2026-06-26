@@ -2,7 +2,6 @@ import cv2
 import time
 import structlog
 import threading
-import queue
 import concurrent.futures
 import numpy as np
 from config import settings
@@ -68,7 +67,7 @@ class CameraAgent:
     def stop(self):
         self._running = False
         self._stop_event.set()
-        self._recognition_executor.shutdown(wait=False)
+        self._recognition_executor.shutdown(wait=True)
         if self._cap:
             self._cap.release()
         logger.info("camera_stopped")
@@ -109,18 +108,24 @@ class CameraAgent:
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
-                    # Skip recognition if already matched with high confidence
-                    if track.pending_match_result and track.pending_match_result.similarity_score > 0.85:
-                        logger.debug("skip_recognition_already_matched",
+                    # Skip recognition if already verified/known or high-confidence match
+                    already_resolved = track.decision in ("verified", "known")
+                    high_confidence = track.pending_match_result and track.pending_match_result.similarity_score > 0.85
+                    if already_resolved or high_confidence:
+                        logger.debug("skip_recognition_resolved",
                                    track_id=track.track_id,
-                                   similarity=track.pending_match_result.similarity_score)
+                                   decision=track.decision,
+                                   similarity=track.pending_match_result.similarity_score if track.pending_match_result else None)
                     else:
-                        logger.debug("progressive_recognition_scheduled",
-                                   track_id=track.track_id,
-                                   frame=self._frame_count)
-                        self._recognition_executor.submit(
-                            self._progressive_recognition, frame.copy(), track
-                        )
+                        with self._track_sets_lock:
+                            already_recognizing = track.track_id in self._recognizing_tracks
+                        if not already_recognizing:
+                            logger.debug("progressive_recognition_scheduled",
+                                       track_id=track.track_id,
+                                       frame=self._frame_count)
+                            self._recognition_executor.submit(
+                                self._progressive_recognition, frame.copy(), track
+                            )
 
             expired = self.track_state.get_expired_tracks()
             for track in expired:
@@ -338,6 +343,15 @@ class CameraAgent:
         finally:
             with self._track_sets_lock:
                 self._recognizing_tracks.discard(track.track_id)
+                # If the track expired while recognition was running, it was skipped by
+                # _loop (line 128) because it was in _recognizing_tracks. Now that recognition
+                # is done, we must finalize it to ensure an event is always logged.
+                if track.track_id not in self._finalized_track_ids and self.track_state.get(track.track_id) is None:
+                    self._finalized_track_ids.add(track.track_id)
+                    try:
+                        self._recognition_executor.submit(self._finalize_track, track)
+                    except RuntimeError:
+                        logger.debug("finalize_submit_after_shutdown", track_id=track.track_id)
 
     def _finalize_track(self, track: Track):
         try:

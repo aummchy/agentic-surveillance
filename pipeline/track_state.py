@@ -148,22 +148,3 @@ class TrackState:
             track = self._tracks.get(composite_id)
             if track:
                 track.pending_memory_context = memory_context
-
-    def classify_visibility(self, composite_id: str) -> str:
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if not track:
-                return "unknown"
-
-            if track.max_face_ratio >= settings.VISIBLE_FACE_RATIO:
-                track.visibility = "visible"
-            elif track.max_face_ratio >= settings.PARTIAL_FACE_RATIO:
-                track.visibility = "partial"
-            elif track.is_masked or track.face_detected_once:
-                track.visibility = "partial"
-            elif not track.face_detected_once and track.total_frames_seen >= settings.MIN_TRACK_FRAMES:
-                track.visibility = "hidden"
-            else:
-                track.visibility = "unknown"
-
-            return track.visibility

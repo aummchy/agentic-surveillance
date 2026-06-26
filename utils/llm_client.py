@@ -15,6 +15,7 @@ import json
 import structlog
 import httpx
 import time
+import threading
 from typing import Optional, Dict, Any
 
 from config import settings
@@ -27,25 +28,40 @@ logger = structlog.get_logger(__name__)
 # Module-level client for connection pooling
 _client: Optional[httpx.Client] = None
 _async_client: Optional[httpx.AsyncClient] = None
+_client_lock = threading.Lock()
+_async_client_lock = threading.Lock()
+_shut_down = False
 
 
 def _get_client() -> httpx.Client:
-    global _client
+    global _client, _shut_down
+    if _shut_down:
+        raise RuntimeError("llm_client has been shut down")
     if _client is None or _client.is_closed:
-        _client = httpx.Client(
-            base_url=settings.OLLAMA_URL,
-            timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
-        )
+        with _client_lock:
+            if _shut_down:
+                raise RuntimeError("llm_client has been shut down")
+            if _client is None or _client.is_closed:
+                _client = httpx.Client(
+                    base_url=settings.OLLAMA_URL,
+                    timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
+                )
     return _client
 
 
 def _get_async_client() -> httpx.AsyncClient:
-    global _async_client
+    global _async_client, _shut_down
+    if _shut_down:
+        raise RuntimeError("llm_client has been shut down")
     if _async_client is None or _async_client.is_closed:
-        _async_client = httpx.AsyncClient(
-            base_url=settings.OLLAMA_URL,
-            timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
-        )
+        with _async_client_lock:
+            if _shut_down:
+                raise RuntimeError("llm_client has been shut down")
+            if _async_client is None or _async_client.is_closed:
+                _async_client = httpx.AsyncClient(
+                    base_url=settings.OLLAMA_URL,
+                    timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
+                )
     return _async_client
 
 
@@ -349,8 +365,19 @@ def is_available() -> bool:
 
 def shutdown():
     """Close HTTP clients on process exit."""
-    global _client, _async_client
+    global _client, _async_client, _shut_down
+    _shut_down = True
     if _client and not _client.is_closed:
         _client.close()
     _client = None
+    if _async_client and not _async_client.is_closed:
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_async_client.aclose())
+            else:
+                loop.run_until_complete(_async_client.aclose())
+        except RuntimeError:
+            pass
     _async_client = None

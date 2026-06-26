@@ -1,5 +1,6 @@
 import structlog
 import uuid
+import threading
 from datetime import datetime
 from typing import Optional
 from pymongo import MongoClient
@@ -13,40 +14,52 @@ _client: Optional[MongoClient] = None
 _faces_collection: Optional[Collection] = None
 _events_collection: Optional[Collection] = None
 _memory_collection: Optional[Collection] = None
+_client_lock = threading.Lock()
+_collection_locks = {
+    "faces": threading.Lock(),
+    "events": threading.Lock(),
+    "memory": threading.Lock(),
+}
 
 
 def get_client() -> MongoClient:
     global _client
     if _client is None:
-        _client = MongoClient(settings.MONGODB_URI)
+        with _client_lock:
+            if _client is None:
+                _client = MongoClient(settings.MONGODB_URI)
     return _client
 
 
 def close_client():
     """Close MongoDB client on shutdown."""
     global _client
-    if _client is not None:
-        _client.close()
-        _client = None
+    with _client_lock:
+        if _client is not None:
+            _client.close()
+            _client = None
 
 
 def get_faces_collection() -> Collection:
     global _faces_collection
     if _faces_collection is None:
-        db = get_client()[settings.MONGODB_DATABASE]
-        _faces_collection = db[settings.MONGODB_COLLECTION]
+        with _collection_locks["faces"]:
+            if _faces_collection is None:
+                db = get_client()[settings.MONGODB_DATABASE]
+                _faces_collection = db[settings.MONGODB_COLLECTION]
     return _faces_collection
 
 
 def get_events_collection() -> Collection:
     global _events_collection
     if _events_collection is None:
-        db = get_client()[settings.MONGODB_DATABASE]
-        _events_collection = db[settings.MONGODB_EVENTS_COLLECTION]
-        # Create indexes for efficient queries
-        _events_collection.create_index("track_id")
-        _events_collection.create_index("timestamp")
-        _events_collection.create_index("status")
+        with _collection_locks["events"]:
+            if _events_collection is None:
+                db = get_client()[settings.MONGODB_DATABASE]
+                _events_collection = db[settings.MONGODB_EVENTS_COLLECTION]
+                _events_collection.create_index("track_id")
+                _events_collection.create_index("timestamp")
+                _events_collection.create_index("status")
     return _events_collection
 
 
@@ -54,11 +67,12 @@ def get_memory_collection() -> Collection:
     """Get the memory collection for visit history tracking."""
     global _memory_collection
     if _memory_collection is None:
-        db = get_client()[settings.MONGODB_DATABASE]
-        _memory_collection = db["visit_memory"]
-        # Create indexes for efficient queries
-        _memory_collection.create_index("person_id", unique=True)
-        _memory_collection.create_index("last_seen")
+        with _collection_locks["memory"]:
+            if _memory_collection is None:
+                db = get_client()[settings.MONGODB_DATABASE]
+                _memory_collection = db["visit_memory"]
+                _memory_collection.create_index("person_id", unique=True)
+                _memory_collection.create_index("last_seen")
     return _memory_collection
 
 
@@ -68,25 +82,26 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
     logger.info("vector_search_started", embedding_len=len(embedding), filter_role=filter_role)
 
     try:
+        vector_stage = {
+            "$vectorSearch": {
+                "index": "vector_index",
+                "path": "latest_embedding",
+                "queryVector": embedding,
+                "numCandidates": limit * 10,
+                "limit": limit
+            }
+        }
+        if filter_role:
+            vector_stage["$vectorSearch"]["filter"] = {"role": filter_role}
+
         pipeline = [
-            {
-                "$vectorSearch": {
-                    "index": "vector_index",
-                    "path": "latest_embedding",
-                    "queryVector": embedding,
-                    "numCandidates": limit * 10,
-                    "limit": limit
-                }
-            },
+            vector_stage,
             {
                 "$addFields": {
                     "score": {"$meta": "vectorSearchScore"}
                 }
             }
         ]
-
-        if filter_role:
-            pipeline.append({"$match": {"role": filter_role}})
 
         results = list(collection.aggregate(pipeline, maxTimeMS=5000))
 
@@ -255,7 +270,8 @@ def find_similar_faces(embedding: list, threshold: float = None) -> list:
 
 def store_face(person_id: str, name: str, role: str, embedding: list,
                image_url: str, tags: list = None, quality_scores: dict = None,
-               camera_id: str = None, skip_search: bool = False) -> str:
+               camera_id: str = None, skip_search: bool = False,
+               quality_score: float = None) -> str:
     collection = get_faces_collection()
 
     # Skip vector search if caller already has match results (avoids redundant query)
@@ -272,7 +288,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
                 existing_id = m["person_id"]
                 existing = collection.find_one({"person_id": existing_id}, {"role": 1})
                 if existing and existing.get("role") == "unknown":
-                    update_face(existing_id, image_url, embedding)
+                    update_face(existing_id, image_url, embedding, quality_score=quality_score)
                     logger.info("store_face_merged_unknown", person_id=existing_id,
                                  similarity=m["similarity_score"])
                     return existing_id
@@ -283,7 +299,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
                 existing_id = m["person_id"]
                 existing = collection.find_one({"person_id": existing_id}, {"role": 1, "verified": 1})
                 if existing:
-                    update_face(existing_id, image_url, embedding)
+                    update_face(existing_id, image_url, embedding, quality_score=quality_score)
                     logger.info("store_face_merged_existing", person_id=existing_id,
                                  similarity=m["similarity_score"], verified=existing.get("verified", False))
                     return existing_id
@@ -294,6 +310,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
         "role": role,
         "embeddings": [embedding],
         "latest_embedding": embedding,
+        "latest_embedding_quality": quality_score if quality_score is not None else 0.0,
         "embedding_model": "arcface",
         "images": [{"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}],
         "source": {"camera_id": camera_id, "captured_at": datetime.utcnow()},
@@ -314,7 +331,8 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
 
 def update_face(person_id: str, image_url: str = None, embedding: list = None,
                 name: str = None, tags: list = None, verified: bool = None,
-                alert_level: str = None, verified_by: str = None):
+                alert_level: str = None, verified_by: str = None,
+                quality_score: float = None):
     collection = get_faces_collection()
 
     update_ops = {"$set": {"updated_at": datetime.utcnow()}}
@@ -337,7 +355,20 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
         push_ops["images"] = {"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}
     if embedding:
         push_ops["embeddings"] = embedding
-        update_ops["$set"]["latest_embedding"] = embedding
+
+        # Quality-gated: only overwrite latest_embedding if new quality is higher
+        if quality_score is not None:
+            existing = collection.find_one(
+                {"person_id": person_id},
+                {"latest_embedding_quality": 1}
+            )
+            current_quality = (existing or {}).get("latest_embedding_quality", 0.0)
+            if quality_score > current_quality:
+                update_ops["$set"]["latest_embedding"] = embedding
+                update_ops["$set"]["latest_embedding_quality"] = quality_score
+        else:
+            # No quality info — always update (backward compat)
+            update_ops["$set"]["latest_embedding"] = embedding
 
     if push_ops:
         update_ops["$push"] = push_ops
@@ -506,32 +537,30 @@ def get_stats() -> dict:
 # ══════════════════════════════════════════════════════════════
 
 def get_or_create_memory(person_id: str) -> dict:
-    """Get existing memory or create a new one for a person."""
+    """Get existing memory or create a new one for a person (atomic upsert)."""
     collection = get_memory_collection()
-    
-    memory = collection.find_one({"person_id": person_id})
-    if memory:
-        return memory
-    
-    # Create new memory document
-    new_memory = {
-        "person_id": person_id,
-        "visit_count": 0,
-        "first_seen": datetime.utcnow(),
-        "last_seen": datetime.utcnow(),
-        "last_camera": None,
-        "last_status": None,
-        "typical_hours": [],        # hours when person is usually seen
-        "typical_cameras": [],      # cameras where person is usually seen
-        "avg_similarity": 0.0,      # average similarity across visits
-        "similarity_history": [],   # last N similarity scores
-        "status_history": [],       # last N statuses
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
-    }
-    
-    collection.insert_one(new_memory)
-    return new_memory
+    now = datetime.utcnow()
+
+    result = collection.find_one_and_update(
+        {"person_id": person_id},
+        {"$setOnInsert": {
+            "visit_count": 0,
+            "first_seen": now,
+            "last_seen": now,
+            "last_camera": None,
+            "last_status": None,
+            "typical_hours": [],
+            "typical_cameras": [],
+            "avg_similarity": 0.0,
+            "similarity_history": [],
+            "status_history": [],
+            "created_at": now,
+            "updated_at": now,
+        }},
+        upsert=True,
+        return_document=True,
+    )
+    return result
 
 
 def update_visit_memory(person_id: str, camera_id: str, status: str,

@@ -82,28 +82,6 @@ def crop_person(frame: np.ndarray, box: tuple) -> np.ndarray:
     return frame[y1:y2, x1:x2].copy()
 
 
-def crop_face_region(person_crop: np.ndarray, face_bbox: tuple, person_box: tuple) -> np.ndarray:
-    fx1, fy1, fx2, fy2 = map(int, face_bbox)
-    px1, py1, px2, py2 = map(int, person_box)
-
-    abs_fx1 = px1 + fx1
-    abs_fy1 = py1 + fy1
-    abs_fx2 = px1 + fx2
-    abs_fy2 = py1 + fy2
-
-    abs_fx1 = max(0, abs_fx1)
-    abs_fy1 = max(0, abs_fy1)
-
-    h, w = person_crop.shape[:2]
-    abs_fx2 = min(w, abs_fx2)
-    abs_fy2 = min(h, abs_fy2)
-
-    if abs_fx2 <= abs_fx1 or abs_fy2 <= abs_fy1:
-        return person_crop
-
-    return person_crop[abs_fy1:abs_fy2, abs_fx1:abs_fx2].copy()
-
-
 def resize_image(image: np.ndarray, target_size: tuple = (112, 112)) -> np.ndarray:
     return cv2.resize(image, target_size, interpolation=cv2.INTER_LINEAR)
 

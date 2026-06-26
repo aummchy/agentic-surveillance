@@ -24,6 +24,7 @@ def track_persons(frame: np.ndarray, persist: bool = True) -> list:
         tracker="bytetrack.yaml",
         classes=[0],
         conf=settings.PERSON_CONF_THRESHOLD,
+        iou=0.5,
         device=settings.YOLO_DEVICE,
         verbose=False
     )

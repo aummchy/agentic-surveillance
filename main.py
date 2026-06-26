@@ -26,7 +26,6 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-worker_pool = None
 track_queue = None
 loop = None
 memory_agent = MemoryAgent()
@@ -153,7 +152,8 @@ def process_finalized_track(track: Track):
                     image_url=image_url,
                     tags=tags,
                     camera_id=settings.CAMERA_ID,
-                    skip_search=True
+                    skip_search=True,
+                    quality_score=track.best_face_score if track.best_face_score > 0 else None
                 )
                 logger.info("store_face_success",
                             track_id=track.track_id,

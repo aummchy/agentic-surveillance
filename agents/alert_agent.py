@@ -20,7 +20,8 @@ _alert_lock = threading.Lock()
 
 
 def _prune_stale_alerts():
-    """Remove entries older than 2x cooldown to prevent unbounded growth."""
+    """Remove entries older than 2x cooldown to prevent unbounded growth.
+    Must be called while holding _alert_lock."""
     global _last_prune_time
     now = time.time()
     if now - _last_prune_time < settings.ALERT_COOLDOWN_SECS * 2:
@@ -38,14 +39,14 @@ _UNVERIFIED_STATUSES = {"unknown", "masked_unknown", "uncertain", "intentionally
 
 
 def should_send_alert(track_id: str, alert_level: str, status: str = None) -> bool:
-    _prune_stale_alerts()
     now = time.time()
-    # Global dedup for unverified/unknown alerts — only one at a time
-    if status in _UNVERIFIED_STATUSES:
-        key = "global:unverified"
-    else:
-        key = f"{track_id}:{alert_level}"
     with _alert_lock:
+        _prune_stale_alerts()
+        # Global dedup for unverified/unknown alerts — only one at a time
+        if status in _UNVERIFIED_STATUSES:
+            key = "global:unverified"
+        else:
+            key = f"{track_id}:{alert_level}"
         last = _alert_timestamps.get(key, 0)
         if now - last < settings.ALERT_COOLDOWN_SECS:
             return False
@@ -94,8 +95,8 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
                 nl = llm_client.generate_nl_summary(payload)
                 if nl:
                     decision.nl_summary = nl
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("nl_summary_generation_failed", error=str(e))
 
         for channel in async_channels:
             try:

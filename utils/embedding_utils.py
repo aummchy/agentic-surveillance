@@ -32,9 +32,27 @@ class InsightFaceSingleton:
                                                           settings.INSIGHTFACE_DET_SIZE))
                     InsightFaceSingleton._initialized = True
 
+    @staticmethod
+    def _apply_clahe(image: np.ndarray) -> np.ndarray:
+        """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to improve
+        face detection and embedding quality in variable lighting."""
+        if image is None or len(image.shape) < 2:
+            return image
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+            l_channel = lab[:, :, 0]
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            lab[:, :, 0] = clahe.apply(l_channel)
+            return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        elif len(image.shape) == 2:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            return clahe.apply(image)
+        return image
+
     def detect_and_embed(self, image: np.ndarray) -> EmbeddingResult:
         try:
             h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
+            image = self._apply_clahe(image)
             faces = self.app.get(image)
 
             if not faces:
@@ -83,55 +101,10 @@ class InsightFaceSingleton:
                 error=str(e)
             )
 
-    def detect_and_embed_relaxed(self, image: np.ndarray, min_score: float = 0.20) -> EmbeddingResult:
-        try:
-            h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
-            faces = self.app.get(image)
-
-            if not faces:
-                return EmbeddingResult(
-                    face_detected=False,
-                    error="No face detected (relaxed)"
-                )
-
-            best_face = max(faces, key=lambda f: f.det_score)
-            logger.debug("relaxed_face_detected",
-                        det_score=best_face.det_score,
-                        min_score=min_score,
-                        faces_found=len(faces),
-                        width=w,
-                        height=h)
-
-            if best_face.det_score < min_score:
-                return EmbeddingResult(
-                    face_detected=True,
-                    detection_score=float(best_face.det_score),
-                    error=f"Detection score {best_face.det_score:.3f} below relaxed threshold {min_score}"
-                )
-
-            embedding = best_face.normed_embedding
-            bbox = tuple(map(int, best_face.bbox))
-            is_masked = self._detect_mask_geometric(best_face.landmark)
-
-            return EmbeddingResult(
-                embedding=embedding,
-                face_detected=True,
-                detection_score=float(best_face.det_score),
-                embedding_score=float(best_face.det_score),
-                bbox=bbox,
-                is_masked=is_masked
-            )
-
-        except Exception as e:
-            logger.error("detect_and_embed_relaxed_failed", error=str(e))
-            return EmbeddingResult(
-                face_detected=False,
-                error=str(e)
-            )
-
     def embed_only(self, image: np.ndarray, det_score: float) -> EmbeddingResult:
         try:
             h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
+            image = self._apply_clahe(image)
             faces = self.app.get(image)
 
             if not faces:
@@ -196,6 +169,7 @@ class InsightFaceSingleton:
         """Run face detection once and return all faces above min_score.
         Each result is a dict with keys: det_score, embedding, bbox, is_masked."""
         try:
+            image = self._apply_clahe(image)
             faces = self.app.get(image)
             if not faces:
                 return []
@@ -214,11 +188,6 @@ class InsightFaceSingleton:
         except Exception as e:
             logger.error("detect_faces_raw_failed", error=str(e))
             return []
-
-    def compare_embeddings(self, emb1: np.ndarray, emb2: np.ndarray) -> float:
-        emb1 = emb1 / (np.linalg.norm(emb1) + 1e-6)
-        emb2 = emb2 / (np.linalg.norm(emb2) + 1e-6)
-        return float(np.dot(emb1, emb2))
 
 
 def get_insightface() -> InsightFaceSingleton:

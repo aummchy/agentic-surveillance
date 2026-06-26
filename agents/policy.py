@@ -77,8 +77,8 @@ class PolicyAgent(BaseAgent):
         # Get current time context
         now = datetime.utcnow()
         current_hour = now.hour
-        is_office_hours = 9 <= current_hour <= 17
-        is_weekday = now.weekday() < 5  # Monday=0, Friday=4
+        is_office_hours = settings.OFFICE_HOURS_START <= current_hour <= settings.OFFICE_HOURS_END
+        is_weekday = now.weekday() in settings.OFFICE_DAYS
 
         result = self._decide(
             recognition=recognition,

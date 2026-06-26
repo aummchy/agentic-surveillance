@@ -9,9 +9,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 import asyncio
+import json
 import structlog
 
 from utils import llm_client
+from config import settings
 from utils.db_utils import (
     get_stats, get_events_with_faces, get_unknown_faces,
     get_visit_history, get_memory_stats, get_face_by_id,
@@ -86,7 +88,6 @@ def _handle_query(user_message: str) -> tuple:
 
     # If we got data, format a prompt for the LLM with context
     if data:
-        import json
         data_str = json.dumps(data, default=str, indent=2)
         prompt = f"Operator question: {user_message}\n\nAvailable data:\n{data_str}"
         reply = llm_client.chat_completion(prompt, system=SYSTEM_PROMPT, max_tokens=300)
@@ -136,4 +137,4 @@ async def chat(request: ChatRequest):
 async def chat_health():
     """Check if the LLM backend is available."""
     available = llm_client.is_available()
-    return {"available": available, "model": "gemma3:4b"}
+    return {"available": available, "model": settings.OLLAMA_MODEL}
