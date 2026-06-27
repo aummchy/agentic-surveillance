@@ -110,7 +110,7 @@ class CameraAgent:
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
                     # Skip recognition if already verified/known or high-confidence match
                     already_resolved = track.decision in ("verified", "known")
-                    high_confidence = track.pending_match_result and track.pending_match_result.similarity_score > 0.85
+                    high_confidence = track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY
                     if already_resolved or high_confidence:
                         logger.debug("skip_recognition_resolved",
                                    track_id=track.track_id,
@@ -150,7 +150,7 @@ class CameraAgent:
             self._recognizing_tracks.add(track.track_id)
         try:
             # Skip InsightFace if already matched with high confidence
-            if track.pending_match_result and track.pending_match_result.similarity_score > 0.80:
+            if track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
                 logger.debug("skip_recognition_high_confidence",
                            track_id=track.track_id,
                            similarity=track.pending_match_result.similarity_score)
@@ -260,7 +260,7 @@ class CameraAgent:
             # Phase 2.2: Use Memory Agent for context (skip for high-confidence matches)
             memory_context = {}
             if match_result.matched and match_result.person_id:
-                if match_result.similarity_score > 0.80:
+                if match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
                     logger.debug("skip_memory_high_confidence",
                                track_id=track.track_id,
                                similarity=match_result.similarity_score)

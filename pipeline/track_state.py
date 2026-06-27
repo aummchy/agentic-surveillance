@@ -94,7 +94,7 @@ class TrackState:
                 return
 
         # Encode JPEG outside the lock (expensive operation) — only if score improved significantly
-        _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
         jpeg_bytes = jpeg_buf.tobytes()
 
         with self._lock:

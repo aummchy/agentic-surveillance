@@ -87,7 +87,7 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
                 "index": "vector_index",
                 "path": "latest_embedding",
                 "queryVector": embedding,
-                "numCandidates": limit * 10,
+                "numCandidates": settings.VECTOR_SEARCH_CANDIDATES,
                 "limit": limit
             }
         }
@@ -140,7 +140,7 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
     if filter_role:
         query["role"] = filter_role
 
-    SCAN_LIMIT = 500
+    SCAN_LIMIT = settings.SCAN_LIMIT
     total_count = collection.count_documents(query)
     all_faces = list(collection.find(query, {"latest_embedding": 1, "person_id": 1,
                                                "name": 1, "role": 1, "tags": 1,
@@ -268,6 +268,19 @@ def find_similar_faces(embedding: list, threshold: float = None) -> list:
     return similar
 
 
+def _compute_mean_embedding(embeddings: list) -> list:
+    """Compute the mean of a list of embeddings (L2-normalized)."""
+    if not embeddings:
+        return []
+    import numpy as np
+    arr = np.array(embeddings, dtype=np.float32)
+    mean = arr.mean(axis=0)
+    norm = np.linalg.norm(mean)
+    if norm < 1e-6:
+        return embeddings[-1] if embeddings else []
+    return (mean / norm).tolist()
+
+
 def store_face(person_id: str, name: str, role: str, embedding: list,
                image_url: str, tags: list = None, quality_scores: dict = None,
                camera_id: str = None, skip_search: bool = False,
@@ -310,6 +323,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
         "role": role,
         "embeddings": [embedding],
         "latest_embedding": embedding,
+        "mean_embedding": embedding,
         "latest_embedding_quality": quality_score if quality_score is not None else 0.0,
         "embedding_model": "arcface",
         "images": [{"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}],
@@ -377,6 +391,17 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
                 "$each": [push_ops["embeddings"]],
                 "$slice": -10
             }
+            # Recompute mean_embedding after adding new embedding
+            existing = collection.find_one(
+                {"person_id": person_id},
+                {"embeddings": 1}
+            )
+            if existing:
+                all_embs = existing.get("embeddings", [])
+                all_embs.append(embedding)  # include the one being added
+                # Keep only last 10
+                all_embs = all_embs[-10:]
+                update_ops["$set"]["mean_embedding"] = _compute_mean_embedding(all_embs)
 
     result = collection.update_one({"person_id": person_id}, update_ops)
     return result.modified_count > 0

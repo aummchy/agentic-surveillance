@@ -198,7 +198,7 @@ class PolicyAgent(BaseAgent):
         # ═══════════════════════════════════════════════════════
         if matched:
             # Check similarity or confidence — high similarity alone is sufficient
-            if similarity >= 0.85 or confidence >= 80:
+            if similarity >= settings.KNOWN_VISITOR_SIMILARITY or confidence >= settings.KNOWN_VISITOR_CONFIDENCE:
                 return DecisionResult(
                     status="known_visitor",
                     alert_level="low",

@@ -94,8 +94,8 @@ class RecognitionAgent(BaseAgent):
             visit_count = memory_context.get("visit_count", 0)
 
         # Case 1: Very high similarity — definitely known
-        if similarity >= 0.90:
-            confidence = min(95, 70 + (similarity - 0.90) * 250 + memory_boost)
+        if similarity >= settings.VERY_HIGH_SIMILARITY:
+            confidence = min(95, 70 + (similarity - settings.VERY_HIGH_SIMILARITY) * 250 + memory_boost)
             return RecognitionResult(
                 status="known",
                 confidence=confidence,
@@ -129,7 +129,7 @@ class RecognitionAgent(BaseAgent):
             )
 
         # Case 3: Below threshold but face quality is high — uncertain
-        if face_quality >= 0.8 and similarity >= settings.MATCH_THRESHOLD * 0.8:
+        if face_quality >= settings.BORDERLINE_FACE_QUALITY and similarity >= settings.MATCH_THRESHOLD * 0.8:
             return RecognitionResult(
                 status="uncertain",
                 confidence=40 + similarity * 30 + memory_boost,
@@ -176,7 +176,7 @@ class RecognitionAgent(BaseAgent):
 
         # Mask penalty
         if is_masked:
-            confidence *= 0.85
+            confidence *= settings.MASK_CONFIDENCE_PENALITY
 
         return max(0, min(100, confidence))
 
@@ -186,14 +186,14 @@ class RecognitionAgent(BaseAgent):
         """Build a human-readable reason string."""
         parts = [base]
 
-        if similarity >= 0.90:
+        if similarity >= settings.VERY_HIGH_SIMILARITY:
             parts.append(f"similarity={similarity:.2%}")
         elif similarity >= settings.MATCH_THRESHOLD:
             parts.append(f"similarity={similarity:.2%} above threshold")
         else:
             parts.append(f"similarity={similarity:.2%} below threshold")
 
-        if face_quality >= 0.8:
+        if face_quality >= settings.BORDERLINE_FACE_QUALITY:
             parts.append("high face quality")
         elif face_quality >= 0.5:
             parts.append("medium face quality")

@@ -180,7 +180,7 @@ Person Detected (YOLO + ByteTrack)
 
 - **Model:** YOLOv8 small (`yolov8s.pt`) — ~22MB, improved small-object detection
 - **Class filter:** Class 0 (person only)
-- **Confidence threshold:** `PERSON_CONF_THRESHOLD = 0.5`
+- **Confidence threshold:** `PERSON_CONF_THRESHOLD = 0.40`
 - **Device:** Configurable (`cpu` or GPU index)
 
 ```python
@@ -208,7 +208,7 @@ A track is considered expired (person left frame) when:
 
 | Condition | Default | Description |
 |-----------|---------|-------------|
-| `(now - last_seen) > TRACK_TIMEOUT_SECS` | 8.0 seconds | No detection for 8 seconds |
+| `(now - last_seen) > TRACK_TIMEOUT_SECS` | 3.0 seconds | No detection for 3 seconds |
 | `(now - first_seen) > MAX_TRACK_SECS` | 300 seconds (5 min) | Maximum track lifetime |
 
 ---
@@ -296,6 +296,11 @@ raw_cosine = (atlas_score × 2) − 1
 
 ```
 overall_score = blur_norm × 0.60 + brightness_norm × 0.25 + area_norm × 0.15
+
+where:
+  blur_norm     = min(Laplacian_var / 1000, 1.0)
+  brightness_norm = V_channel_mean / 255.0
+  area_norm     = min(face_area / 10000, 1.0)
 ```
 
 ### Validity Criteria (all must pass)
@@ -304,12 +309,12 @@ overall_score = blur_norm × 0.60 + brightness_norm × 0.25 + area_norm × 0.15
 |-----------|-----------|
 | Blur (Laplacian variance) | ≥ 30 |
 | Brightness (V-channel mean) | 30–240 |
-| Face area (pixels) | ≥ 900 |
+| Face area (pixels) | ≥ 1600 (40×40 px) |
 
 ### Best Face Selection
 
 - Only updates if new quality score > current best + 0.1 (hysteresis to prevent flickering)
-- JPEG encoding at quality=60 performed outside the lock (expensive operation)
+- JPEG encoding at quality=85 performed outside the lock (expensive operation)
 
 ---
 
@@ -324,7 +329,7 @@ pipeline = [
             "index": "vector_index",
             "path": "latest_embedding",
             "queryVector": embedding,        # 512-dim float list
-            "numCandidates": limit * 10,      # 50 candidates for limit=5
+            "numCandidates": 150,            # HNSW candidate pool (configurable)
             "limit": limit                    # 5
         }
     },
@@ -344,7 +349,7 @@ raw_cosine = (atlas_vectorSearchScore × 2) − 1
 
 ### Match Filtering
 
-Only results where `raw_cosine >= MATCH_THRESHOLD` (default 0.30, max 0.45) are returned.
+Only results where `raw_cosine >= MATCH_THRESHOLD` (default 0.45, max 0.45) are returned.
 
 ### Python Fallback
 
@@ -395,8 +400,8 @@ else:
 | Case | Condition | Status |
 |------|-----------|--------|
 | Very high similarity | `similarity >= 0.90` | `"known"` |
-| Above threshold | `similarity >= MATCH_THRESHOLD (0.30)` | `"known"` if confidence ≥ 70, else `"uncertain"` |
-| Below threshold but good quality | `quality >= 0.8 AND similarity >= 0.24` | `"uncertain"` |
+| Above threshold | `similarity >= MATCH_THRESHOLD (0.45)` | `"known"` if confidence ≥ 70, else `"uncertain"` |
+| Below threshold but good quality | `quality >= 0.8 AND similarity >= 0.36` | `"uncertain"` |
 | Low similarity | Default | `"unknown"` |
 
 ### Confidence Formula
@@ -668,7 +673,7 @@ NEW ──► ACTIVE ──► EXPIRED ──► FINALIZED ──► STORED
 Before running progressive recognition on a track:
 - Skip if already verified or known (high-confidence match)
 - Skip if already matched with `similarity > 0.85` (high-confidence match)
-- Skip if already matched with `similarity > 0.80` (during progressive)
+- Skip if already matched with `similarity > 0.85` (during progressive)
 - Only runs every `RECOGNITION_INTERVAL_FRAMES` (10) frames
 
 ---
@@ -874,6 +879,21 @@ Before running progressive recognition on a track:
 
 ## All Configuration Parameters
 
+### Configuration System
+
+All tunable parameters are centralized in **`config/config.jsonc`** — a JSONC (JSON with Comments) file. Edit this one file to change accuracy, detection, and quality settings without touching code.
+
+**Priority chain:** `.env` (secrets) > `config/config.jsonc` (tunables) > hardcoded defaults
+
+```
+config/
+├── config.jsonc        ← Edit this file for all tunable parameters
+├── settings.py         ← Loads config.jsonc + .env
+└── ...
+```
+
+Secrets (API keys, passwords, URIs) belong in `.env`, not `config.jsonc`.
+
 ### Required
 
 | Variable | Default | Type | Description |
@@ -885,8 +905,8 @@ Before running progressive recognition on a track:
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
 | `CAMERA_INDEX` | `0` | int | cv2 VideoCapture device index |
-| `FRAME_WIDTH` | `640` | int | Capture width (pixels) |
-| `FRAME_HEIGHT` | `480` | int | Capture height (pixels) |
+| `FRAME_WIDTH` | `1280` | int | Capture width (pixels) |
+| `FRAME_HEIGHT` | `720` | int | Capture height (pixels) |
 | `CAMERA_ID` | `"cam_01"` | str | Logical camera identifier |
 
 ### YOLO Detection
@@ -895,13 +915,13 @@ Before running progressive recognition on a track:
 |----------|---------|------|-------------|
 | `YOLO_MODEL` | `"models/yolov8s.pt"` | str | YOLOv8 model path (n/s/m variants) |
 | `YOLO_DEVICE` | `"cpu"` | str | Compute device (`cpu` or GPU index) |
-| `PERSON_CONF_THRESHOLD` | `0.5` | float | YOLO confidence for person detection |
+| `PERSON_CONF_THRESHOLD` | `0.40` | float | YOLO confidence for person detection |
 
 ### Tracking
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
-| `TRACK_TIMEOUT_SECS` | `8.0` | float | Seconds of no detection before track expires |
+| `TRACK_TIMEOUT_SECS` | `3.0` | float | Seconds of no detection before track expires |
 | `MAX_TRACK_SECS` | `300` | float | Maximum track lifetime (seconds) |
 
 ### Face Detection
@@ -921,17 +941,24 @@ Before running progressive recognition on a track:
 |----------|---------|------|-------------|
 | `RECOGNITION_INTERVAL_FRAMES` | `10` | int | Run face recognition every N frames per track |
 | `LOITER_SECS` | `30` | float | Seconds before masked unknown escalates |
-| `MIN_TRACK_FRAMES` | `30` | int | Min frames before hidden classification triggers |
+| `MIN_TRACK_FRAMES` | `15` | int | Min frames before hidden classification triggers |
 | `OFFICE_HOURS_START` | `9` | int | Office hours start (hour 0-23) |
 | `OFFICE_HOURS_END` | `17` | int | Office hours end (hour 0-23) |
-| `OFFICE_DAYS` | `"0,1,2,3,4"` | str | Comma-separated weekday numbers (0=Mon, 6=Sun) |
+| `OFFICE_DAYS` | `[0,1,2,3,4]` | list | Weekday numbers (0=Mon, 6=Sun) |
 
 ### Face Quality
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
+| `QUALITY_BLUR_MIN` | `30` | float | Minimum Laplacian variance for valid face |
+| `QUALITY_BRIGHTNESS_MIN` | `30` | float | Minimum brightness (0-255) |
+| `QUALITY_BRIGHTNESS_MAX` | `240` | float | Maximum brightness (0-255) |
+| `QUALITY_FACE_AREA_MIN` | `1600` | float | Minimum face area (40×40 px) |
 | `QUALITY_BLUR_MAX` | `1000` | float | Max Laplacian variance for blur normalization |
 | `QUALITY_AREA_MAX` | `10000` | float | Max face area for area normalization |
+| `QUALITY_WEIGHT_BLUR` | `0.60` | float | Blur weight in quality score |
+| `QUALITY_WEIGHT_BRIGHT` | `0.25` | float | Brightness weight in quality score |
+| `QUALITY_WEIGHT_AREA` | `0.15` | float | Area weight in quality score |
 | `VISIBLE_FACE_RATIO` | `0.025` | float | Face-to-person area ratio for "visible" |
 | `PARTIAL_FACE_RATIO` | `0.010` | float | Face-to-person area ratio for "partial" |
 
@@ -939,8 +966,42 @@ Before running progressive recognition on a track:
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
-| `MATCH_THRESHOLD` | `0.30` | float | Cosine similarity threshold for match (max 0.45) |
+| `MATCH_THRESHOLD` | `0.45` | float | Cosine similarity threshold for match (max 0.45) |
 | `DEDUP_SIMILARITY_THRESHOLD` | `0.40` | float | Threshold for deduplication when storing faces |
+| `VECTOR_SEARCH_CANDIDATES` | `150` | int | HNSW candidate pool size (higher = better recall) |
+| `VECTOR_SEARCH_LIMIT` | `5` | int | Number of top results returned |
+| `SCAN_LIMIT` | `500` | int | Max documents for Python cosine fallback scan |
+
+### Recognition Thresholds
+
+| Variable | Default | Type | Description |
+|----------|---------|------|-------------|
+| `VERY_HIGH_SIMILARITY` | `0.90` | float | Definite known threshold |
+| `HIGH_CONFIDENCE_SIMILARITY` | `0.85` | float | Skip re-recognition threshold |
+| `KNOWN_VISITOR_SIMILARITY` | `0.85` | float | Auto-escalate to known_visitor |
+| `KNOWN_VISITOR_CONFIDENCE` | `80` | float | Alternative confidence threshold |
+| `BORDERLINE_FACE_QUALITY` | `0.8` | float | Face quality threshold for borderline case |
+| `MASK_CONFIDENCE_PENALITY` | `0.85` | float | Multiply confidence by this for masked faces |
+
+### JPEG Compression
+
+| Variable | Default | Type | Description |
+|----------|---------|------|-------------|
+| `JPEG_QUALITY_STORE` | `85` | int | Quality for stored face captures |
+| `JPEG_QUALITY_BROADCAST` | `65` | int | Quality for live WebSocket stream |
+
+### CLAHE (Contrast Enhancement)
+
+| Variable | Default | Type | Description |
+|----------|---------|------|-------------|
+| `CLAHE_CLIP_LIMIT` | `2.0` | float | CLAHE clip limit |
+| `CLAHE_TILE_SIZE` | `8` | int | CLAHE tile grid size |
+
+### Mask Detection
+
+| Variable | Default | Type | Description |
+|----------|---------|------|-------------|
+| `MASK_RATIO_THRESHOLD` | `0.3` | float | Geometric heuristic threshold |
 
 ### Alerting
 
@@ -1161,8 +1222,8 @@ send = (now − last_alert_time[key]) >= ALERT_COOLDOWN_SECS
 ```
 surveillance-system/
 ├── main.py                          # Entry point, wires everything
-├── .env                             # Your config (not in git)
-├── .env.example                     # Config template
+├── .env                             # Your secrets (not in git)
+├── .env.example                     # Secrets template
 ├── requirements.txt                 # Python dependencies
 │
 ├── agents/                          # Intelligent Agents
@@ -1191,7 +1252,8 @@ surveillance-system/
 │   └── image_utils.py               # Image processing, crop, save, upload
 │
 ├── config/
-│   └── settings.py                  # Configuration loader + validate_config()
+│   ├── config.jsonc               # Centralized tunable parameters (edit this)
+│   └── settings.py                # Configuration loader + validate_config()
 │
 ├── models/                          # Model weights (gitignored)
 │   └── yolov8s.pt                   # YOLOv8 small model
@@ -1253,6 +1315,7 @@ cd ../..
 
 cp .env.example .env
 # Edit .env — set MONGODB_URI at minimum
+# Edit config/config.jsonc — adjust thresholds if needed
 ```
 
 ### MongoDB Atlas Setup
@@ -1289,20 +1352,20 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 |-------|----------|
 | `MONGODB_URI is required` | Set `MONGODB_URI` in `.env` |
 | Camera window black | Change `CAMERA_INDEX` in `.env` |
-| No face embeddings | Lower `DET_SCORE_MIN` to `0.20` |
-| Low similarity scores (~69%) | Quality-gated embeddings now prevent low-quality overwrites. Delete old embeddings and re-embed with `buffalo_m` model for best results |
+| No face embeddings | Lower `DET_SCORE_MIN` in `config/config.jsonc` |
+| Low similarity scores | Delete old embeddings and re-embed. Quality-gated embeddings now prevent low-quality overwrites |
 | Dashboard shows nothing | Ensure FastAPI running on port 8000 |
 | Vite build error (`env/data.js`) | Run `npm install axios@1.7.9` — axios 1.7.10+ breaks Vite's esbuild |
 | `GET /api/events` returns 500 | `similarity_score` is null — ensure `Optional[float]` in `dashboard/backend/models.py` |
 | Terminal too noisy | Console shows `INFO+`; full debug logs go to `logs/surveillance.log` |
 | `FutureWarning` from insightface | Harmless — `estimate` deprecated in InsightFace 0.26 |
-| Slow performance | Use GPU: set `YOLO_DEVICE=0` |
+| Slow performance | Use GPU: set `YOLO_DEVICE=0` in `config/config.jsonc` |
 | No local camera window | System streams via WebSocket — open `http://localhost:5173` |
 | Camera reconnect loops | Auto-reconnects after 30 consecutive failures (~3s). Check USB connection |
-| Track shows UNVERIFIED briefly | Normal — recognition runs every 10 frames (~2s). Set `RECOGNITION_INTERVAL_FRAMES=5` for even faster first recognition |
+| Track shows UNVERIFIED briefly | Normal — recognition runs every 10 frames (~2s). Set `RECOGNITION_INTERVAL_FRAMES=5` in `config/config.jsonc` for faster first recognition |
 | LLM not responding | Check Ollama is running: `ollama serve`. Verify model: `ollama list`. Falls back to templates if unavailable |
 | Chat returns static responses | LLM offline — check `GET /api/chat/health` |
-| Swap LLM model | Change `OLLAMA_MODEL` in `.env` (e.g., `qwen3.5:4b`) |
+| Swap LLM model | Change `OLLAMA_MODEL` in `config/config.jsonc` (e.g., `qwen3.5:4b`) |
 
 ---
 

@@ -44,7 +44,7 @@ def handle_frame_annotated(frame):
     if loop and loop.is_running():
         _broadcast_frame_counter += 1
         def _encode_and_broadcast():
-            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_BROADCAST])
             asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
         _encode_executor.submit(_encode_and_broadcast)
 

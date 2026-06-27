@@ -41,11 +41,13 @@ class InsightFaceSingleton:
         if len(image.shape) == 3 and image.shape[2] == 3:
             lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
             l_channel = lab[:, :, 0]
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            clahe = cv2.createCLAHE(clipLimit=settings.CLAHE_CLIP_LIMIT,
+                                     tileGridSize=(settings.CLAHE_TILE_SIZE, settings.CLAHE_TILE_SIZE))
             lab[:, :, 0] = clahe.apply(l_channel)
             return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
         elif len(image.shape) == 2:
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            clahe = cv2.createCLAHE(clipLimit=settings.CLAHE_CLIP_LIMIT,
+                                     tileGridSize=(settings.CLAHE_TILE_SIZE, settings.CLAHE_TILE_SIZE))
             return clahe.apply(image)
         return image
 
@@ -163,7 +165,7 @@ class InsightFaceSingleton:
             return False
 
         ratio = lower_face_height / upper_face_height
-        return ratio < 0.3
+        return ratio < settings.MASK_RATIO_THRESHOLD
 
     def detect_faces_raw(self, image: np.ndarray, min_score: float = 0.0) -> list:
         """Run face detection once and return all faces above min_score.

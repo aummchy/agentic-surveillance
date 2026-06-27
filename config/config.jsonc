@@ -1,0 +1,122 @@
+{
+  // ============================================================
+  // config.jsonc — Centralized tunable parameters
+  // ============================================================
+  // Edit this file to change accuracy, detection, and quality settings.
+  // Environment variables (.env) override these values if set.
+  // Secrets (API keys, passwords) belong in .env, not here.
+  // ============================================================
+
+  // ── Face Matching ────────────────────────────────────────────
+  // Cosine similarity threshold for ArcFace embeddings.
+  // Higher = stricter (fewer false positives), lower = more matches (more false positives).
+  // ArcFace optimal range: 0.40–0.60. Max recommended: 0.45.
+  "MATCH_THRESHOLD": 0.45,
+  "DEDUP_SIMILARITY_THRESHOLD": 0.40,
+
+  // ── Camera ───────────────────────────────────────────────────
+  // Higher resolution = more face detail = better recognition.
+  // Use 1280x720 if your webcam supports it.
+  "FRAME_WIDTH": 1280,
+  "FRAME_HEIGHT": 720,
+
+  // ── YOLO Detection ──────────────────────────────────────────
+  // Person detection confidence threshold.
+  // Lower = track more persons (good for low light), higher = fewer false detections.
+  "PERSON_CONF_THRESHOLD": 0.40,
+  "TRACK_TIMEOUT_SECS": 3.0,
+  "MAX_TRACK_SECS": 300,
+
+  // ── Face Detection Scores ────────────────────────────────────
+  // DET_SCORE_MIN: Standard threshold for face detection confidence.
+  // DET_SCORE_RELAXED: Fallback threshold (very permissive, use cautiously).
+  // EMBEDDING_DET_SCORE_MIN: Minimum to generate an embedding from a face.
+  "DET_SCORE_MIN": 0.40,
+  "DET_SCORE_RELAXED": 0.20,
+  "EMBEDDING_DET_SCORE_MIN": 0.40,
+
+  // ── Progressive Recognition ──────────────────────────────────
+  // Run face recognition every N frames (10 at 5fps = once per 2 seconds).
+  "RECOGNITION_INTERVAL_FRAMES": 10,
+
+  // ── Quality Scoring ──────────────────────────────────────────
+  // BLUR_MIN: Minimum Laplacian variance for sharp face (30 = reasonable).
+  // BRIGHTNESS_MIN/MAX: Valid brightness range (0-255).
+  // FACE_AREA_MIN: Minimum face area in pixels (40x40 = 1600).
+  // BLUR_MAX: Normalization cap for blur score.
+  // AREA_MAX: Normalization cap for face area.
+  // Weights: Must sum to 1.0.
+  "QUALITY_BLUR_MIN": 30,
+  "QUALITY_BRIGHTNESS_MIN": 30,
+  "QUALITY_BRIGHTNESS_MAX": 240,
+  "QUALITY_FACE_AREA_MIN": 1600,
+  "QUALITY_BLUR_MAX": 1000,
+  "QUALITY_AREA_MAX": 10000,
+  "QUALITY_WEIGHT_BLUR": 0.60,
+  "QUALITY_WEIGHT_BRIGHT": 0.25,
+  "QUALITY_WEIGHT_AREA": 0.15,
+
+  // ── JPEG Compression ────────────────────────────────────────
+  // STORE: Quality for stored face captures (higher = better facial detail).
+  // BROADCAST: Quality for live WebSocket stream (lower = less bandwidth).
+  "JPEG_QUALITY_STORE": 85,
+  "JPEG_QUALITY_BROADCAST": 65,
+
+  // ── Vector Search ────────────────────────────────────────────
+  // CANDIDATES: HNSW candidate pool size (higher = better recall, slower).
+  // LIMIT: Number of top results returned.
+  // SCAN_LIMIT: Max documents for Python cosine fallback scan.
+  "VECTOR_SEARCH_CANDIDATES": 150,
+  "VECTOR_SEARCH_LIMIT": 5,
+  "SCAN_LIMIT": 500,
+
+  // ── Recognition Thresholds ───────────────────────────────────
+  // VERY_HIGH_SIMILARITY: Definite known (0.90+ typical).
+  // HIGH_CONFIDENCE: Skip re-recognition (0.85+).
+  // KNOWN_VISITOR_SIMILARITY: Auto-escalate to known_visitor.
+  // KNOWN_VISITOR_CONFIDENCE: Alternative confidence threshold.
+  // BORDERLINE_QUALITY: Face quality threshold for borderline case.
+  // MASK_CONFIDENCE_PENALITY: Multiply confidence by this for masked faces.
+  "VERY_HIGH_SIMILARITY": 0.90,
+  "HIGH_CONFIDENCE_SIMILARITY": 0.85,
+  "KNOWN_VISITOR_SIMILARITY": 0.85,
+  "KNOWN_VISITOR_CONFIDENCE": 80,
+  "BORDERLINE_FACE_QUALITY": 0.8,
+  "MASK_CONFIDENCE_PENALITY": 0.85,
+
+  // ── CLAHE (Contrast Enhancement) ────────────────────────────
+  // Applied to every frame before face detection.
+  "CLAHE_CLIP_LIMIT": 2.0,
+  "CLAHE_TILE_SIZE": 8,
+
+  // ── Face Visibility ──────────────────────────────────────────
+  "VISIBLE_FACE_RATIO": 0.025,
+  "PARTIAL_FACE_RATIO": 0.010,
+  "MIN_TRACK_FRAMES": 15,
+
+  // ── Mask Detection ───────────────────────────────────────────
+  // Geometric heuristic threshold (lower/upper face ratio).
+  "MASK_RATIO_THRESHOLD": 0.3,
+
+  // ── Office Hours (Policy Agent) ──────────────────────────────
+  // Persons detected outside these hours on weekdays trigger alerts.
+  "OFFICE_HOURS_START": 9,
+  "OFFICE_HOURS_END": 17,
+  "OFFICE_DAYS": [0, 1, 2, 3, 4],
+
+  // ── Alerting ─────────────────────────────────────────────────
+  "ALERT_CHANNELS": ["console", "webhook"],
+  "ALERT_COOLDOWN_SECS": 60,
+
+  // ── Loitering ────────────────────────────────────────────────
+  "LOITER_SECS": 30,
+
+  // ── LLM (Ollama) ────────────────────────────────────────────
+  "OLLAMA_URL": "http://localhost:11434",
+  "OLLAMA_MODEL": "gemma3:4b",
+  "OLLAMA_TIMEOUT": 30,
+
+  // ── Camera ───────────────────────────────────────────────────
+  "CAMERA_INDEX": 0,
+  "CAMERA_ID": "cam_01"
+}
