@@ -1,25 +1,64 @@
-import React, { useState, useEffect } from 'react'
-import axios from 'axios'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import api, { getImageUrl } from '../utils/api'
 
-function EventLog({ refreshKey }) {
+function EventLog({ refreshKey, onRegisterPrepend }) {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('all')
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
+  const eventsRef = useRef(events)
+  eventsRef.current = events
+
+  const prependEvent = useCallback((eventData) => {
+    setEvents((prev) => {
+      if (prev.some((e) => e._id === eventData._id || e.track_id === eventData.track_id)) {
+        return prev
+      }
+      return [eventData, ...prev].slice(0, 100)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (onRegisterPrepend) {
+      onRegisterPrepend(prependEvent)
+    }
+  }, [onRegisterPrepend, prependEvent])
 
   useEffect(() => {
     fetchEvents()
-    const interval = setInterval(fetchEvents, 10000)
+    const interval = setInterval(fetchEvents, 60000)
     return () => clearInterval(interval)
   }, [refreshKey, activeTab])
 
   const fetchEvents = async () => {
+    const tabAtRequestTime = activeTabRef.current
     try {
       const params = { limit: 50 }
-      if (activeTab !== 'all') {
-        params.status = activeTab
+      if (tabAtRequestTime !== 'all') {
+        params.status = tabAtRequestTime
       }
-      const response = await axios.get('/api/events', { params })
-      setEvents(response.data.events || [])
+      const response = await api.get('/api/events', { params })
+      const dbEvents = response.data.events || []
+
+      setEvents((prev) => {
+        if (activeTabRef.current !== tabAtRequestTime) return prev
+        if (prev.length === 0) return dbEvents
+
+        const prevByTrack = new Map(prev.map((e) => [e.track_id, e]))
+        const dbByTrack = new Map(dbEvents.map((e) => [e.track_id, e]))
+
+        const merged = prev.map((e) => {
+          const dbVer = dbByTrack.get(e.track_id)
+          return dbVer ? { ...e, ...dbVer } : e
+        })
+
+        for (const e of dbEvents) {
+          if (!prevByTrack.has(e.track_id)) merged.push(e)
+        }
+
+        return merged.slice(0, 100)
+      })
     } catch (error) {
       console.error('Failed to fetch events:', error)
     } finally {
@@ -66,17 +105,11 @@ function EventLog({ refreshKey }) {
       case 'verified': return 'Verified'
       case 'authorized': return 'Authorized'
       case 'known_visitor': return 'Known Visitor'
-      case 'masked_unknown': return 'Masked Unverified'
+      case 'masked_unknown': return 'Masked Unknown'
       case 'blacklist': return 'Blacklist'
       case 'intentionally_hidden': return 'Hidden'
       default: return status
     }
-  }
-
-  const getImageUrl = (url) => {
-    if (!url) return null
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
-    return `http://localhost:8000/${url}`
   }
 
   const getStatusIcon = (status) => {
@@ -116,6 +149,18 @@ function EventLog({ refreshKey }) {
           Unknown
         </button>
         <button
+          className={`tab ${activeTab === 'masked_unknown' ? 'active' : ''}`}
+          onClick={() => setActiveTab('masked_unknown')}
+        >
+          Masked
+        </button>
+        <button
+          className={`tab ${activeTab === 'blacklist' ? 'active' : ''}`}
+          onClick={() => setActiveTab('blacklist')}
+        >
+          Blacklist
+        </button>
+        <button
           className={`tab ${activeTab === 'verified' ? 'active' : ''}`}
           onClick={() => setActiveTab('verified')}
         >
@@ -130,7 +175,7 @@ function EventLog({ refreshKey }) {
       ) : (
         <div className="events-list">
           {events.map((event) => (
-            <div key={event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
+            <div key={event.track_id || event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
               {getImageUrl(event.image_url || event.person_image) ? (
                 <img
                   src={getImageUrl(event.image_url || event.person_image)}

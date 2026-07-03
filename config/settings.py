@@ -146,6 +146,37 @@ def setup_logging():
 setup_logging()
 
 
+def _log_effective_settings():
+    """Print effective value and source for every tunable setting at startup."""
+    log = structlog.get_logger("config")
+    tunables = [
+        ("MATCH_THRESHOLD", "MATCH_THRESHOLD", 0.45, float),
+        ("PERSON_CONF_THRESHOLD", "PERSON_CONF_THRESHOLD", 0.40, float),
+        ("FRAME_WIDTH", "FRAME_WIDTH", 1280, int),
+        ("FRAME_HEIGHT", "FRAME_HEIGHT", 720, int),
+        ("EMBEDDING_DET_SCORE_MIN", "EMBEDDING_DET_SCORE_MIN", 0.40, float),
+        ("DET_SCORE_MIN", "DET_SCORE_MIN", 0.40, float),
+        ("DET_SCORE_RELAXED", "DET_SCORE_RELAXED", 0.20, float),
+        ("DEDUP_SIMILARITY_THRESHOLD", "DEDUP_SIMILARITY_THRESHOLD", 0.40, float),
+    ]
+    for env_key, config_key, default, cast in tunables:
+        env_val = os.getenv(env_key)
+        config_val = _config.get(config_key)
+        if env_val is not None:
+            source = "env"
+            effective = cast(env_val)
+        elif config_val is not None:
+            source = "config.jsonc"
+            effective = cast(config_val)
+        else:
+            source = "default"
+            effective = default
+        log.info("config.resolved", setting=config_key, value=effective, source=source)
+
+
+_log_effective_settings()
+
+
 def validate_config():
     errors = []
 
@@ -174,7 +205,7 @@ def validate_config():
     if det_relaxed > det_min:
         errors.append("DET_SCORE_RELAXED must be <= DET_SCORE_MIN")
 
-    emb_min = _get("EMBEDDING_DET_SCORE_MIN", "EMBEDDING_DET_SCORE_MIN", 0.40, float)
+    emb_min = EMBEDDING_DET_SCORE_MIN
     if not (0 < emb_min < 1):
         errors.append("EMBEDDING_DET_SCORE_MIN must be between 0 and 1")
 
@@ -255,13 +286,16 @@ SCAN_LIMIT = _get("SCAN_LIMIT", "SCAN_LIMIT", 500, int)
 MATCH_THRESHOLD = _get("MATCH_THRESHOLD", "MATCH_THRESHOLD", 0.45, float)
 DEDUP_SIMILARITY_THRESHOLD = _get("DEDUP_SIMILARITY_THRESHOLD", "DEDUP_SIMILARITY_THRESHOLD", 0.40, float)
 
+# ── Embedding History ─────────────────────────────────────────
+EMBEDDING_HISTORY_CAP = _get("EMBEDDING_HISTORY_CAP", "EMBEDDING_HISTORY_CAP", 25, int)
+
 # ── Recognition Thresholds ─────────────────────────────────────
 VERY_HIGH_SIMILARITY = _get("VERY_HIGH_SIMILARITY", "VERY_HIGH_SIMILARITY", 0.90, float)
 HIGH_CONFIDENCE_SIMILARITY = _get("HIGH_CONFIDENCE_SIMILARITY", "HIGH_CONFIDENCE_SIMILARITY", 0.85, float)
 KNOWN_VISITOR_SIMILARITY = _get("KNOWN_VISITOR_SIMILARITY", "KNOWN_VISITOR_SIMILARITY", 0.85, float)
 KNOWN_VISITOR_CONFIDENCE = _get("KNOWN_VISITOR_CONFIDENCE", "KNOWN_VISITOR_CONFIDENCE", 80, float)
 BORDERLINE_FACE_QUALITY = _get("BORDERLINE_FACE_QUALITY", "BORDERLINE_FACE_QUALITY", 0.8, float)
-MASK_CONFIDENCE_PENALITY = _get("MASK_CONFIDENCE_PENALITY", "MASK_CONFIDENCE_PENALITY", 0.85, float)
+MASK_CONFIDENCE_PENALTY = _get("MASK_CONFIDENCE_PENALTY", "MASK_CONFIDENCE_PENALTY", 0.85, float)
 
 # ── CLAHE ──────────────────────────────────────────────────────
 CLAHE_CLIP_LIMIT = _get("CLAHE_CLIP_LIMIT", "CLAHE_CLIP_LIMIT", 2.0, float)
@@ -283,10 +317,14 @@ OFFICE_HOURS_END = _get("OFFICE_HOURS_END", "OFFICE_HOURS_END", 17, int)
 OFFICE_DAYS = _get("OFFICE_DAYS", "OFFICE_DAYS", [0, 1, 2, 3, 4], list)
 
 # ── Alerting ───────────────────────────────────────────────────
-ALERT_CHANNELS = _get("ALERT_CHANNELS", "ALERT_CHANNELS", ["console"], list)
+ALERT_CHANNELS = _get("ALERT_CHANNELS", "ALERT_CHANNELS", ["console", "webhook"], list)
 ALERT_COOLDOWN_SECS = _get("ALERT_COOLDOWN_SECS", "ALERT_COOLDOWN_SECS", 60, float)
 
 # ── Camera ─────────────────────────────────────────────────────
+# CAMERA_SOURCE: RTSP URL string (e.g. "rtsp://192.168.1.10:554/stream")
+#   OR integer device index (e.g. 0 for local webcam).
+#   Takes precedence over CAMERA_INDEX if set.
+CAMERA_SOURCE = _get("CAMERA_SOURCE", "CAMERA_SOURCE", "")
 CAMERA_INDEX = _get("CAMERA_INDEX", "CAMERA_INDEX", 0, int)
 FRAME_WIDTH = _get("FRAME_WIDTH", "FRAME_WIDTH", 1280, int)
 FRAME_HEIGHT = _get("FRAME_HEIGHT", "FRAME_HEIGHT", 720, int)

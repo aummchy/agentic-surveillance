@@ -236,6 +236,7 @@ class PolicyAgent(BaseAgent):
             return DecisionResult(
                 status="intentionally_hidden",
                 alert_level="high",
+                name="Unidentified Person",
                 reason="Person avoided face detection during track",
                 should_alert=True,
                 should_register=False
@@ -256,6 +257,7 @@ class PolicyAgent(BaseAgent):
             return DecisionResult(
                 status="masked_unknown",
                 alert_level=alert_level,
+                name="Masked Person",
                 reason=reason,
                 should_alert=True,
                 should_register=True
@@ -268,6 +270,7 @@ class PolicyAgent(BaseAgent):
             return DecisionResult(
                 status="unknown",
                 alert_level="high",
+                name="After-Hours Unknown",
                 reason="Unknown person detected after hours",
                 should_alert=True,
                 should_register=True
@@ -279,6 +282,7 @@ class PolicyAgent(BaseAgent):
         return DecisionResult(
             status="unknown",
             alert_level="medium",
+            name="Unidentified Person",
             reason="Unknown person detected",
             should_alert=True,
             should_register=True

@@ -36,18 +36,28 @@ class CameraAgent:
             max_workers=2, thread_name_prefix="recognition"
         )
 
+    @staticmethod
+    def _camera_source():
+        """Return RTSP URL string if CAMERA_SOURCE is set, else CAMERA_INDEX int."""
+        src = getattr(settings, "CAMERA_SOURCE", "")
+        if src:
+            return src
+        return settings.CAMERA_INDEX
+
     def start(self):
         self._running = True
 
-        # Validate camera index
-        test_cap = cv2.VideoCapture(settings.CAMERA_INDEX)
+        source = self._camera_source()
+
+        # Validate camera source
+        test_cap = cv2.VideoCapture(source)
         if not test_cap.isOpened():
-            logger.error("camera_index_invalid", index=settings.CAMERA_INDEX)
+            logger.error("camera_source_invalid", source=source)
             test_cap.release()
             return
         test_cap.release()
 
-        self._cap = cv2.VideoCapture(settings.CAMERA_INDEX)
+        self._cap = cv2.VideoCapture(source)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.FRAME_WIDTH)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.FRAME_HEIGHT)
 
@@ -55,7 +65,7 @@ class CameraAgent:
             logger.error("camera_open_failed")
             return
 
-        logger.info("camera_started", index=settings.CAMERA_INDEX)
+        logger.info("camera_started", source=source)
 
         try:
             self._loop()
@@ -84,7 +94,7 @@ class CameraAgent:
                     # Try to reconnect
                     self._cap.release()
                     time.sleep(1.0)
-                    self._cap = cv2.VideoCapture(settings.CAMERA_INDEX)
+                    self._cap = cv2.VideoCapture(self._camera_source())
                     if self._cap.isOpened():
                         logger.info("camera_reconnected")
                         consecutive_failures = 0
@@ -148,6 +158,7 @@ class CameraAgent:
     def _progressive_recognition(self, frame: np.ndarray, track: Track):
         with self._track_sets_lock:
             self._recognizing_tracks.add(track.track_id)
+        self.track_state.begin_recognition(track.track_id)
         try:
             # Skip InsightFace if already matched with high confidence
             if track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
@@ -163,35 +174,34 @@ class CameraAgent:
 
             app = get_insightface()
 
-            # Run detection on crop with reasonable threshold first
+            # Two-stage detection: person crop first (more focused), then full frame.
+            # crop_faces already filtered to det_score >= DET_SCORE_RELAXED, so best
+            # is always set when crop_faces is non-empty — full-frame fallback only
+            # triggers when the crop finds zero faces (see frame_faces assignment).
             crop_faces = app.detect_faces_raw(person_crop, min_score=settings.DET_SCORE_RELAXED)
-            frame_faces = [] if crop_faces else app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED)
+            frame_faces = app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED) if not crop_faces else []
 
             best = None
             detected_in_person_crop = False
             if crop_faces:
-                # Try standard threshold on crop
+                # Try standard threshold on crop first
                 best = next((f for f in crop_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
                 if best:
                     detected_in_person_crop = True
                     logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
                 else:
-                    # Try relaxed threshold on crop
-                    best = crop_faces[0] if crop_faces[0]["det_score"] >= settings.DET_SCORE_RELAXED else None
-                    if best:
-                        detected_in_person_crop = True
-                        logger.info("face_found_relaxed_crop", track_id=track.track_id, score=best["det_score"])
-
-            if not best and frame_faces:
-                # Try standard threshold on full frame
+                    # All crop faces are >= DET_SCORE_RELAXED, so this always succeeds
+                    best = crop_faces[0]
+                    detected_in_person_crop = True
+                    logger.info("face_found_relaxed_crop", track_id=track.track_id, score=best["det_score"])
+            elif frame_faces:
+                # Crop found nothing — fall back to full frame
                 best = next((f for f in frame_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
                 if best:
                     logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
                 else:
-                    # Try relaxed threshold on full frame
-                    best = frame_faces[0] if frame_faces[0]["det_score"] >= settings.DET_SCORE_RELAXED else None
-                    if best:
-                        logger.info("face_found_relaxed_frame", track_id=track.track_id, score=best["det_score"])
+                    best = frame_faces[0]
+                    logger.info("face_found_relaxed_frame", track_id=track.track_id, score=best["det_score"])
 
             if not best:
                 logger.debug("no_face_anywhere", track_id=track.track_id)
@@ -341,6 +351,7 @@ class CameraAgent:
         except Exception as e:
             logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e), exc_info=True)
         finally:
+            self.track_state.end_recognition(track.track_id)
             with self._track_sets_lock:
                 self._recognizing_tracks.discard(track.track_id)
                 # If the track expired while recognition was running, it was skipped by

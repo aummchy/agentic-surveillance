@@ -1,35 +1,34 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import api, { getImageUrl } from './utils/api'
 import LiveFeed from './components/LiveFeed'
 import UnknownPersons from './components/UnknownPersons'
+import VerifiedPersons from './components/VerifiedPersons'
 import EventLog from './components/EventLog'
 import VerifyModal from './components/VerifyModal'
 import ChatPanel from './components/ChatPanel'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function App() {
   const [selectedPerson, setSelectedPerson] = useState(null)
   const [showModal, setShowModal] = useState(false)
-  const [unknowns, setUnknowns] = useState([])
   const [refreshKey, setRefreshKey] = useState(0)
   const [stats, setStats] = useState({ total_unknown: 0, total_verified: 0, events_today: 0, unknown_today: 0 })
   const [notifications, setNotifications] = useState([])
   const [activeAlert, setActiveAlert] = useState(null)
-
-  const getImageUrl = (url) => {
-    if (!url) return null
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
-    return `http://localhost:8000/${url}`
-  }
   const [liveFrame, setLiveFrame] = useState(null)
   const [wsConnected, setWsConnected] = useState(false)
   const wsRef = useRef(null)
   const statsIntervalRef = useRef(null)
   const reconnectRef = useRef(null)
+  const alertTimeoutRef = useRef(null)
+  const liveEventPrependRef = useRef(null)
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('/api/events/stats')
-      const data = await res.json()
-      setStats(data)
+      const res = await api.get('/api/events/stats')
+      if (res.status === 200) {
+        setStats(res.data)
+      }
     } catch (e) {
       console.error('Failed to fetch stats:', e)
     }
@@ -49,6 +48,7 @@ function App() {
 
       ws.onopen = () => {
         setWsConnected(true)
+        if (ws._pingInterval) clearInterval(ws._pingInterval)
         const pingInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) ws.send('ping')
         }, 30000)
@@ -60,25 +60,39 @@ function App() {
           const msg = JSON.parse(event.data)
           if (msg.type === 'frame' && msg.data) {
             setLiveFrame(`data:image/jpeg;base64,${msg.data}`)
+          } else if (msg.type === 'event' && msg.data) {
+            if (liveEventPrependRef.current) {
+              liveEventPrependRef.current(msg.data)
+            }
+            setRefreshKey(prev => prev + 1)
+            fetchStats()
           } else if (msg.type === 'alert' && msg.data) {
             const alertData = msg.data
             setActiveAlert(alertData)
             setNotifications(prev => [alertData, ...prev].slice(0, 20))
             setRefreshKey(prev => prev + 1)
             fetchStats()
-            setTimeout(() => setActiveAlert(null), 8000)
+            if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
+            alertTimeoutRef.current = setTimeout(() => setActiveAlert(null), 8000)
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error('WebSocket message parse error:', e)
+        }
       }
 
-      ws.onerror = () => setWsConnected(false)
-
-      ws.onclose = () => {
+      ws.onerror = () => {
+        console.warn('WebSocket connection error')
         setWsConnected(false)
-        clearInterval(ws._pingInterval)
+      }
+
+      ws.onclose = (e) => {
+        console.warn(`WebSocket closed (code=${e.code}, reason=${e.reason || 'none'})`)
+        setWsConnected(false)
+        if (ws._pingInterval) clearInterval(ws._pingInterval)
         reconnectRef.current = setTimeout(connectWebSocket, 3000)
       }
     } catch (e) {
+      console.error('WebSocket init failed:', e)
       reconnectRef.current = setTimeout(connectWebSocket, 3000)
     }
   }, [fetchStats])
@@ -88,6 +102,7 @@ function App() {
     return () => {
       if (wsRef.current) wsRef.current.close()
       if (reconnectRef.current) clearTimeout(reconnectRef.current)
+      if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
     }
   }, [connectWebSocket])
 
@@ -105,6 +120,10 @@ function App() {
   const dismissNotification = (index) => {
     setNotifications(prev => prev.filter((_, i) => i !== index))
   }
+
+  const registerLiveEventPrepend = useCallback((prependFn) => {
+    liveEventPrependRef.current = prependFn
+  }, [])
 
   return (
     <div className="app">
@@ -167,23 +186,38 @@ function App() {
 
       <main className="main-content">
         <section className="panel live-feed">
-          <LiveFeed frame={liveFrame} connected={wsConnected} activeAlert={activeAlert} />
+          <ErrorBoundary label="Live Feed">
+            <LiveFeed frame={liveFrame} connected={wsConnected} activeAlert={activeAlert} />
+          </ErrorBoundary>
         </section>
 
-        <section className="panel">
-          <UnknownPersons
-            onVerify={handleVerify}
-            refreshKey={refreshKey}
-            onUnknownsLoaded={setUnknowns}
-          />
-        </section>
+        <div className="three-col-row">
+          <section className="panel">
+            <ErrorBoundary label="Unknown Persons">
+              <UnknownPersons
+                onVerify={handleVerify}
+                refreshKey={refreshKey}
+              />
+            </ErrorBoundary>
+          </section>
 
-        <section className="panel">
-          <EventLog refreshKey={refreshKey} />
-        </section>
+          <section className="panel">
+            <ErrorBoundary label="Verified Persons">
+              <VerifiedPersons refreshKey={refreshKey} />
+            </ErrorBoundary>
+          </section>
+
+          <section className="panel">
+            <ErrorBoundary label="Event Log">
+              <EventLog refreshKey={refreshKey} onRegisterPrepend={registerLiveEventPrepend} />
+            </ErrorBoundary>
+          </section>
+        </div>
 
         <section className="panel chat-section">
-          <ChatPanel />
+          <ErrorBoundary label="Chat Panel">
+            <ChatPanel />
+          </ErrorBoundary>
         </section>
       </main>
 

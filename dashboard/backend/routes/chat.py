@@ -7,7 +7,7 @@ The LLM processes the query and returns a structured response.
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 import asyncio
 import json
 import structlog
@@ -26,6 +26,7 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User message")
+    history: Optional[List[dict]] = Field(default=None, description="Conversation history [{role, content}]")
 
 
 class ChatResponse(BaseModel):
@@ -55,12 +56,21 @@ Rules:
 """
 
 
-def _handle_query(user_message: str) -> tuple:
+def _handle_query(user_message: str, history: list = None) -> tuple:
     """Process the user message, run any needed queries, return (response_text, data_dict).
 
     Returns (str, dict|None)
     """
     lower = user_message.lower().strip()
+
+    history_context = ""
+    if history:
+        recent = history[-20:]
+        lines = []
+        for h in recent:
+            role = "Operator" if h.get("role") == "user" else "Assistant"
+            lines.append(f"{role}: {h.get('content', '')}")
+        history_context = "\n\nPrevious conversation:\n" + "\n".join(lines)
 
     # Route to appropriate data source based on query intent
     data = None
@@ -89,7 +99,7 @@ def _handle_query(user_message: str) -> tuple:
     # If we got data, format a prompt for the LLM with context
     if data:
         data_str = json.dumps(data, default=str, indent=2)
-        prompt = f"Operator question: {user_message}\n\nAvailable data:\n{data_str}"
+        prompt = f"Operator question: {user_message}\n\nAvailable data:\n{data_str}{history_context}"
         reply = llm_client.chat_completion(prompt, system=SYSTEM_PROMPT, max_tokens=300)
         if reply:
             return reply, data
@@ -105,7 +115,8 @@ def _handle_query(user_message: str) -> tuple:
         return f"Here is the data I found: {json.dumps(data, default=str)[:500]}", data
 
     # No specific data query matched — general LLM response
-    reply = llm_client.chat_completion(user_message, system=SYSTEM_PROMPT, max_tokens=300)
+    prompt = f"{user_message}{history_context}"
+    reply = llm_client.chat_completion(prompt, system=SYSTEM_PROMPT, max_tokens=300)
     if reply:
         return reply, None
 
@@ -126,7 +137,7 @@ async def chat(request: ChatRequest):
         )
 
     try:
-        response_text, data = await asyncio.to_thread(_handle_query, request.message)
+        response_text, data = await asyncio.to_thread(_handle_query, request.message, request.history)
         return ChatResponse(response=response_text, data=data, llm_available=True)
     except Exception as e:
         logger.error("chat_endpoint_error", error=str(e))

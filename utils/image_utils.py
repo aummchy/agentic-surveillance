@@ -160,10 +160,3 @@ def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) ->
             _put_label_with_bg(annotated, label, (x1, y1 - 8), 0.45, color, 1, (0, 0, 0))
 
     return annotated
-
-
-def decode_image(image_bytes: bytes, max_size_mb: int = 10) -> np.ndarray:
-    if len(image_bytes) > max_size_mb * 1024 * 1024:
-        raise ValueError(f"Image size {len(image_bytes) / 1024 / 1024:.1f}MB exceeds limit of {max_size_mb}MB")
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    return cv2.imdecode(nparr, cv2.IMREAD_COLOR)

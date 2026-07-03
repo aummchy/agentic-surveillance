@@ -84,7 +84,6 @@ All 32 issues from the problem report have been fixed.
 - Camera streams via WebSocket, not a local OpenCV window — open browser to see feed
 - Mask detection uses geometric landmark heuristic (lower_face/upper_face ratio < 0.3), not a classifier
 - Blacklisted persons always trigger critical alert even if also authorized (tag priority: blacklist > authorized > known_visitor)
-- `agent.md` is the build specification (architecture, data contracts, acceptance criteria), not an OpenCode config file
 - LLM (Ollama) must be running for chat and NL summaries — system falls back to template strings if unavailable
 - Swap LLM model via single env var: `OLLAMA_MODEL=qwen3.5:4b` in `.env` (Qwen 3.5 4B has better reasoning: MMLU-Pro 79.1% vs ~43%)
 - Both Gemma 3 4B and Qwen 3.5 4B fit in 4GB VRAM at Q4_K_M quantization (~2.7GB weights)

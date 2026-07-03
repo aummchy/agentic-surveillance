@@ -14,6 +14,10 @@ export default defineConfig({
         target: 'ws://localhost:8000',
         ws: true,
       },
+      '/captures': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

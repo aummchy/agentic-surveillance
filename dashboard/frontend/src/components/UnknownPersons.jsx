@@ -1,26 +1,28 @@
 import React, { useState, useEffect } from 'react'
-import axios from 'axios'
+import api, { getImageUrl } from '../utils/api'
 
-function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
+const NEW_PERSON_WINDOW_MS = 30000
+
+function UnknownPersons({ onVerify, refreshKey }) {
   const [unknowns, setUnknowns] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('unknown')
+  const [seenIds, setSeenIds] = useState(() => {
+    try { return new Set(JSON.parse(sessionStorage.getItem('seenUnknowns') || '[]')) }
+    catch { return new Set() }
+  })
 
   useEffect(() => {
     fetchPersons()
-  }, [refreshKey, activeTab])
+  }, [refreshKey])
 
   const fetchPersons = async () => {
     setLoading(true)
     try {
-      const response = await axios.get(`/api/faces`, {
-        params: { status: activeTab, limit: 50 }
+      const response = await api.get('/api/faces', {
+        params: { status: 'unknown', limit: 50 }
       })
       const faces = response.data.faces || []
       setUnknowns(faces)
-      if (onUnknownsLoaded) {
-        onUnknownsLoaded(faces)
-      }
     } catch (error) {
       console.error('Failed to fetch persons:', error)
       setUnknowns([])
@@ -48,12 +50,6 @@ function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
     return `${Math.floor(diffHrs / 24)}d ago`
   }
 
-  const getImageUrl = (url) => {
-    if (!url) return null
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
-    return `http://localhost:8000/${url}`
-  }
-
   const getLatestImage = (person) => {
     if (person.images && person.images.length > 0) {
       return getImageUrl(person.images[person.images.length - 1].url)
@@ -70,48 +66,44 @@ function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
   }
 
   const isNewPerson = (person) => {
-    const fiveSecsAgo = Date.now() - 5000
+    if (seenIds.has(person.person_id)) return false
     const created = new Date(person.created_at).getTime()
-    return created > fiveSecsAgo
+    return Date.now() - created < NEW_PERSON_WINDOW_MS
+  }
+
+  const markAsSeen = (personId) => {
+    setSeenIds((prev) => {
+      const next = new Set(prev)
+      next.add(personId)
+      try { sessionStorage.setItem('seenUnknowns', JSON.stringify([...next])) } catch {}
+      return next
+    })
   }
 
   return (
     <div>
       <div className="panel-header">
         <span className="panel-title">
-          {activeTab === 'unknown' ? 'Unknown Persons' : 'Verified Persons'}
+          Unknown Persons
         </span>
         <span className="panel-count">{unknowns.length} persons</span>
-      </div>
-
-      <div className="tabs">
-        <button
-          className={`tab ${activeTab === 'unknown' ? 'active' : ''}`}
-          onClick={() => setActiveTab('unknown')}
-        >
-          Unknown
-        </button>
-        <button
-          className={`tab ${activeTab === 'verified' ? 'active' : ''}`}
-          onClick={() => setActiveTab('verified')}
-        >
-          Verified
-        </button>
       </div>
 
       {loading ? (
         <div className="loading">Loading...</div>
       ) : unknowns.length === 0 ? (
         <div className="empty-state">
-          {activeTab === 'unknown' 
-            ? 'No unknown persons detected'
-            : 'No verified persons yet'
-          }
+          No unknown persons detected
         </div>
       ) : (
         <div className="persons-grid">
           {unknowns.map((person) => (
-            <div key={person.person_id} className={`person-card ${activeTab === 'unknown' && isNewPerson(person) ? 'person-card-new' : ''}`}>
+            <div
+              key={person.person_id}
+              className={`person-card ${isNewPerson(person) ? 'person-card-new' : ''}`}
+              onMouseEnter={() => markAsSeen(person.person_id)}
+              onClick={() => markAsSeen(person.person_id)}
+            >
               {getLatestImage(person) ? (
                 <img
                   src={getLatestImage(person)}
@@ -146,19 +138,12 @@ function UnknownPersons({ onVerify, refreshKey, onUnknownsLoaded }) {
                 {person.images && person.images.length > 1 && (
                   <div className="person-image-count">{person.images.length} images captured</div>
                 )}
-                {!person.verified && (
-                  <button
-                    className="verify-btn"
-                    onClick={() => onVerify(person)}
-                  >
-                    Verify Person
-                  </button>
-                )}
-                {person.verified && (
-                  <div className="verified-badge">
-                    Verified - {person.alert_level} alert
-                  </div>
-                )}
+                <button
+                  className="verify-btn"
+                  onClick={() => onVerify(person)}
+                >
+                  Verify Person
+                </button>
               </div>
             </div>
           ))}

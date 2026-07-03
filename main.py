@@ -18,7 +18,7 @@ from agents.memory import MemoryAgent
 from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings, close_client
 from utils.image_utils import save_image, upload_to_cloudinary, upload_jpeg_to_cloudinary
 from pipeline.models import Track
-from dashboard.backend.routes.live import broadcast_frame, broadcast_alert
+from dashboard.backend.routes.live import broadcast_frame, broadcast_alert, broadcast_event
 from agents.alert_agent import shutdown as alert_shutdown
 from utils.llm_client import shutdown as llm_shutdown, is_available as llm_available
 
@@ -31,7 +31,6 @@ loop = None
 memory_agent = MemoryAgent()
 _encode_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="jpeg")
 _shutdown_event = threading.Event()
-_broadcast_frame_counter = 0
 
 
 def handle_track_finalized(track: Track):
@@ -40,9 +39,7 @@ def handle_track_finalized(track: Track):
 
 
 def handle_frame_annotated(frame):
-    global _broadcast_frame_counter
     if loop and loop.is_running():
-        _broadcast_frame_counter += 1
         def _encode_and_broadcast():
             _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_BROADCAST])
             asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
@@ -143,26 +140,48 @@ def process_finalized_track(track: Track):
             role = "unknown" if decision.status in ("unknown", "masked_unknown") else (match_result.role or "visitor")
             tags = ["auto_registered"] if decision.status in ("unknown", "masked_unknown") else []
 
-            try:
-                stored_id = store_face(
-                    person_id=person_id,
-                    name=name,
-                    role=role,
-                    embedding=track.embedding,
-                    image_url=image_url,
-                    tags=tags,
-                    camera_id=settings.CAMERA_ID,
-                    skip_search=True,
-                    quality_score=track.best_face_score if track.best_face_score > 0 else None
-                )
-                logger.info("store_face_success",
-                            track_id=track.track_id,
-                            stored_person_id=stored_id,
-                            role=role,
-                            name=name,
-                            embedding_len=len(track.embedding))
-            except Exception as e:
-                logger.error("store_face_failed", track_id=track.track_id, error=str(e), exc_info=True)
+            merged = False
+            if decision.status in ("unknown", "masked_unknown"):
+                try:
+                    from utils.db_utils import find_similar_unknowns, update_face
+                    similar = find_similar_unknowns(track.embedding)
+                    if similar:
+                        existing_id = similar[0]["person_id"]
+                        update_face(
+                            existing_id,
+                            image_url=image_url,
+                            embedding=track.embedding,
+                            quality_score=track.best_face_score if track.best_face_score > 0 else None,
+                        )
+                        logger.info("auto_register_merged",
+                                    existing_person_id=existing_id,
+                                    similarity=round(similar[0]["similarity_score"], 4),
+                                    new_track_id=track.track_id)
+                        merged = True
+                except Exception as e:
+                    logger.error("auto_register_dedup_failed", track_id=track.track_id, error=str(e))
+
+            if not merged:
+                try:
+                    stored_id = store_face(
+                        person_id=person_id,
+                        name=name,
+                        role=role,
+                        embedding=track.embedding,
+                        image_url=image_url,
+                        tags=tags,
+                        camera_id=settings.CAMERA_ID,
+                        skip_search=False,
+                        quality_score=track.best_face_score if track.best_face_score > 0 else None
+                    )
+                    logger.info("store_face_success",
+                                track_id=track.track_id,
+                                stored_person_id=stored_id,
+                                role=role,
+                                name=name,
+                                embedding_len=len(track.embedding))
+                except Exception as e:
+                    logger.error("store_face_failed", track_id=track.track_id, error=str(e), exc_info=True)
 
         if match_result.matched:
             memory_agent.record_visit(
@@ -201,6 +220,23 @@ def process_finalized_track(track: Track):
                     image_url, match_result.person_id if match_result.matched else None,
                     match_result.name if match_result.matched else None)
 
+        event_payload = {
+            "track_id": track.track_id,
+            "camera_id": settings.CAMERA_ID,
+            "status": decision.status,
+            "alert_level": decision.alert_level,
+            "person_id": match_result.person_id if match_result.matched else None,
+            "name": match_result.name if match_result.matched else None,
+            "person_name": track.person_name or (match_result.name if match_result.matched else None),
+            "similarity_score": match_result.similarity_score if match_result.matched else 0.0,
+            "image_url": image_url,
+            "reason": f"Track finalized: {decision.status}",
+            "alerted": track.alerted,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(broadcast_event(event_payload), loop)
+
         logger.info("track_finalized", track_id=track.track_id, status=decision.status, alert_level=decision.alert_level)
 
     except Exception as e:
@@ -234,7 +270,7 @@ def _log_event(track: Track, status: str, alert_level: str,
 
 
 def main():
-    global worker_pool, track_queue, loop
+    global track_queue, loop
 
     try:
         settings.validate_config()
@@ -244,7 +280,7 @@ def main():
 
     logger.info("starting_surveillance",
                 camera_id=settings.CAMERA_ID,
-                camera_index=settings.CAMERA_INDEX,
+                camera_source=getattr(settings, "CAMERA_SOURCE", "") or settings.CAMERA_INDEX,
                 alert_channels=settings.ALERT_CHANNELS)
 
     # Check LLM availability
@@ -271,7 +307,6 @@ def main():
     from dashboard.backend.main import app
 
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
     config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="warning", access_log=False)
     server = uvicorn.Server(config)

@@ -42,9 +42,10 @@ def should_send_alert(track_id: str, alert_level: str, status: str = None) -> bo
     now = time.time()
     with _alert_lock:
         _prune_stale_alerts()
-        # Global dedup for unverified/unknown alerts — only one at a time
+        # Per-alert-level dedup for unverified/unknown alerts — a routine
+        # unknown must not suppress a critical (blacklist/after-hours) alert.
         if status in _UNVERIFIED_STATUSES:
-            key = "global:unverified"
+            key = f"unverified:{alert_level}"
         else:
             key = f"{track_id}:{alert_level}"
         last = _alert_timestamps.get(key, 0)
@@ -120,23 +121,15 @@ def _alert_console(payload: dict, decision: DecisionResult = None):
     status = payload["status"]
     track_id = payload["track_id"]
 
-    emoji_map = {
-        "critical": "!!!",
-        "high": "!!",
-        "medium": "!",
-        "low": "*",
-        "none": ""
-    }
-    prefix = emoji_map.get(level, "")
+    summary = decision.nl_summary if decision and decision.nl_summary else payload["reason"]
+    name = payload.get("name")
 
-    print(f"\n{prefix} ALERT [{level}] {status} | Track: {track_id}")
-    if decision and decision.nl_summary:
-        print(f"    {decision.nl_summary}")
-    else:
-        print(f"    Reason: {payload['reason']}")
-    if payload.get("name"):
-        print(f"    Person: {payload['name']}")
-    print()
+    logger.warning("alert",
+                   alert_level=level.lower(),
+                   status=status,
+                   track_id=track_id,
+                   summary=summary,
+                   name=name)
 
 
 def _alert_email(payload: dict, decision: DecisionResult = None):

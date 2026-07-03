@@ -176,7 +176,7 @@ class RecognitionAgent(BaseAgent):
 
         # Mask penalty
         if is_masked:
-            confidence *= settings.MASK_CONFIDENCE_PENALITY
+            confidence *= settings.MASK_CONFIDENCE_PENALTY
 
         return max(0, min(100, confidence))
 

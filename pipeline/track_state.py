@@ -12,6 +12,7 @@ class TrackState:
         self._tracks: Dict[str, Track] = {}
         self._lock = threading.Lock()
         self._session_epoch = int(time.time())
+        self._in_flight: Dict[str, int] = {}  # track_id → active recognition count
 
     def _make_composite_id(self, camera_id: str, byte_track_id: int) -> str:
         return f"{camera_id}_{self._session_epoch}_{byte_track_id}"
@@ -58,7 +59,10 @@ class TrackState:
                 if track.is_expired(settings.TRACK_TIMEOUT_SECS) or track.is_max_lifetime_exceeded():
                     self._classify_visibility_inplace(track)
                     expired.append(track)
-                    to_remove.append(cid)
+                    # Defer actual removal while a recognition thread is still
+                    # writing to the track (set_best_face, set_embedding, etc.).
+                    if self._in_flight.get(cid, 0) == 0:
+                        to_remove.append(cid)
             for cid in to_remove:
                 del self._tracks[cid]
         return expired
@@ -85,6 +89,33 @@ class TrackState:
                     track.face_detected_once = True
                 if face_ratio > track.max_face_ratio:
                     track.max_face_ratio = face_ratio
+
+    def begin_recognition(self, composite_id: str):
+        """Mark a track as having an in-flight recognition task."""
+        with self._lock:
+            self._in_flight[composite_id] = self._in_flight.get(composite_id, 0) + 1
+
+    def end_recognition(self, composite_id: str):
+        """Clear one in-flight recognition reference for a track.
+
+        If the track has expired and no other recognition threads hold a
+        reference, it is removed from _tracks here so finalization can proceed.
+        """
+        with self._lock:
+            count = self._in_flight.get(composite_id, 0)
+            if count <= 1:
+                self._in_flight.pop(composite_id, None)
+                # If the track expired while recognition was running it was
+                # reported by get_expired_tracks() but NOT removed because
+                # _in_flight > 0.  Now that we are the last reference, clean
+                # it up so the next get_expired_tracks() call (or the
+                # progressive-recognition finally block) can finalize it.
+                track = self._tracks.get(composite_id)
+                if track and (track.is_expired(settings.TRACK_TIMEOUT_SECS)
+                              or track.is_max_lifetime_exceeded()):
+                    del self._tracks[composite_id]
+            else:
+                self._in_flight[composite_id] = count - 1
 
     def set_best_face(self, composite_id: str, face_crop: np.ndarray,
                       face_score: float, full_frame: np.ndarray, face_ratio: float):

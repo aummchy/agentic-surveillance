@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import axios from 'axios'
+import { getImageUrl } from '../utils/api'
 
 function VerifyModal({ person, onVerified, onClose }) {
   const [name, setName] = useState('')
@@ -9,7 +10,7 @@ function VerifyModal({ person, onVerified, onClose }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    
+
     if (!name.trim()) {
       setError('Please enter a name')
       return
@@ -33,7 +34,7 @@ function VerifyModal({ person, onVerified, onClose }) {
 
   const getPersonImage = () => {
     if (person.images && person.images.length > 0) {
-      return person.images[0].url
+      return getImageUrl(person.images[0].url)
     }
     return null
   }
@@ -42,14 +43,14 @@ function VerifyModal({ person, onVerified, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Verify Person</h2>
-        
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
+
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
           gap: '1rem',
           marginBottom: '1.5rem',
           padding: '1rem',
-          background: '#0f3460',
+          background: '#f0f4f8',
           borderRadius: '8px'
         }}>
           {getPersonImage() ? (
@@ -68,7 +69,7 @@ function VerifyModal({ person, onVerified, onClose }) {
               width: '80px',
               height: '80px',
               borderRadius: '8px',
-              background: '#1a1a2e',
+              background: '#e2e8f0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

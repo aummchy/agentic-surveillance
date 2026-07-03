@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
-import axios from 'axios'
+import api from '../utils/api'
+
+const MAX_MESSAGES = 100
 
 function ChatPanel() {
   const [messages, setMessages] = useState([
@@ -21,7 +23,7 @@ function ChatPanel() {
 
   const checkHealth = async () => {
     try {
-      const res = await axios.get('/api/chat/health')
+      const res = await api.get('/api/chat/health')
       setLlmAvailable(res.data.available)
     } catch {
       setLlmAvailable(false)
@@ -39,14 +41,26 @@ function ChatPanel() {
     if (!text || loading) return
 
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', text }])
+    const userMsg = { role: 'user', text }
+    setMessages(prev => {
+      const next = [...prev, userMsg]
+      return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next
+    })
     setLoading(true)
 
     try {
-      const res = await axios.post('/api/chat', { message: text })
+      const history = messages
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .slice(-20)
+        .map((m) => ({ role: m.role, content: m.text }))
+
+      const res = await api.post('/api/chat', { message: text, history })
       const { response, data, llm_available } = res.data
       setLlmAvailable(llm_available)
-      setMessages(prev => [...prev, { role: 'assistant', text: response, data }])
+      setMessages(prev => {
+        const next = [...prev, { role: 'assistant', text: response, data }]
+        return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next
+      })
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',

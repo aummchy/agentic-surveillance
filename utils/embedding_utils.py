@@ -35,120 +35,33 @@ class InsightFaceSingleton:
     @staticmethod
     def _apply_clahe(image: np.ndarray) -> np.ndarray:
         """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to improve
-        face detection and embedding quality in variable lighting."""
+        face detection and embedding quality in variable lighting.
+
+        Skips CLAHE when the image already has good contrast (measured by the
+        standard deviation of the L channel in LAB space). This avoids the
+        overhead of color-space conversion + histogram equalization on frames
+        that don't need it."""
         if image is None or len(image.shape) < 2:
             return image
         if len(image.shape) == 3 and image.shape[2] == 3:
             lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
             l_channel = lab[:, :, 0]
+            # Skip CLAHE if contrast is already adequate (std >= 40 is well-lit, high-contrast)
+            l_std = float(l_channel.std())
+            if l_std >= 40.0:
+                return image
             clahe = cv2.createCLAHE(clipLimit=settings.CLAHE_CLIP_LIMIT,
                                      tileGridSize=(settings.CLAHE_TILE_SIZE, settings.CLAHE_TILE_SIZE))
             lab[:, :, 0] = clahe.apply(l_channel)
             return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
         elif len(image.shape) == 2:
+            std = float(image.std())
+            if std >= 40.0:
+                return image
             clahe = cv2.createCLAHE(clipLimit=settings.CLAHE_CLIP_LIMIT,
                                      tileGridSize=(settings.CLAHE_TILE_SIZE, settings.CLAHE_TILE_SIZE))
             return clahe.apply(image)
         return image
-
-    def detect_and_embed(self, image: np.ndarray) -> EmbeddingResult:
-        try:
-            h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
-            image = self._apply_clahe(image)
-            faces = self.app.get(image)
-
-            if not faces:
-                logger.debug("no_face_detected", width=w, height=h)
-                return EmbeddingResult(
-                    face_detected=False,
-                    error="No face detected"
-                )
-
-            best_face = max(faces, key=lambda f: f.det_score)
-            logger.debug("face_detected",
-                        det_score=best_face.det_score,
-                        threshold=settings.DET_SCORE_MIN,
-                        faces_found=len(faces),
-                        width=w,
-                        height=h)
-
-            if best_face.det_score < settings.DET_SCORE_MIN:
-                logger.debug("detection_score_below_threshold",
-                           score=best_face.det_score,
-                           threshold=settings.DET_SCORE_MIN)
-                return EmbeddingResult(
-                    face_detected=True,
-                    detection_score=float(best_face.det_score),
-                    error=f"Detection score {best_face.det_score:.3f} below threshold"
-                )
-
-            embedding = best_face.normed_embedding
-            bbox = tuple(map(int, best_face.bbox))
-
-            is_masked = self._detect_mask_geometric(best_face.landmark)
-
-            return EmbeddingResult(
-                embedding=embedding,
-                face_detected=True,
-                detection_score=float(best_face.det_score),
-                embedding_score=float(best_face.det_score),
-                bbox=bbox,
-                is_masked=is_masked
-            )
-
-        except Exception as e:
-            logger.error("detect_and_embed_failed", error=str(e))
-            return EmbeddingResult(
-                face_detected=False,
-                error=str(e)
-            )
-
-    def embed_only(self, image: np.ndarray, det_score: float) -> EmbeddingResult:
-        try:
-            h, w = image.shape[:2] if image is not None and len(image.shape) >= 2 else (0, 0)
-            image = self._apply_clahe(image)
-            faces = self.app.get(image)
-
-            if not faces:
-                logger.debug("embed_only_no_face", width=w, height=h)
-                return EmbeddingResult(
-                    face_detected=False,
-                    error="No face detected"
-                )
-
-            best_face = max(faces, key=lambda f: f.det_score)
-            logger.debug("embed_only_face_detected",
-                        det_score=best_face.det_score,
-                        threshold=settings.EMBEDDING_DET_SCORE_MIN)
-
-            if best_face.det_score < settings.EMBEDDING_DET_SCORE_MIN:
-                return EmbeddingResult(
-                    face_detected=True,
-                    detection_score=float(best_face.det_score),
-                    embedding_score=float(best_face.det_score),
-                    error=f"Embedding quality score {best_face.det_score:.3f} below threshold"
-                )
-
-            embedding = best_face.normed_embedding
-            bbox = tuple(map(int, best_face.bbox))
-
-            is_masked = self._detect_mask_geometric(best_face.landmark)
-
-            return EmbeddingResult(
-                embedding=embedding,
-                face_detected=True,
-                detection_score=det_score,
-                embedding_score=float(best_face.det_score),
-                bbox=bbox,
-                is_masked=is_masked
-            )
-
-        except Exception as e:
-            logger.error("embed_only_failed", error=str(e))
-            return EmbeddingResult(
-                face_detected=False,
-                error=str(e)
-            )
 
     def _detect_mask_geometric(self, landmarks: np.ndarray) -> bool:
         if landmarks is None or len(landmarks) < 5:

@@ -70,19 +70,23 @@
   "VECTOR_SEARCH_LIMIT": 5,
   "SCAN_LIMIT": 500,
 
+  // ── Embedding History ────────────────────────────────────────
+  // EMBEDDING_HISTORY_CAP: Max past embeddings stored per person.
+  "EMBEDDING_HISTORY_CAP": 25,
+
   // ── Recognition Thresholds ───────────────────────────────────
   // VERY_HIGH_SIMILARITY: Definite known (0.90+ typical).
   // HIGH_CONFIDENCE: Skip re-recognition (0.85+).
   // KNOWN_VISITOR_SIMILARITY: Auto-escalate to known_visitor.
   // KNOWN_VISITOR_CONFIDENCE: Alternative confidence threshold.
   // BORDERLINE_QUALITY: Face quality threshold for borderline case.
-  // MASK_CONFIDENCE_PENALITY: Multiply confidence by this for masked faces.
+  // MASK_CONFIDENCE_PENALTY: Multiply confidence by this for masked faces.
   "VERY_HIGH_SIMILARITY": 0.90,
   "HIGH_CONFIDENCE_SIMILARITY": 0.85,
   "KNOWN_VISITOR_SIMILARITY": 0.85,
   "KNOWN_VISITOR_CONFIDENCE": 80,
   "BORDERLINE_FACE_QUALITY": 0.8,
-  "MASK_CONFIDENCE_PENALITY": 0.85,
+  "MASK_CONFIDENCE_PENALTY": 0.85,
 
   // ── CLAHE (Contrast Enhancement) ────────────────────────────
   // Applied to every frame before face detection.
@@ -117,6 +121,9 @@
   "OLLAMA_TIMEOUT": 30,
 
   // ── Camera ───────────────────────────────────────────────────
+  // CAMERA_SOURCE: RTSP URL string (e.g. "rtsp://192.168.1.10:554/stream")
+  //   for mobile phone cameras. Empty string = use CAMERA_INDEX instead.
+  "CAMERA_SOURCE": "",
   "CAMERA_INDEX": 0,
   "CAMERA_ID": "cam_01"
 }

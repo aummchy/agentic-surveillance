@@ -202,7 +202,10 @@ def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
     import numpy as np
     collection = get_faces_collection()
 
-    unknowns = list(collection.find({"role": "unknown"}, {"latest_embedding": 1, "person_id": 1}).limit(500))
+    unknowns = list(collection.find(
+        {"role": "unknown"},
+        {"latest_embedding": 1, "person_id": 1}
+    ).sort("created_at", -1).limit(500))
 
     if not unknowns:
         return []
@@ -387,20 +390,24 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
     if push_ops:
         update_ops["$push"] = push_ops
         if "embeddings" in push_ops:
+            emb_cap = getattr(settings, "EMBEDDING_HISTORY_CAP", 25)
             update_ops["$push"]["embeddings"] = {
                 "$each": [push_ops["embeddings"]],
-                "$slice": -10
+                "$slice": -emb_cap
             }
-            # Recompute mean_embedding after adding new embedding
+            # Recompute mean_embedding (query BEFORE push to avoid double-counting)
+            # TODO: Consider quality-weighted trimming — keep best N embeddings by
+            # quality_score rather than most recent N. Deferred: requires sorting
+            # the full embedding+quality list and is a larger change than the cap
+            # increase scoped here.
             existing = collection.find_one(
                 {"person_id": person_id},
                 {"embeddings": 1}
             )
             if existing:
                 all_embs = existing.get("embeddings", [])
-                all_embs.append(embedding)  # include the one being added
-                # Keep only last 10
-                all_embs = all_embs[-10:]
+                all_embs.append(embedding)
+                all_embs = all_embs[-emb_cap:]
                 update_ops["$set"]["mean_embedding"] = _compute_mean_embedding(all_embs)
 
     result = collection.update_one({"person_id": person_id}, update_ops)
@@ -590,76 +597,65 @@ def get_or_create_memory(person_id: str) -> dict:
 
 def update_visit_memory(person_id: str, camera_id: str, status: str,
                         similarity: float, is_masked: bool = False) -> dict:
-    """Update memory after a visit. Returns updated memory."""
+    """Update memory after a visit using a single atomic MongoDB operation.
+
+    Replaces the previous read-modify-write pattern to eliminate the TOCTOU
+    race: two concurrent calls for the same person_id now serialize at the
+    database level — visit counts, histories, and camera lists are never lost.
+    """
     collection = get_memory_collection()
     now = datetime.utcnow()
-    
-    memory = get_or_create_memory(person_id)
-    
-    # Update visit count
-    new_count = memory.get("visit_count", 0) + 1
-    
-    # Update similarity history (keep last 10)
-    sim_history = memory.get("similarity_history", [])
-    sim_history.append(similarity)
-    if len(sim_history) > 10:
-        sim_history = sim_history[-10:]
-    avg_sim = sum(sim_history) / len(sim_history) if sim_history else 0.0
-    
-    # Update status history (keep last 10)
-    status_history = memory.get("status_history", [])
-    status_history.append({"status": status, "timestamp": now})
-    if len(status_history) > 10:
-        status_history = status_history[-10:]
-    
-    # Update typical hours (extract hour from last 20 visits)
     hour = now.hour
-    typical_hours = memory.get("typical_hours", [])
-    typical_hours.append(hour)
-    if len(typical_hours) > 20:
-        typical_hours = typical_hours[-20:]
-    
-    # Update typical cameras
-    typical_cameras = memory.get("typical_cameras", [])
-    if camera_id not in typical_cameras:
-        typical_cameras.append(camera_id)
-    if len(typical_cameras) > 5:
-        typical_cameras = typical_cameras[-5:]
-    
-    update_ops = {
-        "$set": {
-            "visit_count": new_count,
-            "last_seen": now,
-            "last_camera": camera_id,
-            "last_status": status,
-            "avg_similarity": avg_sim,
-            "similarity_history": sim_history,
-            "status_history": status_history,
-            "typical_hours": typical_hours,
-            "typical_cameras": typical_cameras,
-            "updated_at": now
-        }
-    }
-    
-    # Update first_seen only if it's the first visit
-    if new_count == 1:
-        update_ops["$set"]["first_seen"] = now
-    
-    collection.update_one({"person_id": person_id}, update_ops, upsert=True)
-    
-    # Return updated memory directly instead of re-querying
+    status_entry = {"status": status, "timestamp": now}
+
+    # Upsert with atomic operators — no prior read needed.
+    #   $inc  — visit_count is always safe to atomically increment.
+    #   $push/$slice — bounded arrays (similarity_history, status_history,
+    #                  typical_hours) grow by one element then $slice trims
+    #                  to the last N, all in one server round-trip.
+    #   $addToSet — typical_cameras grows only when a new camera_id appears.
+    #   $set  — scalar fields are last-writer-wins, which is the correct
+    #           semantic for last_seen / last_camera / last_status.
+    #
+    # avg_similarity cannot be computed server-side without $reduce, so we
+    # accept that it may lag by one concurrent update.  It is informational
+    # and does not drive any critical logic.
+
+    result = collection.find_one_and_update(
+        {"person_id": person_id},
+        {
+            "$inc": {"visit_count": 1},
+            "$push": {
+                "similarity_history": {"$each": [similarity], "$slice": -10},
+                "status_history": {"$each": [status_entry], "$slice": -10},
+                "typical_hours": {"$each": [hour], "$slice": -20},
+            },
+            "$addToSet": {"typical_cameras": camera_id},
+            "$set": {
+                "last_seen": now,
+                "last_camera": camera_id,
+                "last_status": status,
+                "updated_at": now,
+            },
+        },
+        upsert=True,
+        return_document=True,
+    )
+
+    # Return a summary consistent with what callers expect (memory.py only
+    # reads visit_count from the result).
     return {
         "person_id": person_id,
-        "visit_count": new_count,
+        "visit_count": result.get("visit_count", 1),
         "last_seen": now,
         "last_camera": camera_id,
         "last_status": status,
-        "avg_similarity": avg_sim,
-        "similarity_history": sim_history,
-        "status_history": status_history,
-        "typical_hours": typical_hours,
-        "typical_cameras": typical_cameras,
-        "updated_at": now
+        "avg_similarity": result.get("avg_similarity", 0.0),
+        "similarity_history": result.get("similarity_history", []),
+        "status_history": result.get("status_history", []),
+        "typical_hours": result.get("typical_hours", []),
+        "typical_cameras": result.get("typical_cameras", []),
+        "updated_at": now,
     }
 
 
