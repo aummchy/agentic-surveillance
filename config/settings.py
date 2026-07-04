@@ -329,6 +329,9 @@ CAMERA_INDEX = _get("CAMERA_INDEX", "CAMERA_INDEX", 0, int)
 FRAME_WIDTH = _get("FRAME_WIDTH", "FRAME_WIDTH", 1280, int)
 FRAME_HEIGHT = _get("FRAME_HEIGHT", "FRAME_HEIGHT", 720, int)
 CAMERA_ID = _get("CAMERA_ID", "CAMERA_ID", "cam_01")
+# CAMERA_BACKEND: Video capture backend — "dshow" (DirectShow), "msmf", or "" (auto).
+# Use "dshow" on Windows if MSMF drops frames (error -1072875772).
+CAMERA_BACKEND = _get("CAMERA_BACKEND", "CAMERA_BACKEND", "")
 
 # ── LLM (Ollama) ──────────────────────────────────────────────
 OLLAMA_URL = _get("OLLAMA_URL", "OLLAMA_URL", "http://localhost:11434")

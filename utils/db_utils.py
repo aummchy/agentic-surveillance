@@ -298,27 +298,33 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
         except Exception:
             matches = []
 
-        # Check for similar unknowns
+        # Single dedup loop — check all roles in one pass
         for m in matches:
-            if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
-                existing_id = m["person_id"]
-                existing = collection.find_one({"person_id": existing_id}, {"role": 1})
-                if existing and existing.get("role") == "unknown":
-                    update_face(existing_id, image_url, embedding, quality_score=quality_score)
-                    logger.info("store_face_merged_unknown", person_id=existing_id,
-                                 similarity=m["similarity_score"])
-                    return existing_id
+            if m["similarity_score"] < settings.DEDUP_SIMILARITY_THRESHOLD:
+                continue
 
-        # Check for similar verified/known faces
-        for m in matches:
-            if m["similarity_score"] >= settings.DEDUP_SIMILARITY_THRESHOLD:
-                existing_id = m["person_id"]
-                existing = collection.find_one({"person_id": existing_id}, {"role": 1, "verified": 1})
-                if existing:
-                    update_face(existing_id, image_url, embedding, quality_score=quality_score)
-                    logger.info("store_face_merged_existing", person_id=existing_id,
-                                 similarity=m["similarity_score"], verified=existing.get("verified", False))
-                    return existing_id
+            existing_id = m["person_id"]
+            existing = collection.find_one(
+                {"person_id": existing_id}, {"role": 1, "verified": 1}
+            )
+            if not existing:
+                continue
+
+            # NEVER silently overwrite a verified person's embedding
+            if existing.get("verified"):
+                logger.warning("store_face_verified_conflict",
+                               existing_person_id=existing_id,
+                               similarity=m["similarity_score"],
+                               note="New embedding not merged — verified person. Operator review needed.")
+                continue
+
+            # Safe to merge into unknown/unverified
+            update_face(existing_id, image_url, embedding, quality_score=quality_score)
+            logger.info("store_face_merged",
+                        existing_person_id=existing_id,
+                        role=existing.get("role"),
+                        similarity=m["similarity_score"])
+            return existing_id
 
     doc = {
         "person_id": person_id,

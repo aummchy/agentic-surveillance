@@ -157,6 +157,12 @@ class TrackState:
             if track:
                 track.person_name = name
 
+    def set_face_crop_path(self, composite_id: str, path: str):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.best_face_crop_path = path
+
     def set_pending_recognition(self, composite_id: str, frame_num: int,
                                 embedding: list = None, match: dict = None):
         with self._lock:

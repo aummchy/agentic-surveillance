@@ -16,9 +16,9 @@
 
   // ── Camera ───────────────────────────────────────────────────
   // Higher resolution = more face detail = better recognition.
-  // Use 1280x720 if your webcam supports it.
-  "FRAME_WIDTH": 1280,
-  "FRAME_HEIGHT": 720,
+  // Camera will auto-negotiate down if max not supported.
+  "FRAME_WIDTH": 1920,
+  "FRAME_HEIGHT": 1080,
 
   // ── YOLO Detection ──────────────────────────────────────────
   // Person detection confidence threshold.

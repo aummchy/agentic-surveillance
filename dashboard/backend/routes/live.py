@@ -32,6 +32,9 @@ async def broadcast_frame(frame_data: bytes):
         "data": base64.b64encode(frame_data).decode("utf-8")
     })
 
+    if _frame_counter % 100 == 1:
+        logger.info("frame_broadcast", frame_num=_frame_counter, clients=len(connected_clients), size=len(frame_data))
+
     async def _send(client):
         try:
             await asyncio.wait_for(client.send_text(message), timeout=1.0)

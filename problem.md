@@ -1,8 +1,8 @@
 # Problem Report — agentic_ai_singlecam
 
-Codebase audit performed 2026-06-25 (updated 2026-06-25). Issues are grouped by severity and verified against actual source lines.
+Codebase audit performed 2026-06-25 (updated 2026-07-03). Issues are grouped by severity and verified against actual source lines.
 
-**Status: 1 issue remaining (.env credentials). 84 prior issues FIXED. 8 improvements applied.**
+**Status: 3 issues remaining (1 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW). 86 prior issues FIXED. 8 improvements applied.**
 
 ---
 
@@ -17,6 +17,36 @@ Codebase audit performed 2026-06-25 (updated 2026-06-25). Issues are grouped by 
 Real MongoDB Atlas URI, Cloudinary API key, and Cloudinary secret are present in `.env`. While `.gitignore` excludes it from git, any non-git distribution (zip, tarball, rsync) ships these credentials. A leaked MongoDB URI allows full database read/write/delete. A leaked Cloudinary secret allows arbitrary image operations.
 
 **Fix:** Rotate all credentials immediately. Keep `.env.example` with placeholders only.
+
+### HIGH
+
+#### Issue 85 — `store_face` silently overwrites verified person's embedding — **FIXED**
+
+**File:** `utils/db_utils.py:312-321` → replaced with single loop at lines 301-327
+
+### MEDIUM
+
+#### Issue 86 — Duplicate dedup loops in `store_face` waste DB queries — **FIXED**
+
+**File:** `utils/db_utils.py:294-321` → merged into single loop at lines 301-327
+
+### LOW
+
+#### Issue 87 — `_finalize_track` creates fake quality object via `type()`
+
+**File:** `agents/camera_agent.py:249`
+
+When no face crop is available, a dummy quality object is created with `type('Q', (), {'is_valid': False, 'overall_score': 0.0})()`. This is fragile — if any downstream code checks for additional attributes (e.g., `blur_score`, `brightness`), it will raise `AttributeError`. Should use the existing `QualityResult` model from `pipeline/models.py` with defaults.
+
+**Fix:** Replace with `QualityResult(is_valid=False, overall_score=0.0, ...)` or a shared sentinel.
+
+#### Issue 88 — `CAMERA_SOURCE` missing from `.env` (remote camera not configured)
+
+**File:** `.env`, `.env.example:52`
+
+`.env.example` documents `CAMERA_SOURCE=http://10.151.42.241:8080/video` for remote/IP cameras, but the actual `.env` does not set it. If the user intends to use a remote camera, the system will fall back to `CAMERA_INDEX=0` (local webcam) silently. No runtime error — just wrong camera.
+
+**Fix:** Add `CAMERA_SOURCE=` to `.env` (empty for local webcam, or set to RTSP/HTTP URL for remote).
 
 ---
 
@@ -193,13 +223,16 @@ Real MongoDB Atlas URI, Cloudinary API key, and Cloudinary secret are present in
 | 2026-06-25 (pass 5) | 12 | 12 | 0 |
 | 2026-06-25 (pass 6) | 10 | 9 | 0 |
 | 2026-06-25 (pass 7) | 3 | 3 | 0 |
-| **Total** | **85** | **84** | **1** |
+| 2026-07-03 (pass 8) | 4 | 2 | **2** |
+| **Total** | **89** | **86** | **3** |
 
 ### Open issue breakdown
 
 | # | Severity | Summary |
 |---|----------|---------|
 | 50 | **CRITICAL** | `.env` contains live production credentials — rotate immediately |
+| 87 | LOW | `_finalize_track` creates fake quality object via `type()` |
+| 88 | LOW | `CAMERA_SOURCE` missing from `.env` (remote camera not configured) |
 
 ---
 

@@ -41,8 +41,12 @@ def handle_track_finalized(track: Track):
 def handle_frame_annotated(frame):
     if loop and loop.is_running():
         def _encode_and_broadcast():
-            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_BROADCAST])
-            asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
+            try:
+                _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_BROADCAST])
+                if buffer is not None:
+                    asyncio.run_coroutine_threadsafe(broadcast_frame(buffer.tobytes()), loop)
+            except Exception as e:
+                logger.error("frame_broadcast_failed", error=str(e))
         _encode_executor.submit(_encode_and_broadcast)
 
 
@@ -192,6 +196,24 @@ def process_finalized_track(track: Track):
                 is_masked=track.is_masked
             )
 
+        # Move face crop to person-name folder if matched
+        best_crop_path = getattr(track, 'best_face_crop_path', None)
+        person_name = match_result.name if match_result.matched else None
+        if best_crop_path and person_name and os.path.exists(best_crop_path):
+            import shutil
+            src = best_crop_path
+            filename = os.path.basename(src)
+            dst_dir = f"captures/face_crops/{person_name}"
+            dst = os.path.join(dst_dir, filename)
+            try:
+                os.makedirs(dst_dir, exist_ok=True)
+                shutil.move(src, dst)
+                setattr(track, 'best_face_crop_path', dst)
+                best_crop_path = dst
+                logger.info("face_crop_moved", src=src, dst=dst, person=person_name)
+            except Exception as e:
+                logger.error("face_crop_move_failed", src=src, dst=dst, error=str(e))
+
         # Dispatch external alerts (email/sms/console) — respects global dedup
         alert_dispatched = False
         if decision.should_alert and not track.alerted:
@@ -230,6 +252,7 @@ def process_finalized_track(track: Track):
             "person_name": track.person_name or (match_result.name if match_result.matched else None),
             "similarity_score": match_result.similarity_score if match_result.matched else 0.0,
             "image_url": image_url,
+            "best_face_crop_url": f"http://localhost:8000/{best_crop_path.replace(chr(92), '/')}" if best_crop_path else None,
             "reason": f"Track finalized: {decision.status}",
             "alerted": track.alerted,
             "timestamp": datetime.utcnow().isoformat(),
@@ -337,6 +360,12 @@ def main():
     alert_shutdown()
     llm_shutdown()
     close_client()
+    # Wait for uvicorn server thread to finish, then close event loop
+    server_thread.join(timeout=5)
+    try:
+        loop.close()
+    except Exception:
+        pass
     logger.info("shutdown_complete")
 
 

@@ -32,6 +32,8 @@ class Track:
     face_detected_once: bool = False
     max_face_ratio: float = 0.0
     best_face_ratio: float = 0.0
+    best_face_crop_path: str = ""
+    cached_embedding: Optional[list] = None  # Last embedding searched against Atlas
     visibility: str = "unknown"
     max_track_secs: float = 300.0
 

@@ -10,12 +10,16 @@ from pipeline.track_state import TrackState
 from pipeline.quality_agent import compute_quality
 from pipeline.face import compute_face_ratio
 from pipeline.models import Track
-from utils.image_utils import crop_person, resize_image, draw_annotations
+from utils.image_utils import crop_person, resize_image, draw_annotations, save_image, upload_to_cloudinary
 from utils.embedding_utils import get_insightface
 from agents.recognition import RecognitionAgent
 from agents.memory import MemoryAgent
 
 logger = structlog.get_logger(__name__)
+
+# If new embedding's cosine distance from cached is below this threshold,
+# skip the Atlas vector search round-trip and reuse the last match result.
+EMBEDDING_CACHE_COSINE_THRESHOLD = 0.005
 
 
 class CameraAgent:
@@ -44,28 +48,50 @@ class CameraAgent:
             return src
         return settings.CAMERA_INDEX
 
+    @staticmethod
+    def _open_capture():
+        """Open VideoCapture with configured backend (dshow/msmf/auto)."""
+        source = CameraAgent._camera_source()
+        backend = getattr(settings, "CAMERA_BACKEND", "")
+        if backend and isinstance(source, int):
+            import cv2
+            be = getattr(cv2, f"CAP_{backend.upper()}", None)
+            if be is not None:
+                return cv2.VideoCapture(source, be)
+        import cv2
+        return cv2.VideoCapture(source)
+
+    def _apply_frame_props(self):
+        """Set frame dimensions on the current capture and return actual resolution."""
+        if self._cap and self._cap.isOpened():
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.FRAME_WIDTH)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.FRAME_HEIGHT)
+            actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            return f"{actual_w}x{actual_h}"
+        return "unknown"
+
     def start(self):
         self._running = True
 
         source = self._camera_source()
 
         # Validate camera source
-        test_cap = cv2.VideoCapture(source)
+        test_cap = self._open_capture()
         if not test_cap.isOpened():
             logger.error("camera_source_invalid", source=source)
             test_cap.release()
             return
         test_cap.release()
 
-        self._cap = cv2.VideoCapture(source)
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.FRAME_WIDTH)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.FRAME_HEIGHT)
+        self._cap = self._open_capture()
+        resolution = self._apply_frame_props()
 
         if not self._cap.isOpened():
             logger.error("camera_open_failed")
             return
 
-        logger.info("camera_started", source=source)
+        logger.info("camera_started", source=source, backend=getattr(settings, "CAMERA_BACKEND", "auto"), resolution=resolution)
 
         try:
             self._loop()
@@ -94,9 +120,10 @@ class CameraAgent:
                     # Try to reconnect
                     self._cap.release()
                     time.sleep(1.0)
-                    self._cap = cv2.VideoCapture(self._camera_source())
+                    self._cap = self._open_capture()
                     if self._cap.isOpened():
-                        logger.info("camera_reconnected")
+                        resolution = self._apply_frame_props()
+                        logger.info("camera_reconnected", resolution=resolution)
                         consecutive_failures = 0
                     else:
                         logger.error("camera_reconnect_failed")
@@ -256,6 +283,11 @@ class CameraAgent:
                     frame,
                     face_ratio
                 )
+                crop_path = f"captures/face_crops/{track.track_id}/{self._frame_count}.jpg"
+                save_image(face_crop, crop_path)
+                self.track_state.set_face_crop_path(track.track_id, crop_path)
+                logger.info("face_crop_saved", track_id=track.track_id, path=crop_path,
+                            url=f"http://localhost:8000/{crop_path.replace(chr(92), '/')}")
 
             embedding_list = best["embedding"].tolist()
             self.track_state.set_embedding(
@@ -264,8 +296,23 @@ class CameraAgent:
                 best["is_masked"]
             )
 
-            from agents.matching_agent import run_matching_from_embedding
-            match_result = run_matching_from_embedding(embedding_list)
+            # Check if embedding is nearly identical to last searched one
+            match_result = None
+            if track.cached_embedding is not None and track.pending_match_result is not None:
+                a = np.array(track.cached_embedding, dtype=np.float32)
+                b = np.array(embedding_list, dtype=np.float32)
+                norm_a = np.linalg.norm(a)
+                norm_b = np.linalg.norm(b)
+                if norm_a > 0 and norm_b > 0:
+                    cos_dist = 1.0 - float(np.dot(a, b) / (norm_a * norm_b))
+                    if cos_dist < EMBEDDING_CACHE_COSINE_THRESHOLD:
+                        match_result = track.pending_match_result
+                        logger.debug("embedding_cache_hit", track_id=track.track_id, distance=cos_dist)
+
+            if match_result is None:
+                from agents.matching_agent import run_matching_from_embedding
+                match_result = run_matching_from_embedding(embedding_list)
+                track.cached_embedding = embedding_list
 
             # Phase 2.2: Use Memory Agent for context (skip for high-confidence matches)
             memory_context = {}
@@ -312,7 +359,6 @@ class CameraAgent:
                     already_finalized = track.track_id in self._finalized_track_ids
                 if not already_finalized:
                     from agents.alert_agent import dispatch
-                    from utils.image_utils import upload_to_cloudinary, save_image
                     image_url = track.image_url
                     if not image_url and track.best_full_frame is not None:
                         save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
