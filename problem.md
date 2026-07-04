@@ -1,8 +1,8 @@
 # Problem Report — agentic_ai_singlecam
 
-Codebase audit performed 2026-06-25 (updated 2026-07-03). Issues are grouped by severity and verified against actual source lines.
+Codebase audit performed 2026-06-25 (updated 2026-07-05). Issues are grouped by severity and verified against actual source lines.
 
-**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 86 prior issues FIXED. 8 improvements applied.**
+**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 89 prior issues FIXED. 13 improvements applied.**
 
 ---
 
@@ -94,6 +94,16 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 
 ## IMPROVEMENTS — Tuning & Enhancements Applied
 
+### 2026-07-05 — 5 improvements applied (accuracy pass)
+
+| # | Improvement | File | Impact |
+|---|-------------|------|--------|
+| 9 | **Quality gate on `set_embedding()`** | `track_state.py:140-148` | Prevents bad frames from overwriting good embeddings mid-track |
+| 10 | **Full-frame fallback for low-score crop faces** | `camera_agent.py:208-209` | Recovers detections missed in person-crop but found at full resolution |
+| 11 | **Native crop resolution for finalization detection** | `camera_agent.py:424-425` | Removed 112×112 resize — SCRFD sees the actual crop, not an upsampled thumbnail |
+| 12 | **No unconditional DB embedding overwrite** | `db_utils.py:392-394` | Removed backward-compat path that could silently degrade stored embeddings |
+| 13 | **Reduced `set_best_face` buffer** | `track_state.py:124` | +0.03 (was +0.10) — lets better-quality faces replace marginal ones |
+
 ### 2026-06-25 — 8 improvements applied
 
 | # | Improvement | File | Change |
@@ -110,6 +120,19 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 ---
 
 ## SOLVED — Issues Fixed
+
+### 2026-07-05 (pass 10) — 5 accuracy issues resolved + 3 config tunes
+
+| # | Severity | Issue | File:Line | Status |
+|---|----------|-------|-----------|--------|
+| 93 | **HIGH** | Embedding overwritten without quality gate — bad frames wipe out good embeddings | `track_state.py:140-148` | **FIXED** — `set_embedding()` now checks `det_score` against existing, requires +0.05 to overwrite |
+| 94 | **HIGH** | Full-frame fallback skipped when crop has low-scoring but non-empty faces | `camera_agent.py:208-209` | **FIXED** — full frame now checked when no crop face meets `EMBEDDING_DET_SCORE_MIN` |
+| 95 | MEDIUM | Finalization resizes `best_face_crop` to 112×112 before SCRFD detection (11× upsampling = poor feature maps) | `camera_agent.py:424-425` | **FIXED** — removed `resize_image()` call, passes crop at native resolution |
+| 96 | MEDIUM | `update_face` backward-compat branch overwrites `latest_embedding` unconditionally when `quality_score=None` | `db_utils.py:392-394` | **FIXED** — removed unconditional overwrite branch; `main.py:158,179` always passes `best_face_score` |
+| 97 | LOW | `set_best_face` requires +0.1 quality improvement to replace current best — prevents gradual improvement | `track_state.py:124` | **FIXED** — buffer reduced to +0.03 |
+| — | TUNE | `QUALITY_BLUR_MIN` 30 → 15 | `config.jsonc:49` | Accepts slightly blurry crops that still produce valid embeddings |
+| — | TUNE | `QUALITY_FACE_AREA_MIN` 1600 → 800 | `config.jsonc:52` | Accepts ~28×28 face crops from distant persons |
+| — | TUNE | Removed redundant `DET_SCORE_MIN` tier (identical to `EMBEDDING_DET_SCORE_MIN=0.40`) | `camera_agent.py:213-231` | Simplified best-face selection to single pass |
 
 ### 2026-06-25 (pass 7) — 3 issues resolved
 
@@ -267,7 +290,8 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 | 2026-06-25 (pass 7) | 3 | 3 | 0 |
 | 2026-07-03 (pass 8) | 4 | 2 | **2** |
 | 2026-07-05 (pass 9) | 4 | 0 | **4** |
-| **Total** | **93** | **86** | **7** |
+| 2026-07-05 (pass 10) | 5 | 5 | **0** |
+| **Total** | **98** | **91** | **7** |
 
 ### Open issue breakdown
 
@@ -299,3 +323,8 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 | 2026-06-25 | `recognition_executor.shutdown(wait=True)` | `main.py` | Prevents MongoClient use-after-close |
 | 2026-06-26 | InsightFace model `buffalo_l` → `buffalo_m` | `.env` | Same accuracy (91.25 MR-ALL), 2x faster inference |
 | 2026-06-26 | Quality-gated embedding updates | `utils/db_utils.py` | Only overwrites `latest_embedding` if new quality is higher |
+| 2026-07-05 | Quality gate on `set_embedding()` (det_score check) | `track_state.py:140-148` | Prevents bad frames from overwriting good embeddings on the same track |
+| 2026-07-05 | Full-frame fallback when crop faces score below `EMBEDDING_DET_SCORE_MIN` | `camera_agent.py:208-209` | Recovers lost detections where full-frame SCRFD scale pyramid works better |
+| 2026-07-05 | Removed 112×112 resize before finalization face detection | `camera_agent.py:424-425` | Improves finalization detection success rate by using native crop resolution |
+| 2026-07-05 | Removed backward-compat unconditional `latest_embedding` overwrite | `db_utils.py:392-394` | DB embedding can no longer be silently degraded by a low-quality registration |
+| 2026-07-05 | Lowered `set_best_face` buffer 0.1 → 0.03 | `track_state.py:124` | Allows gradual face quality improvement within a single track |
