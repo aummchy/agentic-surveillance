@@ -2,7 +2,7 @@
 
 Codebase audit performed 2026-06-25 (updated 2026-07-03). Issues are grouped by severity and verified against actual source lines.
 
-**Status: 3 issues remaining (1 CRITICAL, 0 HIGH, 0 MEDIUM, 2 LOW). 86 prior issues FIXED. 8 improvements applied.**
+**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 86 prior issues FIXED. 8 improvements applied.**
 
 ---
 
@@ -19,6 +19,48 @@ Real MongoDB Atlas URI, Cloudinary API key, and Cloudinary secret are present in
 **Fix:** Rotate all credentials immediately. Keep `.env.example` with placeholders only.
 
 ### HIGH
+
+#### Issue 89 — `_finalize_track` race: `no_embedding_after_retries` with `frames_seen=1` after 34-frame track
+
+**File:** `agents/camera_agent.py:394-448`
+
+The camera_agent's `_finalize_track` (line 394) can be called from two concurrent code paths: the `_loop`'s expired-track iteration (line 164-168) and `_progressive_recognition`'s `finally` block (line 386-392). When both fire for the same track, one finds `track.embedding is None` and `total_frames_seen=1`, logging `no_embedding_after_retries` — even though the original track had 34 frames and a valid embedding. The `finally` block does not check `_finalized_track_ids` before submitting, so no dedup prevents the double-submit. The `main.py` handler (`process_track`) recovers correctly because the Track object was set via `set_embedding()`, but the camera thread wastes CPU re-running face detection.
+
+**Log evidence:** Track `cam_01_1783190221_1` — progressive recognition ran twice (frames 20 and 38), `set_embedding` set a 512-dim embedding. At finalization: `no_embedding_after_retries face_detected=False frames_seen=1` (camera_agent), immediately followed by `track_embedding_present embedding_len=512 frames_seen=34` (main.py).
+
+**Fix:** Add `_finalized_track_ids` check in the `finally` block before submitting `_finalize_track`. Also add a lock or atomic flag so only one `_finalize_track` runs per track.
+
+### MEDIUM
+
+#### Issue 90 — `auto_register_dedup_failed`: `len()` called on numpy scalar (0-d array)
+
+**File:** `utils/db_utils.py:215-225` (inside `store_face` / `auto_register_dedup`)
+
+When `track.embedding` is a 0-d numpy array instead of a Python list, `len(embedding)` raises `TypeError: len() of unsized object`. This happens when `embedding.tolist()` returns a scalar instead of a list (edge case in InsightFace's `detect_faces_raw` pipeline — some detection paths return a single-element array that `.tolist()` converts to a float, not a list).
+
+**Log evidence:** `auto_register_dedup_failed error='len() of unsized object'` shown for track `cam_01_1783190221_2` and repeated once.
+
+**Fix:** Wrap `len(embedding)` with a `hasattr(embedding, '__len__')` guard, or convert `track.embedding` to list earlier and validate its type after `tolist()` in `camera_agent.py:288`.
+
+#### Issue 91 — `EMBEDDING_CACHE_COSINE_THRESHOLD` too tight (0.005), cache never fires
+
+**File:** `agents/camera_agent.py:20`
+
+The embedding cache threshold is set to `0.005` — cosine distance must be below 0.5% for a cache hit. In practice, even the same person at slightly different angles/lighting produces cosine distances of 0.01–0.05 between frames. Zero `embedding_cache_hit` logs appeared across an entire session where the same person was recognized 3+ times with nearly identical match results (similarity 0.594 vs 0.5942).
+
+**Log evidence:** Track `cam_01_1783190221_1` — two vector searches at frames 20 and 38, both matched "Unknown" at similarity 0.594 and 0.5942. No `embedding_cache_hit` log (code would have logged at `camera_agent.py:310`). The cache was correctly coded but never activated.
+
+**Fix:** Relax threshold from `0.005` to `0.02` — still a tight bound for "same person same angle" but allows for natural face variation between frames.
+
+#### Issue 92 — Face crops moved to `captures/face_crops/Unknown/` when name is placeholder
+
+**File:** `main.py:200-215`
+
+The face-crop move-to-person-name logic fires for ALL matched persons, but auto-registered persons have `name="Unknown"`. This creates an unhelpful `captures/face_crops/Unknown/` directory. Verified persons like "aum" go to the correct `captures/face_crops/aum/` folder.
+
+**Log evidence:** `face_crop_moved dst=captures/face_crops/Unknown\38.jpg person=Unknown` — a folder literally named "Unknown".
+
+**Fix:** Skip the move when `person_name` is `None`, empty, or equals `"Unknown"`. The crop stays in the track-ID folder as a fallback.
 
 #### Issue 85 — `store_face` silently overwrites verified person's embedding — **FIXED**
 
@@ -224,13 +266,18 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 | 2026-06-25 (pass 6) | 10 | 9 | 0 |
 | 2026-06-25 (pass 7) | 3 | 3 | 0 |
 | 2026-07-03 (pass 8) | 4 | 2 | **2** |
-| **Total** | **89** | **86** | **3** |
+| 2026-07-05 (pass 9) | 4 | 0 | **4** |
+| **Total** | **93** | **86** | **7** |
 
 ### Open issue breakdown
 
 | # | Severity | Summary |
 |---|----------|---------|
 | 50 | **CRITICAL** | `.env` contains live production credentials — rotate immediately |
+| 89 | HIGH | `_finalize_track` race: `frames_seen=1` after 34-frame track (double-submit from `_loop` and `finally` block) |
+| 90 | MEDIUM | `auto_register_dedup_failed`: `len()` on numpy scalar (0-d array from `tolist()`) |
+| 91 | MEDIUM | `EMBEDDING_CACHE_COSINE_THRESHOLD=0.005` too tight — never fires in practice |
+| 92 | MEDIUM | Face crops moved to `captures/face_crops/Unknown/` when name is placeholder "Unknown" |
 | 87 | LOW | `_finalize_track` creates fake quality object via `type()` |
 | 88 | LOW | `CAMERA_SOURCE` missing from `.env` (remote camera not configured) |
 

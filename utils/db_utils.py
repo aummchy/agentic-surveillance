@@ -389,9 +389,6 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
             if quality_score > current_quality:
                 update_ops["$set"]["latest_embedding"] = embedding
                 update_ops["$set"]["latest_embedding_quality"] = quality_score
-        else:
-            # No quality info — always update (backward compat)
-            update_ops["$set"]["latest_embedding"] = embedding
 
     if push_ops:
         update_ops["$push"] = push_ops

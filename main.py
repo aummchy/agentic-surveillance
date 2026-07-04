@@ -155,7 +155,7 @@ def process_finalized_track(track: Track):
                             existing_id,
                             image_url=image_url,
                             embedding=track.embedding,
-                            quality_score=track.best_face_score if track.best_face_score > 0 else None,
+                            quality_score=track.best_face_score,
                         )
                         logger.info("auto_register_merged",
                                     existing_person_id=existing_id,

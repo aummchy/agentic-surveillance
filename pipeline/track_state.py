@@ -121,7 +121,7 @@ class TrackState:
                       face_score: float, full_frame: np.ndarray, face_ratio: float):
         with self._lock:
             track = self._tracks.get(composite_id)
-            if not track or face_score <= track.best_face_score + 0.1:
+            if not track or face_score <= track.best_face_score + 0.03:
                 return
 
         # Encode JPEG outside the lock (expensive operation) — only if score improved significantly
@@ -137,12 +137,14 @@ class TrackState:
                 track.best_face_ratio = face_ratio
                 track.best_frame_jpeg = jpeg_bytes
 
-    def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False):
+    def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                track.embedding = embedding
-                track.is_masked = is_masked
+                if track.embedding is None or det_score > getattr(track, '_embedding_det_score', 0.0) + 0.05:
+                    track.embedding = embedding
+                    track.is_masked = is_masked
+                    track._embedding_det_score = det_score
 
     def set_decision(self, composite_id: str, decision: str, alerted: bool = False):
         with self._lock:

@@ -46,10 +46,10 @@
   // BLUR_MAX: Normalization cap for blur score.
   // AREA_MAX: Normalization cap for face area.
   // Weights: Must sum to 1.0.
-  "QUALITY_BLUR_MIN": 30,
+  "QUALITY_BLUR_MIN": 15,
   "QUALITY_BRIGHTNESS_MIN": 30,
   "QUALITY_BRIGHTNESS_MAX": 240,
-  "QUALITY_FACE_AREA_MIN": 1600,
+  "QUALITY_FACE_AREA_MIN": 800,
   "QUALITY_BLUR_MAX": 1000,
   "QUALITY_AREA_MAX": 10000,
   "QUALITY_WEIGHT_BLUR": 0.60,

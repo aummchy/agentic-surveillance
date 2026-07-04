@@ -201,34 +201,21 @@ class CameraAgent:
 
             app = get_insightface()
 
-            # Two-stage detection: person crop first (more focused), then full frame.
-            # crop_faces already filtered to det_score >= DET_SCORE_RELAXED, so best
-            # is always set when crop_faces is non-empty — full-frame fallback only
-            # triggers when the crop finds zero faces (see frame_faces assignment).
+            # Two-stage detection: person crop first (more focused), then full frame
+            # when the crop has no faces with embedding-grade quality.
             crop_faces = app.detect_faces_raw(person_crop, min_score=settings.DET_SCORE_RELAXED)
-            frame_faces = app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED) if not crop_faces else []
+            crop_has_embedding_quality = any(f["det_score"] >= settings.EMBEDDING_DET_SCORE_MIN for f in crop_faces)
+            frame_faces = app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED) if not crop_has_embedding_quality else []
 
             best = None
             detected_in_person_crop = False
             if crop_faces:
-                # Try standard threshold on crop first
-                best = next((f for f in crop_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
-                if best:
-                    detected_in_person_crop = True
-                    logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
-                else:
-                    # All crop faces are >= DET_SCORE_RELAXED, so this always succeeds
-                    best = crop_faces[0]
-                    detected_in_person_crop = True
-                    logger.info("face_found_relaxed_crop", track_id=track.track_id, score=best["det_score"])
+                best = crop_faces[0]
+                detected_in_person_crop = True
+                logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
             elif frame_faces:
-                # Crop found nothing — fall back to full frame
-                best = next((f for f in frame_faces if f["det_score"] >= settings.DET_SCORE_MIN), None)
-                if best:
-                    logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
-                else:
-                    best = frame_faces[0]
-                    logger.info("face_found_relaxed_frame", track_id=track.track_id, score=best["det_score"])
+                best = frame_faces[0]
+                logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
 
             if not best:
                 logger.debug("no_face_anywhere", track_id=track.track_id)
@@ -293,7 +280,8 @@ class CameraAgent:
             self.track_state.set_embedding(
                 track.track_id,
                 embedding_list,
-                best["is_masked"]
+                best["is_masked"],
+                det_score=best["det_score"]
             )
 
             # Check if embedding is nearly identical to last searched one
@@ -421,8 +409,7 @@ class CameraAgent:
                 crop_faces = []
                 if track.best_face_crop is not None:
                     try:
-                        resized = resize_image(track.best_face_crop)
-                        crop_faces = app.detect_faces_raw(resized, min_score=settings.DET_SCORE_RELAXED)
+                        crop_faces = app.detect_faces_raw(track.best_face_crop, min_score=settings.DET_SCORE_RELAXED)
                     except Exception as e:
                         logger.debug("best_face_crop_detect_failed", track_id=track.track_id, error=str(e))
 
