@@ -915,7 +915,8 @@ Secrets (API keys, passwords, URIs) belong in `.env`, not `config.jsonc`.
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
-| `CAMERA_INDEX` | `0` | int | cv2 VideoCapture device index |
+| `CAMERA_SOURCE` | `""` | str | RTSP/HTTP URL for mobile camera (e.g. `http://192.168.x.x:8080/video` with IP Webcam). Overrides `CAMERA_INDEX` when set. |
+| `CAMERA_INDEX` | `0` | int | cv2 VideoCapture device index (used only when `CAMERA_SOURCE` is empty) |
 | `FRAME_WIDTH` | `1280` | int | Capture width (pixels) |
 | `FRAME_HEIGHT` | `720` | int | Capture height (pixels) |
 | `CAMERA_ID` | `"cam_01"` | str | Logical camera identifier |
@@ -1306,7 +1307,7 @@ surveillance-system/
 - Python 3.11 (InsightFace/onnxruntime wheels unreliable on other versions)
 - MongoDB Atlas cluster with `surveillance` database
 - Atlas Vector Search index named `vector_index` on `faces.latest_embedding` (512 dims, cosine)
-- Camera device at `CAMERA_INDEX=0` (or adjust in `.env`)
+- Camera: local webcam (`CAMERA_INDEX=0`) **or** mobile phone via IP Webcam app (set `CAMERA_SOURCE=http://192.168.x.x:8080/video` in `.env`)
 - Ollama with a model installed (e.g., `ollama pull gemma3:4b` or `ollama pull qwen3.5:4b`) *(optional — system falls back to templates)*
 - For Intel Arc iGPU acceleration: `pip install openvino` and export YOLO: `yolo export model=yolov8s.pt format=openvino half=True` *(optional — CPU works too)*
 
@@ -1364,7 +1365,7 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 | Issue | Solution |
 |-------|----------|
 | `MONGODB_URI is required` | Set `MONGODB_URI` in `.env` |
-| Camera window black | Change `CAMERA_INDEX` in `.env` |
+| Camera window black | Change `CAMERA_INDEX` in `.env`, or set `CAMERA_SOURCE=http://<phone-ip>:8080/video` for mobile IP Webcam |
 | No face embeddings | Lower `DET_SCORE_MIN` in `config/config.jsonc` |
 | Low similarity scores | Delete old embeddings and re-embed. Quality-gated embeddings now prevent low-quality overwrites |
 | Dashboard shows nothing | Ensure FastAPI running on port 8000 |
