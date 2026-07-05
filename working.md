@@ -247,8 +247,8 @@ class Track:
 {
     "embedding": np.ndarray | None,  # 512-dim L2-normalized
     "face_detected": bool,
-    "detection_score": float,        # SCRFD det_score (threshold: DET_SCORE_MIN=0.50)
-    "embedding_score": float,        # quality gate (threshold: EMBEDDING_DET_SCORE_MIN=0.70)
+    "detection_score": float,        # SCRFD det_score (entry: DET_SCORE_RELAXED=0.20; embedding: EMBEDDING_DET_SCORE_MIN=0.40)
+    "embedding_score": float,        # quality gate (threshold: EMBEDDING_DET_SCORE_MIN=0.40)
     "bbox": tuple | None,            # (x1, y1, x2, y2)
     "is_masked": bool,               # mask present on this face
     "error": str | None

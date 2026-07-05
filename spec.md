@@ -6,8 +6,8 @@
 |-----------|------------|-----|
 | **Detection** | YOLOv8 (`yolov8s.pt`) via Ultralytics | Singleton model in `pipeline/tracker.py:track_persons()`. Returns person boxes every frame. |
 | **Tracking** | ByteTrack (Ultralytics built-in `bytetrack.yaml`) | Cross-frame person ID 0,1,2... per session. Converted to composite IDs `{cam_id}_{epoch}_{track_id}` in `pipeline/track_state.py`. |
-| **Face detection** | InsightFace SCRFD (`buffalo_m`) | Loaded once as singleton in `utils/embedding_utils.py:InsightFaceSingleton`. Two-stage: crop person first, full frame fallback. CLAHE applied before detection. |
-| **Face embedding** | InsightFace ArcFace (512-d normed) | Generated from best face detected. Pushed to `Track.embedding`. Used for vector search. |
+| **Face detection** | InsightFace SCRFD (`buffalo_l` in `.env`) | Loaded once as singleton in `utils/embedding_utils.py:InsightFaceSingleton`. Two-stage: crop person first, full frame fallback when crop has no faces ≥ `EMBEDDING_DET_SCORE_MIN`. CLAHE applied before detection. No redundant `DET_SCORE_MIN` tier. |
+| **Face embedding** | InsightFace ArcFace (512-d normed) | Generated from best face detected. Quality-gated: only overwrites `track.embedding` if `det_score` exceeds existing by ≥ 0.05. Used for vector search. Embedding cache skips Atlas search if cosine distance < 0.005 from last searched embedding. |
 | **Mask detection** | Geometric heuristic (landmark nose/mouth ratio) | `_detect_mask_geometric()` — no classifier. Ratio < 0.3 = masked. |
 | **Vector search** | MongoDB Atlas `$vectorSearch` (index `vector_index`, 512d cosine) | `utils/db_utils.py:vector_search()`. Atlas score converted: `raw_cosine = (score*2)-1`. Fallback to Python numpy cosine scan on Atlas failure. |
 | **MongoDB** | Atlas with 3 collections | `faces` (person DB + embeddings + vector index), `events` (track log), `visit_memory` (visit history). Thread-safe lazy singleton client. |
@@ -31,8 +31,9 @@ main.py
 │   ├── YOLOv8 detect persons per frame
 │   ├── TrackState.update() (thread-safe, composite IDs)
 │   ├── Every 10 frames: ThreadPool → progressive_recognition()
-│   │   ├── InsightFace detection + embedding
-│   │   ├── MongoDB vector search (MatchingAgent)
+│   │   ├── InsightFace detection + embedding (quality-gated overwrite)
+│   │   ├── Embedding cache check (cosine dist < 0.005 → skip Atlas)
+│   │   ├── MongoDB vector search (MatchingAgent) [if cache miss]
 │   │   ├── MemoryAgent lookup
 │   │   ├── RecognitionAgent (multi-factor)
 │   │   └── PolicyAgent (9 rules) → cache on Track
@@ -60,6 +61,9 @@ main.py
 - **Camera loop never blocks** — all I/O via `queue.Queue` + `ThreadPoolExecutor`
 - **Thread safety** — `TrackState._lock` for all track mutations; JPEG encoding done outside lock
 - **Progressive caching** — results from progressive recognition stored on `Track` object, reused at finalization to avoid redundant DB calls
+- **Embedding cache** — if new embedding's cosine distance from last searched < 0.005, skip Atlas round-trip and reuse prior `MatchResult`
+- **Quality-gated embedding** — per-track: only overwrites if `det_score` exceeds existing by ≥ 0.05. Per-DB: only overwrites `latest_embedding` if new `quality_score` > stored quality (no backward-compat unconditional overwrite)
+- **Best face hysteresis** — quality score buffer reduced to +0.03 (was +0.10) for gradual improvement
 - **Atlas vector search fallback** — if Atlas `$vectorSearch` fails/timeouts, falls to `_python_cosine_scan()` scanning up to 500 docs
 - **LLM optional** — system runs without Ollama; NL summaries fall back to template strings
 
@@ -77,7 +81,10 @@ main.py
 |---------|---------|------|
 | MATCH_THRESHOLD | 0.45 | Max recommended. Converts via `(atlas_score*2)-1`. |
 | VERY_HIGH_SIMILARITY | 0.90 | Skips memory + recognition, immediate known. |
-| DET_SCORE_MIN | 0.40 | Standard face det threshold. |
-| DET_SCORE_RELAXED | 0.20 | Fallback if nothing found at standard. |
+| EMBEDDING_DET_SCORE_MIN | 0.40 | Minimum score to generate embedding. |
+| DET_SCORE_RELAXED | 0.20 | Entry gate for face detection (single tier, `DET_SCORE_MIN` removed). |
+| EMBEDDING_CACHE_COSINE_THRESHOLD | 0.005 | Skip Atlas search if cosine dist from last searched < threshold. |
+| QUALITY_BLUR_MIN | 15 | Minimum Laplacian variance (relaxed from 30). |
+| QUALITY_FACE_AREA_MIN | 800 | Min face area ~28×28 px (relaxed from 40×40). |
 | TRACK_TIMEOUT_SECS | 3.0 | Person gone for 3s = track ends. |
 | ALERT_COOLDOWN_SECS | 60 | Per-level dedup window. |

@@ -217,20 +217,24 @@ A track is considered expired (person left frame) when:
 
 ### InsightFace Singleton
 
-- **Model:** `buffalo_m` (SCRFD detection + ArcFace embedding)
+- **Model:** `buffalo_m` (SCRFD detection + ArcFace embedding, `buffalo_l` in `.env` for higher accuracy)
 - **Detection input size:** 1280×1280
 - **Execution provider:** `CPUExecutionProvider` (configurable)
 - **Embedding dimension:** 512 (L2-normalized ArcFace)
 - **Thread-safe:** Double-checked locking singleton, loaded once per process
+- **CLAHE preprocessing:** Applied before every detection pass (skipped if L-channel std ≥ 40)
 
-### Detection Methods
+### Detection Flow
 
-| Method | Detection Score Threshold | Use Case |
-|--------|--------------------------|----------|
-| `detect_and_embed(image)` | `DET_SCORE_MIN = 0.40` | Standard face detection |
-| `detect_and_embed_relaxed(image)` | `DET_SCORE_RELAXED = 0.20` | Fallback for distant faces |
-| `embed_only(image, det_score)` | `EMBEDDING_DET_SCORE_MIN = 0.40` | Embedding when face already detected |
-| `detect_faces_raw(image, min_score)` | Configurable | Returns all faces above threshold |
+Face detection runs in two stages with a single threshold:
+
+| Stage | Threshold | Use Case |
+|-------|-----------|----------|
+| `crop_faces` | `DET_SCORE_RELAXED = 0.20` | Person crop — first pass |
+| `frame_faces` | `DET_SCORE_RELAXED = 0.20` | Full frame — only when crop has no faces ≥ `EMBEDDING_DET_SCORE_MIN` |
+| Embedding gate | `EMBEDDING_DET_SCORE_MIN = 0.40` | Minimum score to generate embedding |
+
+The redundant `DET_SCORE_MIN` tier was removed — if a face clears the relaxed threshold but fails the embedding gate, the full frame is checked for a better detection before discarding.
 
 ### Progressive Recognition Flow
 
@@ -238,21 +242,19 @@ Every 10 frames per track, recognition runs in a background thread:
 
 ```
 1. Crop person from frame using person bounding box
-2. Run InsightFace on CROPPED person:
-   a. Try DET_SCORE_MIN (0.40)
-   b. Try DET_SCORE_RELAXED (0.20)
-3. If no face in crop, try FULL FRAME:
-   a. Try DET_SCORE_MIN (0.40)
-   b. Try DET_SCORE_RELAXED (0.20)
-4. If no face found → return
-5. Compute face_ratio = face_area / person_area
-6. If det_score < EMBEDDING_DET_SCORE_MIN (0.40) → return
-7. Extract face crop from full frame coordinates
-8. Compute quality score (blur + brightness + area)
-9. Update track's best face if quality improved
-10. Store embedding and mask status
-11. Run Matching Agent → Recognition Agent → Policy Agent
-12. Only dispatch CRITICAL alerts during progressive (others deferred to finalization)
+2. Run InsightFace on CROPPED person (min_score = DET_SCORE_RELAXED)
+3. If crop has no face with score ≥ EMBEDDING_DET_SCORE_MIN, run FULL FRAME
+4. Pick best face (highest score from crop or full frame)
+5. If no face found → return
+6. Compute face_ratio = face_area / person_area
+7. If det_score < EMBEDDING_DET_SCORE_MIN (0.40) → return
+8. Extract face crop from full frame coordinates
+9. Compute quality score (blur + brightness + area)
+10. Update track's best face if quality improved (buffer +0.03)
+11. Store embedding (quality-gated: only overwrites if det_score ≥ existing + 0.05)
+12. Check embedding cache: if cosine distance from last search < 0.005, reuse prior match
+13. Run Matching Agent → Recognition Agent → Policy Agent
+14. Only dispatch CRITICAL alerts during progressive (others deferred to finalization)
 ```
 
 ### Similarity Computation
@@ -307,13 +309,13 @@ where:
 
 | Criterion | Threshold |
 |-----------|-----------|
-| Blur (Laplacian variance) | ≥ 30 |
+| Blur (Laplacian variance) | ≥ 15 (relaxed from 30 to accept slightly blurry crops that still embed well) |
 | Brightness (V-channel mean) | 30–240 |
-| Face area (pixels) | ≥ 1600 (40×40 px) |
+| Face area (pixels) | ≥ 800 (~28×28 px, relaxed from 40×40 for distant persons) |
 
 ### Best Face Selection
 
-- Only updates if new quality score > current best + 0.1 (hysteresis to prevent flickering)
+- Only updates if new quality score > current best + 0.03 (reduced from +0.10 to allow gradual quality improvement)
 - JPEG encoding at quality=85 performed outside the lock (expensive operation)
 
 ---
@@ -369,25 +371,28 @@ When Atlas Vector Search is unavailable:
 
 ### Quality-Gated Embedding Updates
 
-The system protects `latest_embedding` (the vector used for Atlas Vector Search) from being overwritten by low-quality detections:
+The system protects `latest_embedding` (the vector used for Atlas Vector Search) from being overwritten by low-quality detections at two levels:
 
+**1. Per-track quality gate** (`track_state.py:set_embedding`):
+- New embedding only overwrites the track's current embedding if its `det_score` exceeds the existing embedding's score by at least +0.05
+- Prevents a blurry/distant frame from wiping out a high-quality embedding set earlier in the same track
+
+**2. Database quality gate** (`update_face`):
 ```python
-# In update_face():
 if quality_score is not None:
     existing = collection.find_one({"person_id": person_id}, {"latest_embedding_quality": 1})
     current_quality = (existing or {}).get("latest_embedding_quality", 0.0)
     if quality_score > current_quality:
         update_ops["$set"]["latest_embedding"] = embedding
         update_ops["$set"]["latest_embedding_quality"] = quality_score
-else:
-    update_ops["$set"]["latest_embedding"] = embedding  # backward compat
+# NOTE: backward-compat unconditional overwrite was removed — quality_score is always required
 ```
 
 **Why this matters:**
 - Without quality gating, every new detection overwrites `latest_embedding`, even if the face is blurry/backlit
 - Vector search only queries `latest_embedding` (not the `embeddings` array)
 - A single bad overwrite can tank similarity scores for all subsequent matches
-- Quality gating ensures the best-quality embedding persists
+- Quality gating ensures the best-quality embedding persists across registrations
 
 **Impact:** Similarity scores improve from ~69% to 85%+ as high-quality embeddings are preserved.
 
@@ -673,7 +678,7 @@ NEW ──► ACTIVE ──► EXPIRED ──► FINALIZED ──► STORED
 Before running progressive recognition on a track:
 - Skip if already verified or known (high-confidence match)
 - Skip if already matched with `similarity > 0.85` (high-confidence match)
-- Skip if already matched with `similarity > 0.85` (during progressive)
+- Skip if embedding cache hit: cosine distance from last searched embedding < 0.005 → reuse prior match result
 - Only runs every `RECOGNITION_INTERVAL_FRAMES` (10) frames
 
 ---
@@ -741,6 +746,9 @@ Before running progressive recognition on a track:
 | `pending_recognition` | `dict` | `None` | Recognition Agent output |
 | `pending_match_result` | `MatchResult` | `None` | Full match result |
 | `pending_memory_context` | `dict` | `None` | Cached memory context |
+| `best_face_crop_path` | `str` | `""` | File path to saved face crop image |
+| `cached_embedding` | `list` | `None` | Last embedding searched against Atlas (for cache) |
+| `_embedding_det_score` | `float` | `0.0` | Detection score of current embedding (internal) |
 | `decision` | `DecisionResult` | `None` | Final decision result (set by worker) |
 
 ### MatchResult
@@ -931,8 +939,8 @@ Secrets (API keys, passwords, URIs) belong in `.env`, not `config.jsonc`.
 | `INSIGHTFACE_MODEL` | `"buffalo_m"` | str | InsightFace model (buffalo_m/l/s) |
 | `INSIGHTFACE_DET_SIZE` | `1280` | int | Detection input size |
 | `INSIGHTFACE_PROVIDER` | `"CPUExecutionProvider"` | str | ONNX execution provider |
-| `DET_SCORE_MIN` | `0.40` | float | Standard face detection score threshold |
-| `DET_SCORE_RELAXED` | `0.20` | float | Relaxed face detection threshold (fallback) |
+| `DET_SCORE_MIN` | `0.40` | float | (Legacy — no longer used in detection flow) |
+| `DET_SCORE_RELAXED` | `0.20` | float | Entry gate for face detection; full-frame checked if no crop face ≥ `EMBEDDING_DET_SCORE_MIN` |
 | `EMBEDDING_DET_SCORE_MIN` | `0.40` | float | Minimum score for embedding generation |
 
 ### Recognition
@@ -950,10 +958,10 @@ Secrets (API keys, passwords, URIs) belong in `.env`, not `config.jsonc`.
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
-| `QUALITY_BLUR_MIN` | `30` | float | Minimum Laplacian variance for valid face |
+| `QUALITY_BLUR_MIN` | `15` | float | Minimum Laplacian variance for valid face (relaxed from 30) |
 | `QUALITY_BRIGHTNESS_MIN` | `30` | float | Minimum brightness (0-255) |
 | `QUALITY_BRIGHTNESS_MAX` | `240` | float | Maximum brightness (0-255) |
-| `QUALITY_FACE_AREA_MIN` | `1600` | float | Minimum face area (40×40 px) |
+| `QUALITY_FACE_AREA_MIN` | `800` | float | Minimum face area (~28×28 px, relaxed from 1600) |
 | `QUALITY_BLUR_MAX` | `1000` | float | Max Laplacian variance for blur normalization |
 | `QUALITY_AREA_MAX` | `10000` | float | Max face area for area normalization |
 | `QUALITY_WEIGHT_BLUR` | `0.60` | float | Blur weight in quality score |
@@ -1246,7 +1254,7 @@ surveillance-system/
 │   └── quality_agent.py             # Image quality scoring
 │
 ├── utils/                           # Utilities
-│   ├── db_utils.py                  # MongoDB CRUD + vector search + quality-gated embedding updates
+│   ├── db_utils.py                  # MongoDB CRUD + vector search + quality-gated embedding updates (no backward-compat overwrite)
 │   ├── embedding_utils.py           # InsightFace singleton (buffalo_m, CLAHE preprocessing)
 │   ├── llm_client.py                # Ollama HTTP client (generate, chat, NL summaries)
 │   └── image_utils.py               # Image processing, crop, save, upload
