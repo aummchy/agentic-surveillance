@@ -179,9 +179,10 @@ Person Detected (YOLO + ByteTrack)
 ### YOLOv8 Person Detection
 
 - **Model:** YOLOv8 small (`yolov8s.pt`) — ~22MB, improved small-object detection
+- **OpenVINO export:** `yolo export model=yolov8s.pt format=openvino half=True` → `yolov8s_openvino_model/`
 - **Class filter:** Class 0 (person only)
 - **Confidence threshold:** `PERSON_CONF_THRESHOLD = 0.40`
-- **Device:** Configurable (`cpu` or GPU index)
+- **Device:** `cpu` | `intel:GPU` (OpenVINO) | `0` (CUDA)
 
 ```python
 results = model.track(
@@ -194,6 +195,8 @@ results = model.track(
     verbose=False
 )
 ```
+
+**OpenVINO GPU acceleration** (Intel Arc iGPU/NPU): Export YOLO to OpenVINO IR, then set `YOLO_MODEL=models/yolov8s_openvino_model/` and `YOLO_DEVICE=intel:GPU` in `.env`. The `intel:` prefix is required — bare `GPU` is not valid in Ultralytics. Expect ~8× speedup (128ms → 16ms for yolov8s at 640×640 on Arc 130T iGPU).
 
 ### ByteTrack Multi-Object Tracking
 
@@ -218,8 +221,8 @@ A track is considered expired (person left frame) when:
 ### InsightFace Singleton
 
 - **Model:** `buffalo_m` (SCRFD detection + ArcFace embedding, `buffalo_l` in `.env` for higher accuracy)
-- **Detection input size:** 1280×1280
-- **Execution provider:** `CPUExecutionProvider` (configurable)
+- **Detection input size:** 1280×1280 (configurable via `INSIGHTFACE_DET_SIZE` — drop to 640 for ~4× faster face detection)
+- **Execution provider:** `CPUExecutionProvider` (configurable; `CUDAExecutionProvider` for NVIDIA GPU, `OpenVINOExecutionProvider` has known DLL compatibility issues on Windows)
 - **Embedding dimension:** 512 (L2-normalized ArcFace)
 - **Thread-safe:** Double-checked locking singleton, loaded once per process
 - **CLAHE preprocessing:** Applied before every detection pass (skipped if L-channel std ≥ 40)
@@ -921,8 +924,8 @@ Secrets (API keys, passwords, URIs) belong in `.env`, not `config.jsonc`.
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
-| `YOLO_MODEL` | `"models/yolov8s.pt"` | str | YOLOv8 model path (n/s/m variants) |
-| `YOLO_DEVICE` | `"cpu"` | str | Compute device (`cpu` or GPU index) |
+| `YOLO_MODEL` | `"models/yolov8s.pt"` | str | YOLOv8 model path; use `"models/yolov8s_openvino_model/"` for OpenVINO IR |
+| `YOLO_DEVICE` | `"cpu"` | str | Compute device: `cpu` \| `intel:GPU` (OpenVINO) \| `intel:NPU` \| `0` (CUDA) |
 | `PERSON_CONF_THRESHOLD` | `0.40` | float | YOLO confidence for person detection |
 
 ### Tracking
@@ -1264,7 +1267,8 @@ surveillance-system/
 │   └── settings.py                # Configuration loader + validate_config()
 │
 ├── models/                          # Model weights (gitignored)
-│   └── yolov8s.pt                   # YOLOv8 small model
+│   ├── yolov8s.pt                   # YOLOv8 small model (PyTorch)
+│   └── yolov8s_openvino_model/      # OpenVINO IR export (for Intel iGPU)
 │
 ├── logs/                            # System logs (gitignored)
 │   └── surveillance.log             # Rotating: 5MB × 5 backups
@@ -1303,7 +1307,8 @@ surveillance-system/
 - MongoDB Atlas cluster with `surveillance` database
 - Atlas Vector Search index named `vector_index` on `faces.latest_embedding` (512 dims, cosine)
 - Camera device at `CAMERA_INDEX=0` (or adjust in `.env`)
-- Ollama with a model installed (e.g., `ollama pull gemma3:4b` or `ollama pull qwen3.5:4b`)
+- Ollama with a model installed (e.g., `ollama pull gemma3:4b` or `ollama pull qwen3.5:4b`) *(optional — system falls back to templates)*
+- For Intel Arc iGPU acceleration: `pip install openvino` and export YOLO: `yolo export model=yolov8s.pt format=openvino half=True` *(optional — CPU works too)*
 
 ### Installation
 
@@ -1367,7 +1372,7 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 | `GET /api/events` returns 500 | `similarity_score` is null — ensure `Optional[float]` in `dashboard/backend/models.py` |
 | Terminal too noisy | Console shows `INFO+`; full debug logs go to `logs/surveillance.log` |
 | `FutureWarning` from insightface | Harmless — `estimate` deprecated in InsightFace 0.26 |
-| Slow performance | Use GPU: set `YOLO_DEVICE=0` in `config/config.jsonc` |
+| Slow performance | Use GPU: `YOLO_DEVICE=0` (CUDA) or `YOLO_DEVICE=intel:GPU` (OpenVINO Intel iGPU) in `.env`; also export YOLO to OpenVINO IR for ~8× speedup on Arc iGPU |
 | No local camera window | System streams via WebSocket — open `http://localhost:5173` |
 | Camera reconnect loops | Auto-reconnects after 30 consecutive failures (~3s). Check USB connection |
 | Track shows UNVERIFIED briefly | Normal — recognition runs every 10 frames (~2s). Set `RECOGNITION_INTERVAL_FRAMES=5` in `config/config.jsonc` for faster first recognition |

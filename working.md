@@ -94,10 +94,14 @@ Dashboard          (live view, visitor log, alerts, audit trail)
 | Runtime | **onnxruntime** | InsightFace inference backend (CPU by default) |
 | Local LLM | **Ollama** + **Gemma 3 4B** / **Qwen 3.5 4B** | NL summaries, report generation, conversational chat |
 | HTTP client | **httpx** | Async Ollama API calls |
+| GPU acceleration | **OpenVINO** (`openvino`) | YOLO + InsightFace on Intel iGPU/NPU (YOLO device: `intel:GPU`) |
 
-> **GPU note.** Everything runs on CPU. If a CUDA GPU is available, set
-> InsightFace providers to `CUDAExecutionProvider` and YOLO `device=0` — the
-> code should read the device from config, never hardcode it.
+> **GPU note.** Everything runs on CPU by default. For Intel Arc iGPU acceleration
+> via OpenVINO: export YOLO to OpenVINO IR (`yolo export model=... format=openvino
+> half=True`), set `YOLO_MODEL=models/yolov8s_openvino_model/`,
+> `YOLO_DEVICE=intel:GPU` in `.env`. InsightFace stays on CPU (OpenVINO EP has
+> known DLL compatibility issues on Windows). Expect ~8× YOLO speedup on Arc iGPU
+> (128ms → 16ms for yolov8s at 640×640).
 
 ### `requirements.txt` (target — all phases)
 
@@ -129,6 +133,9 @@ uvicorn[standard]>=0.27.0
 # Alerting
 twilio>=8.0.0              # Optional SMS
 requests>=2.31.0          # Webhook alerts
+
+# GPU acceleration (OpenVINO for Intel iGPU/NPU)
+openvino>=2024.0.0
 
 # LLM
 httpx>=0.27.0             # Ollama HTTP client
@@ -349,6 +356,12 @@ instead of creating a duplicate.
 ## 5. Phase plan
 
 > Build phase by phase in order. Each phase builds on the previous one.
+
+> **OpenVINO device format.** For Intel GPU/NPU acceleration, the YOLO device
+> must use the `intel:GPU` or `intel:NPU` format (not bare `GPU`). This is
+> required by Ultralytics' OpenVINO backend, which parses the `intel:` prefix
+> to extract the actual OpenVINO device name while keeping the PyTorch `device`
+> parameter at `cpu`.
 
 ### Phase 1 — Camera capture & quality selection
 
@@ -642,8 +655,8 @@ CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
 
 # ── Models ───────────────────────────────────────────
-YOLO_MODEL=yolov8n.pt
-YOLO_DEVICE=cpu                 # or "0" for CUDA GPU 0
+YOLO_MODEL=yolov8s_openvino_model/  # or yolov8s.pt for PyTorch CPU
+YOLO_DEVICE=intel:GPU               # cpu | intel:GPU | intel:NPU | 0 (CUDA)
 INSIGHTFACE_MODEL=buffalo_l
 INSIGHTFACE_DET_SIZE=640
 INSIGHTFACE_PROVIDER=CPUExecutionProvider

@@ -5,6 +5,10 @@ numpy>=1.24.0
 # Detection + tracking
 ultralytics>=8.1.0          # YOLOv8 + ByteTrack
 
+# OpenVINO acceleration (Intel CPU/iGPU/NPU)
+openvino>=2024.0.0          # YOLO GPU inference
+onnxruntime-openvino        # Optional: InsightFace OpenVINO EP
+
 # Face recognition
 insightface>=0.7.3          # SCRFD detection + ArcFace embedding
 onnxruntime>=1.16.0         # CPU inference (use onnxruntime-gpu if CUDA)

@@ -16,6 +16,7 @@ env/
 models/*.pt
 models/*.onnx
 models/*.bin
+models/*_openvino_model/
 
 # Captures (runtime output)
 captures/

@@ -24,7 +24,8 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 - MongoDB Atlas cluster with `surveillance` database, `faces`/`events`/`visit_memory` collections
 - Atlas Vector Search index named `vector_index` on `faces.latest_embedding` (512 dims, cosine)
 - `.env` with at minimum `MONGODB_URI` (copy from `.env.example`)
-- Camera device at `CAMERA_INDEX=0` (or adjust in `.env`)
+- Camera device at `CAMERA_INDEX=0` or `CAMERA_SOURCE=http://<phone-ip>:8080/video` for mobile (adjust in `.env`)
+- For Intel Arc iGPU acceleration: `pip install openvino` and export YOLO (optional — CPU works too)
 
 ## Commands
 
@@ -35,6 +36,7 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 | Run dashboard frontend | `cd dashboard/frontend && npm run dev` |
 | Install Python deps | `pip install -r requirements.txt` |
 | Install frontend deps | `cd dashboard/frontend && npm install` |
+| Export YOLO to OpenVINO IR | `yolo export model=models/yolov8s.pt format=openvino half=True` |
 
 No test suite, linter, or CI pipeline exists in this repo.
 
@@ -75,6 +77,16 @@ main.py (entry point, wires everything)
 ## Known issues (0 remaining)
 
 All 32 issues from the problem report have been fixed.
+
+## OpenVINO GPU acceleration
+
+After installing `openvino` and exporting YOLO to OpenVINO IR (`yolo export model=models/yolov8s.pt format=openvino half=True`):
+
+1. Set `YOLO_MODEL=models/yolov8s_openvino_model/` in `.env`
+2. Set `YOLO_DEVICE=intel:GPU` in `.env` (the `intel:` prefix is required — bare `GPU` fails)
+3. InsightFace stays on `CPUExecutionProvider` (OpenVINO EP has known DLL compatibility issues on Windows)
+
+Benchmark on Arc 130T iGPU: YOLOv8s 128ms CPU → 15.6ms GPU (8.2× speedup).
 
 ## Gotchas
 
