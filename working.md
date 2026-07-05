@@ -1,817 +1,773 @@
-# Agentic AI Visitor Surveillance System — Build Specification
-
-> **Purpose of this document.** This is a complete, self-contained build
-> specification. An AI agent (or developer) should be able to build the entire
-> system **from scratch** using only this file. It defines the full target
-> architecture, the tech stack, data contracts, directory layout, and
-> acceptance criteria.
->
-> Read this top to bottom before writing any code. Build phase by phase. Do not
-> skip the data contracts — every agent communicates through them.
+# working.md — End-to-End Data Flow with Exact Formulas
 
 ---
 
-## 1. What we are building
-
-An **always-on, multi-agent video surveillance system** that:
-
-1. Watches a camera feed continuously.
-2. Detects **people** (not just faces) with YOLOv8.
-3. Tracks each person across frames with **ByteTrack** (stable per-person ID).
-4. Crops the face region and recognizes identity with **SCRFD + ArcFace**.
-5. Stores face embeddings in **MongoDB Atlas** and searches them with vector
-   search.
-6. Makes an **autonomous decision** (authorized / known visitor / unknown /
-   **masked unknown → HIGH ALERT**) without requiring an operator in the loop.
-7. Raises **alerts** through a configurable alerting system.
-8. Archives best-face images in **Cloudinary**.
-9. Surfaces everything on a **web dashboard** with an audit log.
-
-It is an academic / internship-grade project, not a hardened production
-deployment — but it should be architecturally honest (real tracker, real
-decision engine, real alerts), not a demo held together with `time.sleep`.
-
-### Target pipeline (authoritative)
+## 1. Startup sequence (`main.py:295-372`)
 
 ```
-Camera
-  ↓
-YOLOv8n            (person detection)
-  ↓
-ByteTrack          (multi-object tracking → stable track_id per person)
-  ↓
-Face Crop          (extract face region from each tracked person box)
-  ↓
-SCRFD / InsightFace Detection   (precise face box + landmarks + mask check)
-  ↓
-Face Visibility Analyzer        (face_area / person_area ratio, track-level metrics)
-  ↓
-ArcFace Embedding  (512-dim L2-normalized vector)
-  ↓
-MongoDB Atlas Vector Search     (cosine similarity match)
-  ↓
-Decision Engine    (authorized / known / unknown / masked-unknown → HIGH ALERT)
-  ↓
-Cloudinary         (image archival)
-  ↓
-Dashboard          (live view, visitor log, alerts, audit trail)
-```
-
-### Why this architecture (key design decisions)
-
-- **Person-first, not face-first.** Detecting people with YOLO and tracking them
-  means we keep a stable identity for someone even when their face is turned
-  away, occluded, or masked. Face detection runs *inside* each tracked person
-  box. **The tracker provides stable identity across frames.**
-- **One decision per track, not per frame.** We accumulate the best face for a
-  track_id over its lifetime, recognize once, decide once, alert once. No
-  duplicate records, no flicker.
-- **Autonomous decision engine.** Recognition + policy run without blocking on
-  operator `input()`. Operators review *after the fact* on the dashboard.
-- **Mask handling is a first-class signal**, not an afterthought — see §7.
-
----
-
-## 2. Tech stack
-
-| Layer | Choice | Notes |
-|-------|--------|-------|
-| Language | **Python 3.11** | Pin to 3.11 (insightface/onnxruntime wheels are reliable here) |
-| Video / image | **OpenCV** (`opencv-python`) | Camera capture, drawing, image IO |
-| Person detection | **Ultralytics YOLOv8** (`ultralytics`) | `yolov8n.pt` (nano) for CPU; person class only |
-| Tracking | **ByteTrack** | Built into Ultralytics: `model.track(..., tracker="bytetrack.yaml", persist=True)` |
-| Face detection | **InsightFace SCRFD** | Bundled in the `buffalo_l` model pack |
-| Face embedding | **InsightFace ArcFace** (`buffalo_l`) | 512-dim, L2-normalized, ~99.8% LFW |
-| Mask detection | **Lightweight classifier** | See §7 — landmark heuristic OR small CNN |
-| Vector DB | **MongoDB Atlas** (`pymongo`) | Atlas Vector Search index on `embedding` |
-| Image storage | **Cloudinary** (`cloudinary`) | Best-face archival, returns secure URL |
-| Orchestration | **LangGraph** (`langgraph`) — optional but recommended | Stateful multi-agent coordination; can start with plain Python callbacks |
-| Config | **python-dotenv** | All secrets/config in `.env` |
-| Numerics | **numpy** | Embedding math |
-| Backend API | **FastAPI** + **uvicorn** | Dashboard backend / REST + WebSocket |
-| Frontend | **React** (Vite) OR **Streamlit** | Streamlit for speed; React for a real UI |
-| Alerting | **smtplib / Twilio / webhook** | Pluggable; see §8 |
-| Runtime | **onnxruntime** | InsightFace inference backend (CPU by default) |
-| Local LLM | **Ollama** + **Gemma 3 4B** / **Qwen 3.5 4B** | NL summaries, report generation, conversational chat |
-| HTTP client | **httpx** | Async Ollama API calls |
-| GPU acceleration | **OpenVINO** (`openvino`) | YOLO + InsightFace on Intel iGPU/NPU (YOLO device: `intel:GPU`) |
-
-> **GPU note.** Everything runs on CPU by default. For Intel Arc iGPU acceleration
-> via OpenVINO: export YOLO to OpenVINO IR (`yolo export model=... format=openvino
-> half=True`), set `YOLO_MODEL=models/yolov8s_openvino_model/`,
-> `YOLO_DEVICE=intel:GPU` in `.env`. InsightFace stays on CPU (OpenVINO EP has
-> known DLL compatibility issues on Windows). Expect ~8× YOLO speedup on Arc iGPU
-> (128ms → 16ms for yolov8s at 640×640).
-
-### `requirements.txt` (target — all phases)
-
-```txt
-# Core CV
-opencv-python>=4.8.0
-numpy>=1.24.0
-
-# Detection + tracking
-ultralytics>=8.1.0          # YOLOv8 + ByteTrack
-
-# Face recognition
-insightface>=0.7.3          # SCRFD detection + ArcFace embedding
-onnxruntime>=1.16.0         # CPU inference (use onnxruntime-gpu if CUDA)
-
-# Storage
-pymongo>=4.6.0              # MongoDB Atlas + vector search
-cloudinary>=1.36.0          # Image archival
-
-# Orchestration
-langgraph>=0.1.0            # Optional: stateful agent graph
-langchain>=0.1.0
-
-# Backend / dashboard
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-# streamlit>=1.30.0         # Alternative simple dashboard
-
-# Alerting
-twilio>=8.0.0              # Optional SMS
-requests>=2.31.0          # Webhook alerts
-
-# GPU acceleration (OpenVINO for Intel iGPU/NPU)
-openvino>=2024.0.0
-
-# LLM
-httpx>=0.27.0             # Ollama HTTP client
-
-# Config
-python-dotenv>=1.0.0
+1. settings.validate_config()          — checks MONGODB_URI, thresholds, channels
+2. llm_available()                     — pings Ollama GET /api/tags (cached 10s)
+3. check_atlas_search_index()          — warns if "vector_index" missing
+4. backfill_missing_embeddings()       — fixes faces with empty latest_embedding
+5. Start 2 worker threads             — worker_process_tracks() via queue.Queue
+6. Start uvicorn (port 8000)          — FastAPI dashboard + REST + WebSocket
+7. CameraAgent(on_track_finalized, on_frame_annotated)
+8. camera.start()                     — blocks until Q press or camera disconnect
+9. On exit: queue.join(), shutdown executors, close MongoDB, close LLM clients
 ```
 
 ---
 
-## 3. Repository layout (target)
+## 2. Camera loop (`camera_agent.py:111-183`)
+
+Each iteration:
 
 ```
-surveillance-system/
-├── agent.md                      # ← this file
-├── README.md
-├── requirements.txt
-├── .env.example                  # template — NEVER commit real .env
-├── .gitignore                    # must ignore .env, captures/, models/, *.pt
-├── main.py                       # entry point, wires the pipeline
-│
-├── config/
-│   └── settings.py               # loads .env, exposes constants, validate_config()
-│
-├── agents/
-│   ├── camera_agent.py           # capture + tracking loop
-│   ├── quality_agent.py          # best-face selection
-│   ├── matching_agent.py         # embedding + DB search
-│   ├── decision_agent.py         # autonomous authorize/alert policy
-│   └── alert_agent.py            # dispatch alerts
-│
-├── pipeline/
-│   ├── detector.py               # YOLOv8 person detection wrapper
-│   ├── tracker.py                # ByteTrack wrapper → (track_id, box)
-│   ├── face.py                   # SCRFD detect + ArcFace embed + mask check
-│   ├── visibility_analyzer.py    # face_area / person_area ratio, track-level visibility
-│   ├── track_state.py            # per-track accumulator (best face, decision)
-│   └── decision_engine.py        # visibility + identity → alert decision
-│
-├── utils/
-│   ├── image_utils.py            # blur/brightness/crop/resize/save/draw
-│   ├── embedding_utils.py        # InsightFace singleton, embed, compare
-│   ├── llm_client.py             # Ollama HTTP client (Gemma/Qwen)
-│   └── db_utils.py               # MongoDB CRUD + vector search + audit log
-│
-├── dashboard/
-│   ├── backend/                  # FastAPI app (REST + WebSocket live feed)
-│   │   └── routes/
-│   │       └── chat.py           # POST /api/chat, GET /api/chat/health
-│   └── frontend/                 # React (Vite) or Streamlit app
-│       └── src/components/
-│           └── ChatPanel.jsx     # Conversational AI chat UI
-│
-├── models/                       # downloaded weights (gitignored)
-│   ├── yolov8n.pt
-│   └── (insightface buffalo_l auto-downloads to ~/.insightface)
-│
-└── captures/                     # runtime output (gitignored)
-    ├── raw_frames/
-    ├── best_faces/
-    ├── known_faces/
-    └── unknown_faces/
+frame = cap.read()                     — OpenCV VideoCapture
+frame_count += 1
+
+tracks = track_persons(frame)          — YOLOv8 + ByteTrack
+
+For each track t:
+    composite_id = f"{camera_id}_{session_epoch}_{byte_track_id}"
+    track = track_state.update(camera_id, t["track_id"], t["box"])
+
+    Every RECOGNITION_INTERVAL_FRAMES frames:
+        If not already_resolved AND not high_confidence:
+            Submit _progressive_recognition(frame.copy(), track) to executor
+
+expired = track_state.get_expired_tracks()
+    — Returns tracks where:
+        is_expired = (now - last_seen) > TRACK_TIMEOUT_SECS   [default 3.0s]
+        OR is_max_lifetime = (now - first_seen) > MAX_TRACK_SECS [default 300s]
+    — Classifies visibility BEFORE removal
+    — Removes from dict only if no in-flight recognition
+
+For each expired track not already finalizing:
+    Submit _finalize_track(track) to executor
+
+annotated = draw_annotations(frame, all_tracks)
+on_frame_annotated(annotated)          — JPEG encode + WebSocket broadcast
 ```
 
 ---
 
-## 4. Data contracts (build these first — every agent depends on them)
-
-These are the interfaces between agents. Lock them down before implementing.
-
-### 4.1 Track object (in-memory, per person)
+## 3. Person detection + tracking (`pipeline/tracker.py`)
 
 ```python
-@dataclass
-class Track:
-    track_id: str                  # composite: f"{camera_id}_{session_epoch}_{byte_track_id}"
-    first_seen: float              # epoch seconds
-    last_seen: float
-    person_box: tuple              # (x1, y1, x2, y2) latest
-    best_face_crop: np.ndarray | None   # face crop with best face_ratio (for ArcFace)
-    best_face_score: float         # quality score of best_face_crop
-    best_full_frame: np.ndarray | None  # full frame for the best face
-    is_masked: bool                # latest mask determination
-    embedding: list | None         # 512-dim, set after recognition
-    decision: str | None           # see DecisionResult.status
-    alerted: bool                  # has an alert already fired for this track
-    # Progressive recognition state
-    last_recognition_frame: int    # frame number of last recognition attempt
-    pending_embedding: list | None # partial embedding from progressive recognition
-    pending_match: dict | None     # partial match result from progressive recognition
-    # Face visibility (track-level)
-    total_frames_seen: int         # total frames this track appeared
-    frames_with_detectable_face: int  # frames where SCRFD detected a face (analytics)
-    face_detected_once: bool       # True if face was ever detected (decision logic)
-    max_face_ratio: float          # max(face_area / person_area) across all frames
-    best_face_ratio: float         # face_ratio of the best face detected
-    visibility: str                # "visible" | "partial" | "hidden" | "unknown"
-    max_track_secs: float = 300.0  # force finalization after this many seconds
+model = YOLO(settings.YOLO_MODEL)     — loaded once, module-level singleton
+results = model.track(
+    frame,
+    persist=True,                      — ByteTrack maintains IDs across frames
+    tracker="bytetrack.yaml",
+    classes=[0],                       — person class only
+    conf=PERSON_CONF_THRESHOLD,        — default 0.40
+    iou=0.5,
+    device=YOLO_DEVICE,                — "cpu" or "intel:GPU"
+)
+# Returns: [{"track_id": int, "box": (x1,y1,x2,y2), "confidence": float}]
 ```
-
-### 4.2 Quality result
-
-```python
-{
-    "blur_score": float,           # Laplacian variance (higher = sharper)
-    "brightness": float,           # mean HSV-V, 0–255
-    "face_area": int,              # bbox pixel area
-    "is_valid": bool,              # passed all thresholds
-    "overall_score": float         # normalized (0-1): blur_norm*0.60 + bright_norm*0.25 + area_norm*0.15
-}
-```
-
-### 4.3 Embedding result
-
-```python
-{
-    "embedding": np.ndarray | None,  # 512-dim L2-normalized
-    "face_detected": bool,
-    "detection_score": float,        # SCRFD det_score (entry: DET_SCORE_RELAXED=0.20; embedding: EMBEDDING_DET_SCORE_MIN=0.40)
-    "embedding_score": float,        # quality gate (threshold: EMBEDDING_DET_SCORE_MIN=0.40)
-    "bbox": tuple | None,            # (x1, y1, x2, y2)
-    "is_masked": bool,               # mask present on this face
-    "error": str | None
-}
-```
-
-### 4.4 Match result (from DB search)
-
-```python
-[
-    {
-        "person_id": str,
-        "name": str,
-        "role": str,                 # employee | visitor | contractor | unknown
-        "tags": list[str],           # e.g. ["authorized", "vip", "blacklist"]
-        "similarity_score": float,   # cosine, 0–1 in Atlas score space
-        "image_url": str
-    },
-    ...
-]
-```
-
-### 4.5 Decision result (the heart of autonomy)
-
-```python
-{
-    "status": str,        # "authorized" | "known_visitor" | "unknown"
-                          #   | "masked_unknown" | "intentionally_hidden" | "blacklist"
-    "alert_level": str,   # "none" | "low" | "medium" | "high" | "critical"
-    "person_id": str | None,
-    "name": str | None,
-    "reason": str,        # human-readable explanation for the audit log
-    "should_alert": bool,
-    "should_register": bool
-}
-```
-
-### 4.6 MongoDB documents
-
-**`faces` collection** (one per enrolled identity):
-
-```python
-{
-    "person_id": "visitor_20260615_120000_0001",
-    "name": "John Doe",
-    "role": "visitor",                 # employee|visitor|contractor|unknown
-    "embeddings": [[...], [...]],     # multiple 512-dim lists (ArcFace) over time
-    "latest_embedding": [...],        # most recent embedding (fast search field)
-    "embedding_model": "arcface",
-    "images": [                       # multiple images over time
-        {"url": "https://res.cloudinary.com/...", "captured_at": <datetime>}
-    ],
-    "source": {"camera_id": "cam_01", "captured_at": <datetime>},
-    "quality_scores": {...},
-    "tags": ["authorized"],            # authorized | blacklist | vip | known ...
-    "created_at": <datetime>,
-    "updated_at": <datetime>
-}
-```
-
-**`events` collection** (audit log — one per decision):
-
-```python
-{
-    "_id": <ObjectId>,                # use _id as event identifier (no separate event_id)
-    "track_id": "cam_01_1718467200_42",  # composite track key
-    "camera_id": "cam_01",
-    "timestamp": <datetime>,
-    "status": "masked_unknown",        # mirrors DecisionResult.status
-    "alert_level": "high",
-    "person_id": null,                 # null if unknown
-    "name": null,
-    "is_masked": true,
-    "similarity_score": 0.32,         # actual best match score (even if below threshold)
-    "image_url": "https://res.cloudinary.com/...",
-    "reason": "Unknown person wearing mask — identity cannot be verified",
-    "alerted": true
-}
-```
-
-**Auto-registration dedup:** Before inserting a new unknown face, check if
-embedding is close to existing unknown records (`DEDUP_SIMILARITY_THRESHOLD=0.50`).
-If match found, update the existing record (add new image, bump `updated_at`)
-instead of creating a duplicate.
-
-**Indexes:**
-- `faces`: index on `latest_embedding` for vector search, index on `role` and `tags`
-- `events`: TTL index on `timestamp` with `expireAfterSeconds=7776000` (90 days),
-  index on `camera_id`, `status`, `alert_level` for dashboard queries
-
-> **Atlas Vector Search index** (create manually in Atlas UI, name
-> `vector_index`): `path=latest_embedding`, `numDimensions=512`,
-> `similarity=cosine`. The code must fall back to a Python cosine scan if the
-> index is missing (so the system runs before the index is set up).
 
 ---
 
-## 5. Phase plan
+## 4. Face detection + embedding + mask detection (`utils/embedding_utils.py`)
 
-> Build phase by phase in order. Each phase builds on the previous one.
+### 4.1 CLAHE contrast enhancement
 
-> **OpenVINO device format.** For Intel GPU/NPU acceleration, the YOLO device
-> must use the `intel:GPU` or `intel:NPU` format (not bare `GPU`). This is
-> required by Ultralytics' OpenVINO backend, which parses the `intel:` prefix
-> to extract the actual OpenVINO device name while keeping the PyTorch `device`
-> parameter at `cpu`.
+```
+Applied to every image BEFORE face detection.
 
-### Phase 1 — Camera capture & quality selection
+1. Convert BGR → LAB color space
+2. Extract L channel
+3. Compute l_std = stddev(L)
+4. IF l_std >= 40.0: skip CLAHE (contrast already adequate)
+5. ELSE: apply CLAHE with:
+       clipLimit = CLAHE_CLIP_LIMIT (default 2.0)
+       tileGridSize = CLAHE_TILE_SIZE × CLAHE_TILE_SIZE (default 8×8)
+6. Convert LAB → BGR
+```
 
-**Goal:** Continuous camera loop that detects people, tracks them, and selects
-the best face image per tracked person.
+### 4.2 Face detection (SCRFD via InsightFace)
 
-- `pipeline/detector.py`: load `yolov8n.pt` once; detect `person` class only;
-  return list of person boxes + confidences.
-- `pipeline/tracker.py`: run `model.track(frame, persist=True,
-  tracker="bytetrack.yaml", classes=[0])`; return `[(track_id, box, conf)]`.
-- `pipeline/track_state.py`: maintain a dict `{track_id: Track}`; for each
-  tracked person, crop the person region, run quality scoring on the face within
-  it, and keep the highest-scoring face crop as `best_face_crop`. Use a
-  `threading.Lock` to protect the dict from concurrent access.
-- Drop a track when its `track_id` hasn't been seen for `TRACK_TIMEOUT_SECS`
-  OR when `track.first_seen + MAX_TRACK_SECS < now` (force-finalize long tracks);
-  on drop, hand the finalized `Track` to the Quality → Matching → Decision chain.
+```
+InsightFace singleton loaded once:
+    model = FaceAnalysis(name="buffalo_m", providers=["CPUExecutionProvider"])
+    app.prepare(ctx_id=0, det_size=(1280, 1280))
 
-**Progressive recognition (real-time alerts during active tracks):**
+detect_faces_raw(image, min_score):
+    1. Apply CLAHE to image
+    2. faces = app.get(image)          — SCRFD face detection
+    3. Filter: keep faces where det_score >= min_score
+    4. For each face, extract:
+       - det_score: float (detection confidence)
+       - embedding: 512-dim L2-normalized vector (ArcFace)
+       - bbox: (x1, y1, x2, y2) in pixel coords
+       - is_masked: bool (geometric mask heuristic)
+    5. Sort by det_score descending
+```
 
-Every `RECOGNITION_INTERVAL_FRAMES` frames, for each active track where
-`frames_since_last_recognition >= RECOGNITION_INTERVAL_FRAMES`:
-
-1. If `best_face_crop` quality ≥ threshold, run SCRFD + ArcFace embedding.
-2. Run vector search → `match_result`.
-3. Run `decide(track, match_result)` → `DecisionResult`.
-4. If `should_alert` and not yet alerted → dispatch alert **immediately**.
-5. Store partial result on Track (`pending_embedding`, `pending_match`).
-
-This enables real-time alerts for masked unknowns while they are still in frame.
-The track-end finalization still runs and writes the audit event.
-
-**Quality scoring:**
-- blur_raw = `cv2.Laplacian(gray, cv2.CV_64F).var()` (reject < 60)
-- brightness_raw = mean HSV-V (reject < 50 or > 230)
-- face_area_raw = bbox pixel area (reject if face_area < 2500)
-- Normalize each to 0-1 range:
-  - blur_norm = min(blur_raw / QUALITY_BLUR_MAX, 1.0)
-  - bright_norm = brightness_raw / 255.0
-  - area_norm = min(face_area_raw / QUALITY_AREA_MAX, 1.0)
-- `overall_score = blur_norm*0.60 + bright_norm*0.25 + area_norm*0.15`
-- Final gate: InsightFace must confirm a real face (`det_score ≥ 0.70`) — this
-  rejects reflections / window frames / posters.
-
-**Acceptance:** Two people in frame simultaneously each get a distinct
-`track_id` and their own best face. No double-processing of one person.
-
-### Phase 2 — Recognition, MongoDB, Cloudinary
-
-**Goal:** Turn a best-face image into an identity decision backed by a database.
-
-- `utils/embedding_utils.py`: InsightFace `buffalo_l` loaded as a **singleton**
-  (load once, never per-frame). `generate_embedding()` → 512-dim normed vector;
-  use `DET_SCORE_MIN=0.50` for face detection, `EMBEDDING_DET_SCORE_MIN=0.70`
-  as quality gate before generating embeddings.
-- `utils/db_utils.py`: `$vectorSearch` pipeline on `vector_index`, cosine,
-  with a Python cosine-scan fallback. **Threshold conversion is critical:**
-  `MATCH_THRESHOLD` is raw cosine (−1..1); Atlas `vectorSearchScore` is
-  `(1 + cosine)/2`, so filter on `atlas_threshold = (1 + MATCH_THRESHOLD) / 2`.
-  Recommended `MATCH_THRESHOLD = 0.35`; **never above 0.45** (ArcFace
-  same-person indoor scores land 0.30–0.55).
-- **Threshold comparison function** — single source of truth for both paths:
-  ```python
-  def compare_similarity(raw_cosine: float, threshold: float = MATCH_THRESHOLD) -> bool:
-      """Compare raw cosine similarity against threshold. Used by both Atlas and Python fallback."""
-      return raw_cosine >= threshold
-
-  def atlas_score_to_cosine(atlas_score: float) -> float:
-      """Convert Atlas vectorSearchScore back to raw cosine for comparison."""
-      return (atlas_score * 2) - 1
-  ```
-  Both the Atlas path and Python fallback MUST use `compare_similarity()` after
-  converting Atlas scores to raw cosine. Do not compare raw values directly.
-- Cloudinary upload → `secure_url`; store full face record in `faces`.
-
-**Acceptance:** A previously enrolled face matches with score ≥ threshold and
-returns the stored identity; a new face returns no match — both with **zero**
-operator interaction.
-
-### Phase 3 — Decision Agent & Alert Agent
-
-**Goal:** Autonomous policy + alerting. This is what makes it "agentic" rather
-than a recognition demo.
-
-**`agents/decision_agent.py` — `decide(track, match_result) → DecisionResult`:**
-
-Policy (evaluate in order; first match wins):
-
-| Condition | status | alert_level | action |
-|-----------|--------|-------------|--------|
-| Match found AND tag `blacklist` | `blacklist` | **critical** | alert + log |
-| Match found AND tag `authorized` | `authorized` | none | log only |
-| Match found (known, not authorized) | `known_visitor` | low | log |
-| No match AND visibility = `hidden` | `intentionally_hidden` | **high** | alert + log + save best frame |
-| No match AND visibility = `partial` | `masked_unknown` | medium | log + auto-register |
-| No match AND visibility = `visible` | `unknown` | medium | log + auto-register |
-
-**Visibility classification (computed at track end):**
+### 4.3 Mask detection heuristic (`embedding_utils.py:66-81`)
 
 ```python
-if max_face_ratio >= VISIBLE_FACE_RATIO:
+# landmarks from SCRFD: [left_eye, right_eye, nose, left_mouth, right_mouth]
+nose_tip = landmarks[2]
+mouth_center = (landmarks[3] + landmarks[4]) / 2
+upper_face = (landmarks[0] + landmarks[1]) / 2
+
+lower_face_height = |mouth_center.y - nose_tip.y|
+upper_face_height = |upper_face.y - nose_tip.y|
+
+ratio = lower_face_height / upper_face_height
+is_masked = (ratio < MASK_RATIO_THRESHOLD)   # default 0.3
+```
+
+### 4.4 Progressive recognition two-stage detection (`camera_agent.py:204-232`)
+
+```
+Stage 1: Detect in person_crop (tighter, more focused)
+    crop_faces = detect_faces_raw(person_crop, min_score=DET_SCORE_RELAXED=0.20)
+
+Stage 2: If no embedding-grade face in crop, detect in full frame
+    crop_has_embedding_quality = any(f["det_score"] >= EMBEDDING_DET_SCORE_MIN for f in crop_faces)
+    frame_faces = detect_faces_raw(frame, min_score=DET_SCORE_RELAXED=0.20)
+        ONLY IF crop_has_embedding_quality is False
+
+Pick best face:
+    1. Try crop_faces[0] (highest det_score) — detected_in_person_crop = True
+    2. Else try frame_faces[0]
+    3. Convert bbox to frame coordinates if detected in crop:
+       frame_bbox = (fx1 + px1, fy1 + py1, fx2 + px1, fy2 + py1)
+
+Gate: best["det_score"] must be >= EMBEDDING_DET_SCORE_MIN (0.40)
+    — If below threshold, skip embedding generation
+```
+
+### 4.5 Finalization face detection fallback (`camera_agent.py:401-448`)
+
+```
+If track has no embedding at finalization:
+    1. Try detect_faces_raw(best_face_crop, min_score=DET_SCORE_RELAXED=0.20)
+    2. If no faces in crop, try detect_faces_raw(best_full_frame, min_score=DET_SCORE_RELAXED=0.20)
+    3. Pick best face with two-tier priority:
+       a. First pass: any face with det_score >= EMBEDDING_DET_SCORE_MIN (0.40)
+       b. Second pass: any face with det_score >= DET_SCORE_RELAXED (0.20)
+    4. If found: track.embedding = best["embedding"].tolist()
+```
+
+---
+
+## 5. Face quality scoring (`pipeline/quality_agent.py`)
+
+```
+blur_raw = Laplacian(gray, CV_64F).var()
+    — Gray conversion: cvtColor(face_crop, COLOR_BGR2GRAY) if 3-channel
+    — Laplacian variance: higher = sharper
+
+brightness_raw = mean(HSV_V channel)
+    — HSV conversion: cvtColor(face_crop, COLOR_BGR2HSV)
+    — Take channel V (value/brightness)
+    — Mean of all pixels: range 0–255
+
+face_area = height × width (in pixels)
+
+VALIDITY GATES (all must pass):
+    blur_valid  = blur_raw   >= QUALITY_BLUR_MIN          (default 30)
+    bright_valid = QUALITY_BRIGHTNESS_MIN <= brightness_raw <= QUALITY_BRIGHTNESS_MAX  (default 30–240)
+    area_valid  = face_area  >= QUALITY_FACE_AREA_MIN      (default 1600 = 40×40)
+
+NORMALIZATION:
+    blur_norm   = min(blur_raw / QUALITY_BLUR_MAX, 1.0)   — default max 1000
+    bright_norm = brightness_raw / 255.0
+    area_norm   = min(face_area / QUALITY_AREA_MAX, 1.0)  — default max 10000
+
+WEIGHTED SCORE:
+    overall_score = blur_norm   × QUALITY_WEIGHT_BLUR      (default 0.60)
+                  + bright_norm × QUALITY_WEIGHT_BRIGHT     (default 0.25)
+                  + area_norm   × QUALITY_WEIGHT_AREA       (default 0.15)
+
+is_valid = blur_valid AND bright_valid AND area_valid
+```
+
+### 5.1 Best face selection (`pipeline/track_state.py:120-138`)
+
+```
+set_best_face(composite_id, face_crop, face_score, full_frame, face_ratio):
+    1. Quick exit: if face_score <= track.best_face_score + 0.03 → return
+       (requires >3% improvement to replace)
+    2. Encode full_frame to JPEG (QUALITY_STORE=85) — outside lock
+    3. Under lock: if face_score > track.best_face_score:
+       - Replace best_face_crop, best_face_score, best_full_frame,
+         best_face_ratio, best_frame_jpeg
+```
+
+---
+
+## 6. Face ratio calculation (`pipeline/face.py`)
+
+```python
+face_area   = (fx2 - fx1) × (fy2 - fy1)
+person_area = (px2 - px1) × (py2 - py1)
+face_ratio  = face_area / person_area    (if person_area > 0, else 0.0)
+```
+
+---
+
+## 7. Embedding cache optimization (`camera_agent.py:288-303`)
+
+```
+IF track has cached_embedding AND pending_match_result:
+    a = array(cached_embedding, float32)
+    b = array(new_embedding, float32)
+    cos_distance = 1.0 - dot(a, b) / (||a|| × ||b||)
+
+    IF cos_distance < EMBEDDING_CACHE_COSINE_THRESHOLD (0.005):
+        Reuse previous match_result (skip Atlas query)
+    ELSE:
+        Run vector_search(new_embedding) → fresh match_result
+        Update track.cached_embedding = new_embedding
+```
+
+---
+
+## 8. Visibility classification (`pipeline/track_state.py:70-81`)
+
+Classified when track expires (before removal):
+
+```
+IF max_face_ratio >= VISIBLE_FACE_RATIO (0.025):
     visibility = "visible"
-elif max_face_ratio >= PARTIAL_FACE_RATIO:
+
+ELIF max_face_ratio >= PARTIAL_FACE_RATIO (0.010):
     visibility = "partial"
-elif is_masked or face_detected_once:
-    visibility = "partial"           # mask or distant face → partial
-elif not face_detected_once and total_frames_seen >= MIN_TRACK_FRAMES:
-    visibility = "hidden"
-else:
-    visibility = "unknown"
-```
 
-- Decisions are made **once per track** when the track ends. Never from a single frame.
-- If face becomes visible at any point (`max_face_ratio >= VISIBLE_FACE_RATIO`), process
-  recognition normally using `best_face_crop` — even if initially hidden.
-- Masked person (mask only, upper face visible) → `partial`, not `hidden`.
-- `authorized` wins regardless of visibility.
-- Only classify `hidden` when no face was detected AND track is long enough.
-  Brief appearances do not trigger intentionally_hidden.
-- Distant people with detectable faces (small ratio but `face_detected_once` is True)
-  are classified as `partial`, not `hidden`.
+ELIF is_masked OR face_detected_once:
+    visibility = "partial"           — mask or distant detectable face
 
-**Tag priority (evaluate in this exact order):**
+ELIF NOT face_detected_once AND total_frames_seen >= MIN_TRACK_FRAMES (15):
+    visibility = "hidden"            — long track, never saw face
 
-1. `blacklist` — always wins, even if person is also `authorized`
-2. `authorized` — no alert regardless of visibility
-3. `known_visitor` — low alert
-4. No tags — apply visibility-based rules below
-
-**`agents/alert_agent.py` — `dispatch(decision, track) → bool`:**
-
-- Pluggable channels selected by config: **console** (always), **email**
-  (smtplib), **SMS** (Twilio), **webhook** (POST JSON to `ALERT_WEBHOOK_URL` —
-  works with Slack/Discord/n8n).
-- Alert payload: status, alert_level, timestamp, camera_id, track_id, image_url,
-  reason, snapshot thumbnail.
-- **Debounce:** never send more than one alert per track_id; rate-limit repeated
-  same-level alerts to `ALERT_COOLDOWN_SECS` to avoid alert storms.
-- Every alert also writes an `events` document (audit trail).
-
-**Acceptance:** With camera running, an enrolled authorized person produces no
-alert; an unknown unmasked person logs a medium event; an unknown **masked**
-person fires a **high** alert through every configured channel exactly once.
-
-### Phase 4 — Review dashboard & audit log
-
-**Goal:** A web UI for operators — no more terminal-only output.
-
-**Backend (`dashboard/backend/`, FastAPI):**
-- `GET /api/events` — paginated audit log (filter by status, alert_level, date).
-- `GET /api/faces` — enrolled identities (CRUD: enroll, edit name/role/tags,
-  delete, mark authorized/blacklist).
-- `GET /api/alerts` — active/recent high+ alerts.
-- `WS /ws/live` — WebSocket pushing annotated frames + current tracks for a
-  live view.
-- `POST /api/faces/{person_id}/review` — operator confirms / relabels an
-  auto-registered unknown.
-
-**Frontend (`dashboard/frontend/`, React+Vite or Streamlit):**
-- **Live view:** annotated camera feed with track boxes, IDs, names, alert
-  badges.
-- **Visitor log:** chronological events with thumbnails, identity, decision,
-  alert level.
-- **Alerts panel:** high/critical events front and center, with acknowledge.
-- **Enrollment / people manager:** review unknowns, assign names/roles/tags,
-  toggle authorized/blacklist.
-- **Audit trail:** immutable `events` history for compliance.
-
-**Acceptance:** Operator can watch the live feed, see a masked-unknown high
-alert appear in real time, click it, view the snapshot, and either enroll the
-person or acknowledge the alert — all from the browser.
-
----
-
-## 6. Orchestration (how the agents connect)
-
-Two acceptable approaches — pick based on time budget:
-
-**A. Plain Python callbacks with queue decoupling (simplest).**
-```
-main.py
- └─ run_camera_agent()
-        │  (YOLO + ByteTrack loop, per-track accumulation)
-        │  (progressive recognition every RECOGNITION_INTERVAL_FRAMES)
-        │
-        ├──► recognition_worker (thread) — runs during-track recognition
-        │
-        └──► finalized_track_queue (queue.Queue)
-               │
-               └── worker_pool (ThreadPoolExecutor, 2-4 workers)
-                     ├─ run_visibility_analyzer(track) ────────► visibility
-                     ├─ run_matching_agent(best_face) ──────────► match_result
-                     ├─ decide(track, match_result) ────────────► DecisionResult
-                     ├─ if should_alert: alert_agent.dispatch()
-                     ├─ if should_register: db_utils.store_face() + cloudinary
-                     └─ db_utils.log_event()                    # always
-```
-
-The camera loop NEVER blocks on I/O. All MongoDB, Cloudinary, and alert work
-runs in the worker pool. Frame rate stays constant regardless of DB latency.
-
-**B. LangGraph state machine (recommended for "agentic" framing).**
-Nodes: `capture → quality → match → decide → (alert | register) → log`. State
-object carries the `Track`. Gives you human-in-the-loop hooks, retries, and a
-clean graph the dashboard can visualize. Heavier to set up.
-
-> Start with A to get an end-to-end working system, then optionally refactor to
-> B. Do not let orchestration framework choice block early progress.
-
-**Thread safety requirements:**
-- Use `threading.Lock` around the track dict in `track_state.py`
-- Wrap InsightFace singleton access with `threading.Lock` or run inference on
-  a dedicated thread with a work queue
-- Copy frame data before passing to WebSocket (OpenCV reuses buffers)
-
----
-
-## 7. Masked-person detection & high alert (new requirement)
-
-This is a required feature. Two parts: **detect the mask**, then **apply the
-policy** (handled in §5 Phase 3 — Decision Agent & Alert Agent).
-
-### Detecting a mask
-
-Pick one (in increasing order of robustness):
-
-1. **Geometric landmark heuristic (no extra model — start here).** SCRFD returns
-   5 facial landmarks (eyes, nose, mouth corners). A mask occludes nose + mouth.
-   NOTE: SCRFD does NOT return per-landmark confidence scores — use geometric
-   analysis instead:
-   ```python
-   # landmarks: [left_eye, right_eye, nose, left_mouth, right_mouth]
-   nose_tip = landmarks[2]
-   mouth_center = (landmarks[3] + landmarks[4]) / 2
-   upper_face = (landmarks[0] + landmarks[1]) / 2  # eye midpoint
-
-   lower_face_height = abs(mouth_center[1] - nose_tip[1])
-   upper_face_height = abs(upper_face[1] - nose_tip[1])
-
-   # If lower face region is abnormally small → mask likely
-   if lower_face_height / (upper_face_height + 1e-6) < 0.3:
-       is_masked = True
-   ```
-   Cheap, no training, good enough for a first cut.
-2. **Lightweight mask classifier (recommended).** A small CNN (e.g. MobileNetV2
-   fine-tuned on a mask/no-mask dataset) run on the face crop → `is_masked`
-   bool + confidence. Many pretrained mask classifiers exist; wrap one in
-   `pipeline/face.py`.
-3. **Detection-confidence signal.** Masks lower ArcFace/SCRFD detection
-   confidence. A face that is clearly a person (YOLO is confident) but whose
-   SCRFD `det_score` is borderline AND lower-face landmarks are weak is a strong
-   mask candidate. Use `DET_SCORE_MIN=0.50` for detection,
-   `EMBEDDING_DET_SCORE_MIN=0.70` for embedding quality gate.
-
-Set `is_masked` on the embedding result and on the `Track`. Combine signals:
-mask = (classifier says mask) OR (geometric heuristic says lower face occluded).
-
-### The high-alert rule
-
-In the Decision Engine: **unknown identity (no DB match above threshold) AND
-`is_masked == True` → `status="masked_unknown"`, `alert_level="high"`,
-`should_alert=True`.** Save the snapshot to `unknown_faces/` and Cloudinary,
-write an `events` doc, and dispatch through the Alert Agent.
-
-Important nuances:
-- A **masked but recognized authorized** person → `authorized`, no alert. (Mask
-  alone is not suspicious; mask + *unknown* is.)
-- If recognition is unreliable because of the mask, treat as **unknown** (fail
-  toward alerting, not toward silently authorizing).
-- Escalate to **critical** if a masked unknown is detected repeatedly or
-  loiters (track lifetime > `LOITER_SECS`).
-
----
-
-## 8. Configuration (`.env` / `config/settings.py`)
-
-`config/settings.py` loads `.env` with `python-dotenv` and exposes constants +
-`validate_config()`. **Never hardcode secrets. Commit `.env.example`, never
-`.env`.** Ensure `.gitignore` excludes `.env`, `captures/`, `models/`, `*.pt`.
-
-```ini
-# ── MongoDB ──────────────────────────────────────────
-MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net
-MONGODB_DATABASE=surveillance
-MONGODB_COLLECTION=faces
-MONGODB_EVENTS_COLLECTION=events
-
-# ── Cloudinary ───────────────────────────────────────
-CLOUDINARY_CLOUD_NAME=
-CLOUDINARY_API_KEY=
-CLOUDINARY_API_SECRET=
-
-# ── Models ───────────────────────────────────────────
-YOLO_MODEL=yolov8s_openvino_model/  # or yolov8s.pt for PyTorch CPU
-YOLO_DEVICE=intel:GPU               # cpu | intel:GPU | intel:NPU | 0 (CUDA)
-INSIGHTFACE_MODEL=buffalo_l
-INSIGHTFACE_DET_SIZE=640
-INSIGHTFACE_PROVIDER=CPUExecutionProvider
-
-# ── Detection / tracking ─────────────────────────────
-PERSON_CONF_THRESHOLD=0.5
-TRACK_TIMEOUT_SECS=8.0          # drop a track unseen this long
-MAX_TRACK_SECS=300              # force-finalize track after this many seconds
-DET_SCORE_MIN=0.50              # face detection threshold (lower for detection)
-EMBEDDING_DET_SCORE_MIN=0.70    # quality gate before generating embeddings
-
-# ── Progressive recognition ─────────────────────────
-RECOGNITION_INTERVAL_FRAMES=20  # run face recog every N frames per track
-
-# ── Quality scoring ───────────────────────────────────
-QUALITY_BLUR_MAX=1000           # Laplacian variance cap for normalization
-QUALITY_AREA_MAX=10000          # face area cap for normalization
-
-# ── Matching ─────────────────────────────────────────
-MATCH_THRESHOLD=0.35            # raw cosine; do NOT exceed 0.45
-DEDUP_SIMILARITY_THRESHOLD=0.50 # merge unknowns above this similarity
-
-# ── Mask / decision ──────────────────────────────────
-MASK_DETECTION=heuristic        # heuristic | classifier
-LOITER_SECS=30                  # masked unknown beyond this → critical
-
-# ── Face visibility ──────────────────────────────────
-VISIBLE_FACE_RATIO=0.025          # face_ratio >= this = visible
-PARTIAL_FACE_RATIO=0.010          # face_ratio >= this = partial
-MIN_TRACK_FRAMES=15               # min frames before hidden classification (was 30)
-
-# ── Alerting ─────────────────────────────────────────
-ALERT_CHANNELS=console,webhook  # console,email,sms,webhook
-ALERT_WEBHOOK_URL=
-ALERT_COOLDOWN_SECS=60
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-ALERT_EMAIL_TO=
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_FROM=
-ALERT_SMS_TO=
-
-# ── Camera ───────────────────────────────────────────
-CAMERA_INDEX=0
-FRAME_WIDTH=640
-FRAME_HEIGHT=480
-CAMERA_ID=cam_01
-
-# ── Local LLM (Ollama) ──────────────────────────────
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=gemma3:4b          # swap to qwen3.5:4b for better reasoning
-OLLAMA_TIMEOUT=120              # seconds
+ELSE:
+    visibility = "unknown"           — short track, no face detected
 ```
 
 ---
 
-## 9. Build order (do this, in this sequence)
+## 9. Vector search — Atlas path (`utils/db_utils.py:79-132`)
 
-1. **Scaffold + config.** Repo layout (§3), `requirements.txt` (§2),
-   `.env.example` + `.gitignore`, `config/settings.py` with `validate_config()`.
-2. **Data contracts (§4).** Define the dataclasses / dict shapes. Everything
-   keys off these.
-3. **Utils.** `image_utils.py` (blur/brightness/crop/save/draw),
-   `embedding_utils.py` (InsightFace singleton + embed + compare),
-   `db_utils.py` (Mongo CRUD + vector search + fallback + `log_event`).
-4. **Camera & tracking pipeline.** `detector.py` (YOLO), `tracker.py` (ByteTrack),
-   `track_state.py`, `camera_agent.py`, `quality_agent.py`. Verify two people
-   get distinct stable IDs and best faces.
-5. **Recognition pipeline.** `matching_agent.py` — embedding + DB search + Cloudinary.
-   Verify enroll + re-match round-trips through Atlas.
-6. **Decision & alerting.** `face.py` mask detection, `decision_agent.py` policy,
-   `alert_agent.py` channels. Verify the masked-unknown high alert end to end.
-7. **Dashboard.** FastAPI backend + dashboard frontend reading `events`/`faces`,
-   live WebSocket feed, operator review/enroll.
-8. **Hardening.** Single-load models (no per-frame reload), alert debounce,
-   secret hygiene, graceful camera release on exit.
-9. **LLM integration.** Ollama HTTP client (`utils/llm_client.py`), NL alert
-   summaries in `alert_agent.py`, enhanced reports in `report.py`, conversational
-   chat endpoint (`dashboard/backend/routes/chat.py`), `ChatPanel.jsx` frontend.
-   All LLM calls have template fallback. Model swap via `OLLAMA_MODEL` env var.
+```python
+pipeline = [
+    {"$vectorSearch": {
+        "index": "vector_index",
+        "path": "latest_embedding",
+        "queryVector": embedding,         # 512-dim L2-normalized
+        "numCandidates": 150,             # VECTOR_SEARCH_CANDIDATES
+        "limit": 5                        # VECTOR_SEARCH_LIMIT
+    }},
+    {"$addFields": {"score": {"$meta": "vectorSearchScore"}}}
+]
 
----
+# Atlas returns vectorSearchScore = (1 + raw_cosine) / 2
+# Must convert back:
+raw_cosine = (atlas_score × 2) - 1
 
-## 10. Best practices
+# Then compare against threshold:
+match = compare_similarity(raw_cosine)   # raw_cosine >= MATCH_THRESHOLD (0.45)
+```
 
-- **Load models once.** Load YOLO once at startup, InsightFace as a singleton.
-  Never reload models inside a per-frame loop.
-- **Thread safety.** Use `threading.Lock` around the track dict and InsightFace
-  singleton access. Camera loop and worker pool run concurrently.
-- **Decouple I/O from camera loop.** Use `queue.Queue` + `ThreadPoolExecutor`
-  for MongoDB, Cloudinary, and alert work. Camera loop must never block.
-- **Autonomous decisions.** Decisions must be autonomous without blocking on
-  `input()`. Operators review events asynchronously on the dashboard.
-- **Use composite track IDs.** Use `f"{camera_id}_{session_epoch}_{byte_track_id}"`
-  to prevent collision after camera restarts.
-- **Generous face crops.** InsightFace is more reliable on full-frame /
-  loosely-cropped context. Feed the recognition stage a generous crop or the
-  full frame, not a tight face box.
-- **Threshold conversion.** Atlas `vectorSearchScore = (1+cosine)/2`. Convert
-  back to raw cosine before comparing: `raw_cosine = (atlas_score * 2) - 1`.
-  Always use `compare_similarity()` — never compare raw values directly.
-- **Reasonable thresholds.** Keep `MATCH_THRESHOLD` ≤ 0.45 — above this
-  rejects genuine same-person matches under indoor lighting.
-- **Secret hygiene.** `.env` must be gitignored from commit #1; only
-  `.env.example` is tracked.
-- **Meaningful directories.** Either write to `known_faces/` / `unknown_faces/`
-  meaningfully (save unknown/masked snapshots there for the dashboard) or rely
-  on Cloudinary + Mongo as the durable store and document that.
-- **Track-level visibility, not single-frame.** Use max_face_ratio across the
-  entire track. Never classify intentional hiding from a single frame.
-- **Hidden means no face detected in a long track.** Only classify `hidden` when
-  face_detected_once is False AND total_frames_seen >= MIN_TRACK_FRAMES.
-  Brief appearances do not trigger intentionally_hidden.
-- **Auto-registration dedup.** Before inserting a new unknown face, check if
-  embedding is close to existing unknown records. Merge instead of duplicating.
+### 9.1 Python cosine fallback (`utils/db_utils.py:135-195`)
+
+```
+Triggered when Atlas $vectorSearch fails (index missing, timeout, etc.)
+
+1. Load up to SCAN_LIMIT (500) face documents from MongoDB
+2. For each stored embedding:
+   query_emb  = embedding / (||embedding|| + 1e-6)    — L2-normalize
+   stored_emb = stored / (||stored|| + 1e-6)           — L2-normalize
+   similarity = dot(query_emb, stored_emb)              — cosine similarity
+
+3. Sort by similarity descending
+4. Return top matches where similarity >= MATCH_THRESHOLD (0.45)
+```
 
 ---
 
-## 11. Acceptance criteria (definition of done, whole system)
+## 10. Match result structure (`agents/matching_agent.py`)
 
-1. Camera runs continuously; `Q` (or API stop) shuts down cleanly, releasing the
-   device.
-2. Two people in frame simultaneously each receive a distinct, stable
-   `track_id` and are processed independently.
-3. An enrolled authorized person is recognized and produces **no** alert.
-4. An unknown, unmasked person is logged as `unknown` (medium) and
-   auto-registered for later review — no operator interaction.
-5. An unknown **masked** person fires a **high** alert through every configured
-   channel **exactly once** per track, with a snapshot saved to Cloudinary and
-   an `events` doc written.
-6. A masked but *authorized* person does **not** alert.
-7. The dashboard shows the live feed, the visitor/audit log, and lets an
-   operator review/enroll an unknown — all without touching the terminal.
-8. No model is loaded inside any per-frame loop; no secret is committed to git.
-9. An unknown person whose face is NEVER detected during a sufficiently long
-    track (>= 15 frames) fires a **high** `intentionally_hidden` alert.
-10. A person who appears briefly (< 15 frames) with no face detected is NOT
-    classified as `intentionally_hidden`.
-11. A masked person (mask only) is classified as `partial`, not `hidden`.
-12. A distant person with small face_ratio but detectable face is NOT
-    classified as `intentionally_hidden`.
-13. A masked unknown person triggers a **real-time alert** during the track
-    (not just at track end) via progressive recognition.
-14. Camera frame rate stays constant regardless of MongoDB/Cloudinary latency
-    (I/O is decoupled via queue).
-15. Track IDs are unique across camera restarts (composite key).
-16. Auto-registered unknowns are deduplicated — same person appearing multiple
-    times does not create duplicate face records.
-17. LLM generates natural-language alert summaries visible in console, email, SMS,
-    WebSocket broadcasts, and dashboard notifications — with template fallback if
-    Ollama is unavailable.
-18. Chat endpoint (`POST /api/chat`) answers natural-language questions about
-    surveillance data (stats, recent events, unknown persons, visit history) with
-    LLM-polished responses — with template fallback if Ollama is unavailable.
-19. LLM model can be swapped via single env var change (`OLLAMA_MODEL`).
+```python
+run_matching_from_embedding(embedding):
+    matches = vector_search(embedding)       # Atlas or Python fallback
+    if not matches: return MatchResult(matched=False)
+
+    best = matches[0]
+    return MatchResult(
+        person_id      = best["person_id"],
+        name           = best["name"],
+        role           = best["role"],
+        tags           = best["tags"],          # ["authorized", "blacklist", etc.]
+        similarity_score = best["similarity_score"],  # raw cosine
+        image_url      = best["image_url"],
+        matched        = True,
+        verified       = best["verified"],
+        alert_level    = best["alert_level"]
+    )
+```
+
+---
+
+## 11. Memory Agent — confidence boost (`agents/memory.py:149-184`)
+
+```
+boost = 0.0
+
+# Returning visitor bonus
+IF visit_count > 0:
+    boost += min(10, visit_count × 2)       — +2 per visit, cap at +10
+
+# Recency bonus
+IF days_since_last <= 7:    boost += 5
+ELIF days_since_last <= 30: boost += 2
+
+# Consistency bonus
+IF avg_similarity > 0.8:    boost += 3
+ELIF avg_similarity > 0.6:  boost += 1
+
+# Pattern bonus
+IF is_typical_time:          boost += 2
+IF is_typical_camera:        boost += 1
+
+# Penalty: current similarity much lower than average
+IF avg_similarity > 0 AND current_similarity < avg_similarity × 0.7:
+    boost -= 5
+
+RETURN clamp(boost, -10, +20)
+```
+
+### 11.1 is_typical_time check
+
+```
+hour_counts = count occurrences of each hour in typical_hours
+common_hours = top 3 most frequent hours
+is_typical_time = any(|current_hour - h| <= 2 for h in common_hours)
+```
+
+### 11.2 is_known check
+
+```
+is_known = (visit_count > 0) AND (last_status in ["known", "verified", "authorized", "known_visitor"])
+```
+
+---
+
+## 12. Recognition Agent — confidence computation (`agents/recognition.py`)
+
+### 12.1 Case routing
+
+```
+CASE 1: similarity >= VERY_HIGH_SIMILARITY (0.90)
+    confidence = min(95, 70 + (similarity - 0.90) × 250 + memory_boost)
+    status = "known"
+
+CASE 2: similarity >= MATCH_THRESHOLD (0.45)
+    confidence = compute_confidence(...)
+    IF confidence >= 70: status = "known"
+    ELSE:                status = "uncertain"
+
+CASE 3: face_quality >= BORDERLINE_FACE_QUALITY (0.8)
+        AND similarity >= MATCH_THRESHOLD × 0.8 (= 0.36)
+    confidence = 40 + similarity × 30 + memory_boost
+    status = "uncertain"
+
+CASE 4: else (low similarity)
+    confidence = max(60, 100 - similarity × 100)
+    status = "unknown"
+```
+
+### 12.2 Confidence formula (`_compute_confidence`)
+
+```
+sim_score = min(60, (similarity - MATCH_THRESHOLD) / (1.0 - MATCH_THRESHOLD) × 60)
+    — Maps similarity from [MATCH_THRESHOLD, 1.0] to [0, 60]
+
+quality_score = face_quality × 25
+    — Maps face_quality [0, 1] to [0, 25]
+
+duration_score = min(15, track_duration / 10)
+    — Maps seconds [0, 150] to [0, 15]
+
+confidence = sim_score + quality_score + duration_score + memory_boost
+
+IF is_masked:
+    confidence ×= MASK_CONFIDENCE_PENALTY (0.85)
+
+confidence = clamp(confidence, 0, 100)
+```
+
+---
+
+## 13. Policy Agent — decision rules (`agents/policy.py:110-289`)
+
+Evaluated in priority order (first match wins):
+
+```
+RULE 1: "blacklist" in tags
+    → status="blacklist", alert_level="critical", should_alert=True
+
+RULE 2: "authorized" in tags
+    → status="authorized", alert_level="none", should_alert=False
+
+RULE 3: verified == True
+    → status="verified", alert_level="none", should_alert=False
+
+RULE 4: matched AND is_known_from_memory
+    → status="known_visitor", alert_level="low", should_alert=False
+
+RULE 5: matched (not memory-confirmed)
+    5a: similarity >= KNOWN_VISITOR_SIMILARITY (0.85) OR confidence >= KNOWN_VISITOR_CONFIDENCE (80)
+        → status="known_visitor", alert_level="low"
+    5b: similarity >= MATCH_THRESHOLD (0.45)
+        → status="known_visitor", alert_level="low"
+    5c: else
+        → status="uncertain", alert_level="low", should_register=True
+
+RULE 6: visibility == "hidden"
+    → status="intentionally_hidden", alert_level="high", should_alert=True
+
+RULE 7: is_masked OR visibility == "partial"
+    IF track_lifetime > LOITER_SECS (30):
+        → alert_level="high", reason="Masked unknown person loitering"
+    ELSE:
+        → alert_level="medium", reason="Unknown person with partial visibility or mask"
+    → status="masked_unknown", should_alert=True, should_register=True
+
+RULE 8: NOT is_office_hours OR NOT is_weekday
+    → status="unknown", alert_level="high", should_alert=True
+    (office_hours: OFFICE_HOURS_START=9 to OFFICE_HOURS_END=17, weekday=Mon-Fri)
+
+RULE 9: else (unknown during office hours)
+    → status="unknown", alert_level="medium", should_alert=True, should_register=True
+```
+
+---
+
+## 14. Alert deduplication (`agents/alert_agent.py:41-55`)
+
+```
+For unverified statuses (unknown, masked_unknown, uncertain, intentionally_hidden):
+    key = "unverified:{alert_level}"
+    — All unknowns of same level share one cooldown timer
+    — A routine unknown does NOT suppress a critical (blacklist) alert
+
+For all other statuses:
+    key = "{track_id}:{alert_level}"
+    — Per-track, per-level dedup
+
+IF now - last_alert_time < ALERT_COOLDOWN_SECS (60):
+    → suppress (return False)
+ELSE:
+    → allow, update timestamp
+```
+
+### 14.1 Stale pruning
+
+```
+Every ALERT_COOLDOWN_SECS × 2 seconds:
+    Remove entries older than ALERT_COOLDOWN_SECS × 2 from _alert_timestamps
+    — Prevents unbounded memory growth
+```
+
+---
+
+## 15. Progressive critical alert dispatch (`camera_agent.py:345-362`)
+
+```
+During progressive recognition (NOT at finalization):
+
+IF decision.should_alert
+   AND decision.alert_level == "critical"    — ONLY critical fires early
+   AND NOT track.alerted
+   AND NOT already_finalized:
+    → dispatch(track, decision, image_url)   — immediate alert
+    → set_decision(track_id, status, alerted=True)
+
+ALL OTHER alerts:
+    → deferred to finalization (main.py process_finalized_track)
+    — Avoids premature alerts for verified/known users when early
+      recognition attempts produce low similarity
+```
+
+---
+
+## 16. Track finalization (`main.py:68-271`)
+
+```
+1. Upload image to Cloudinary (or save locally as fallback)
+   — Uses pre-encoded JPEG bytes if available (avoids re-encoding)
+
+2. IF track.embedding is None:
+   → log_event("unknown", "none", alerted=False) and return
+
+3. Reuse match_result from progressive recognition if available
+   — ELSE: run_matching_from_embedding(track.embedding)
+
+4. Reuse recognition_result if match was also reused
+   — ELSE: RecognitionAgent.run({...})
+
+5. Reuse memory_context if match was reused
+   — ELSE: MemoryAgent.run({...})
+
+6. decision = decide(track, match_result, recognition_result, memory_context)
+
+7. IF decision.should_register:
+   7a. IF status is "unknown" or "masked_unknown":
+       — Check find_similar_unknowns(embedding) for dedup
+       — If similar found: update_face() (merge into existing)
+       — ELSE: store_face() (create new record)
+   7b. ELSE: store_face() with name/role from match_result
+
+8. IF match_result.matched:
+   — memory_agent.record_visit(person_id, camera_id, status, similarity, is_masked)
+
+9. Move face_crop to captures/face_crops/{person_name}/ if matched
+
+10. IF decision.should_alert AND NOT track.alerted:
+    — dispatch(track, decision, image_url) → returns True if sent
+    — Broadcast alert_payload to dashboard via WebSocket
+
+11. log_event(track_id, status, alert_level, alerted, similarity_score, ...)
+12. Broadcast event_payload to dashboard via WebSocket
+```
+
+---
+
+## 17. Auto-registration dedup (`utils/db_utils.py:198-229`)
+
+```
+find_similar_unknowns(embedding):
+    1. Load up to 500 unknowns (role="unknown") sorted by created_at desc
+    2. For each:
+       query_emb  = embedding / (||embedding|| + 1e-6)
+       stored_emb = stored / (||stored|| + 1e-6)
+       similarity = dot(query_emb, stored_emb)
+    3. Return matches where similarity >= DEDUP_SIMILARITY_THRESHOLD (0.40)
+
+IF similar found: merge into first match (update_face)
+ELSE: create new face record (store_face)
+```
+
+---
+
+## 18. Face record storage (`utils/db_utils.py:287-352`)
+
+```
+store_face(...) {
+    1. IF NOT skip_search:
+       — Run vector_search(embedding, limit=3) for dedup check
+       — For each match with similarity >= DEDUP_SIMILARITY_THRESHOLD (0.40):
+         a. IF existing face is verified: SKIP (never overwrite verified)
+         b. ELSE: merge via update_face() and return existing person_id
+
+    2. Create new document:
+       {
+           person_id: str,
+           name: str,
+           role: str,
+           embeddings: [embedding],              # list of 512-dim vectors
+           latest_embedding: embedding,           # fastest search field
+           mean_embedding: embedding,             # recomputed on update
+           latest_embedding_quality: quality_score,
+           embedding_model: "arcface",
+           images: [{id: uuid, url: image_url, captured_at: now}],
+           source: {camera_id, captured_at},
+           tags: [...],                           # ["authorized", "blacklist", etc.]
+           verified: False,
+           alert_level: "low",
+           created_at: now, updated_at: now
+       }
+}
+```
+
+### 18.1 Quality-gated embedding update (`utils/db_utils.py:382-391`)
+
+```
+update_face(...) {
+    IF new_embedding AND quality_score provided:
+        current_quality = existing.latest_embedding_quality
+        IF quality_score > current_quality:
+            → overwrite latest_embedding with new embedding
+            — Higher quality embedding wins for vector search
+}
+```
+
+### 18.2 Embedding history management (`utils/db_utils.py:395-414`)
+
+```
+Push new embedding to embeddings array:
+    $push: { embeddings: { $each: [embedding], $slice: -EMBEDDING_HISTORY_CAP } }
+    — Keeps only last 25 embeddings (FIFO)
+
+Recompute mean_embedding:
+    all_embs = existing.embeddings + [new_embedding]
+    all_embs = all_embs[-25:]                      — last 25
+    mean = mean(all_embs, axis=0)
+    mean_embedding = mean / (||mean|| + 1e-6)       — L2-normalize
+```
+
+---
+
+## 19. Memory visit recording (`utils/db_utils.py:601-662`)
+
+Atomic MongoDB update (single round-trip):
+
+```
+find_one_and_update({person_id}, {
+    $inc:  { visit_count: 1 },
+    $push: {
+        similarity_history: { $each: [similarity], $slice: -10 },
+        status_history:     { $each: [{status, timestamp}], $slice: -10 },
+        typical_hours:      { $each: [current_hour], $slice: -20 },
+    },
+    $addToSet: { typical_cameras: camera_id },
+    $set: {
+        last_seen: now,
+        last_camera: camera_id,
+        last_status: status,
+        updated_at: now,
+    },
+}, upsert=True)
+```
+
+---
+
+## 20. LLM integration (`utils/llm_client.py`)
+
+### 20.1 Alert NL summary generation
+
+```
+POST /api/generate (Ollama)
+System: "You are a surveillance alert system..."
+Prompt: status, alert_level, person, camera, masked, reason, visit_history
+Temperature: 0.2, Max tokens: 150
+Retry: 3 attempts, timeout from settings.OLLAMA_TIMEOUT (30s)
+Fallback: None (caller uses template string)
+```
+
+### 20.2 Chat completion
+
+```
+POST /api/chat (Ollama)
+Messages: [system_prompt, user_message]
+Temperature: 0.3, Max tokens: 1024
+Retry: 3 attempts
+Fallback: None (returns None on failure)
+```
+
+### 20.3 Availability check
+
+```
+GET /api/tags
+Cached for 10 seconds (avoids hammering Ollama)
+Returns True if status_code == 200
+```
+
+---
+
+## 21. Dashboard broadcast pipeline (`dashboard/backend/routes/live.py`)
+
+```
+WebSocket /ws/live:
+
+broadcast_frame(jpeg_bytes):
+    — FRAME_SKIP = 2 (broadcasts every 2nd frame)
+    — MAX_FRAME_SIZE = 1MB
+    — base64 encode → JSON {"type": "frame", "data": "..."}
+
+broadcast_event(event_dict):
+    — JSON {"type": "event", "data": {...}}
+
+broadcast_alert(alert_dict):
+    — JSON {"type": "alert", "data": {...}}
+
+Client management:
+    — connected_clients: Set[WebSocket]
+    — Auto-disconnect on send failure (1s timeout per client)
+    — Ping/pong: client sends "ping" → server responds {"type": "pong"}
+```
+
+---
+
+## 22. Thread architecture
+
+```
+Main thread:
+    CameraAgent._loop()                 — blocking cap.read() loop
+
+Recognition executor (2 threads):
+    _progressive_recognition()          — InsightFace + matching + decision
+    _finalize_track()                   — final embedding + finalization
+
+Track worker pool (2 threads):
+    process_finalized_track()           — Cloudinary + DB + alerts + events
+
+JPEG encode executor (2 threads):
+    _encode_and_broadcast()             — JPEG encode + WebSocket broadcast
+
+Alert executor (2 threads):
+    _send_async()                       — LLM summary + email/sms/webhook
+
+Uvicorn server (1 thread):
+    FastAPI REST + WebSocket server
+
+Thread safety:
+    — TrackState._lock: threading.Lock around _tracks dict
+    — TrackState._in_flight: tracks in-progress recognition count
+    — InsightFaceSingleton._lock: one-time model initialization
+    — _collection_locks: per-collection MongoDB connection locks
+    — _alert_lock: alert dedup timestamp access
+    — _client_lock: MongoDB client creation
+```
+
+---
+
+## 23. All thresholds summary
+
+| Threshold | Default | Purpose |
+|-----------|---------|---------|
+| PERSON_CONF_THRESHOLD | 0.40 | YOLO person detection confidence |
+| DET_SCORE_MIN | 0.40 | Standard face detection threshold |
+| DET_SCORE_RELAXED | 0.20 | Relaxed face detection fallback |
+| EMBEDDING_DET_SCORE_MIN | 0.40 | Minimum det_score to generate embedding |
+| MATCH_THRESHOLD | 0.45 | Raw cosine similarity for face match (max 0.45) |
+| DEDUP_SIMILARITY_THRESHOLD | 0.40 | Merge unknowns above this similarity |
+| VERY_HIGH_SIMILARITY | 0.90 | Definite known match |
+| HIGH_CONFIDENCE_SIMILARITY | 0.85 | Skip re-recognition |
+| KNOWN_VISITOR_SIMILARITY | 0.85 | Auto-escalate to known_visitor |
+| KNOWN_VISITOR_CONFIDENCE | 80 | Alternative confidence threshold |
+| BORDERLINE_FACE_QUALITY | 0.80 | Face quality for borderline case |
+| MASK_CONFIDENCE_PENALTY | 0.85 | Multiply confidence for masked faces |
+| MASK_RATIO_THRESHOLD | 0.30 | Geometric mask detection ratio |
+| VISIBLE_FACE_RATIO | 0.025 | face_area/person_area >= this = visible |
+| PARTIAL_FACE_RATIO | 0.010 | face_area/person_area >= this = partial |
+| MIN_TRACK_FRAMES | 15 | Min frames before hidden classification |
+| TRACK_TIMEOUT_SECS | 3.0 | Drop track unseen this long |
+| MAX_TRACK_SECS | 300 | Force-finalize after this many seconds |
+| LOITER_SECS | 30 | Masked unknown beyond this = high alert |
+| QUALITY_BLUR_MIN | 30 | Minimum Laplacian variance |
+| QUALITY_BRIGHTNESS_MIN | 30 | Min HSV-V brightness |
+| QUALITY_BRIGHTNESS_MAX | 240 | Max HSV-V brightness |
+| QUALITY_FACE_AREA_MIN | 1600 | Min face area (40×40 px) |
+| QUALITY_BLUR_MAX | 1000 | Blur normalization cap |
+| QUALITY_AREA_MAX | 10000 | Area normalization cap |
+| QUALITY_WEIGHT_BLUR | 0.60 | Blur weight in overall score |
+| QUALITY_WEIGHT_BRIGHT | 0.25 | Brightness weight |
+| QUALITY_WEIGHT_AREA | 0.15 | Area weight |
+| CLAHE_CLIP_LIMIT | 2.0 | CLAHE contrast clip limit |
+| CLAHE_TILE_SIZE | 8 | CLAHE tile grid size |
+| EMBEDDING_CACHE_COSINE_THRESHOLD | 0.005 | Skip Atlas if embedding nearly identical |
+| ALERT_COOLDOWN_SECS | 60 | Min seconds between same-type alerts |
+| EMBEDDING_HISTORY_CAP | 25 | Max past embeddings per person |
+| OFFICE_HOURS_START | 9 | Office hours start (hour) |
+| OFFICE_HOURS_END | 17 | Office hours end (hour) |
+| OFFICE_DAYS | [0,1,2,3,4] | Mon–Fri |
+| SCAN_LIMIT | 500 | Max docs for Python cosine fallback |
+| VECTOR_SEARCH_CANDIDATES | 150 | Atlas HNSW candidate pool |
+| VECTOR_SEARCH_LIMIT | 5 | Atlas top results returned |
