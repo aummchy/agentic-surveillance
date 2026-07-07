@@ -247,7 +247,7 @@ ALERT_SMS_TO = os.getenv("ALERT_SMS_TO", "")
 # ── Model / Pipeline ───────────────────────────────────────────
 YOLO_MODEL = _get("YOLO_MODEL", "YOLO_MODEL", "models/yolov8s.pt")
 YOLO_DEVICE = _get("YOLO_DEVICE", "YOLO_DEVICE", "cpu")
-INSIGHTFACE_MODEL = _get("INSIGHTFACE_MODEL", "INSIGHTFACE_MODEL", "buffalo_m")
+INSIGHTFACE_MODEL = _get("INSIGHTFACE_MODEL", "INSIGHTFACE_MODEL", "buffalo_l")
 INSIGHTFACE_DET_SIZE = _get("INSIGHTFACE_DET_SIZE", "INSIGHTFACE_DET_SIZE", 1280, int)
 INSIGHTFACE_PROVIDER = _get("INSIGHTFACE_PROVIDER", "INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
 

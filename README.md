@@ -220,7 +220,7 @@ A track is considered expired (person left frame) when:
 
 ### InsightFace Singleton
 
-- **Model:** `buffalo_m` (SCRFD detection + ArcFace embedding, `buffalo_l` in `.env` for higher accuracy)
+- **Model:** `buffalo_l` (SCRFD detection + ArcFace embedding, higher accuracy than `buffalo_m`)
 - **Detection input size:** 1280×1280 (configurable via `INSIGHTFACE_DET_SIZE` — drop to 640 for ~4× faster face detection)
 - **Execution provider:** `CPUExecutionProvider` (configurable; `CUDAExecutionProvider` for NVIDIA GPU, `OpenVINOExecutionProvider` has known DLL compatibility issues on Windows)
 - **Embedding dimension:** 512 (L2-normalized ArcFace)
@@ -940,7 +940,7 @@ Secrets (API keys, passwords, URIs) belong in `.env`, not `config.jsonc`.
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
-| `INSIGHTFACE_MODEL` | `"buffalo_m"` | str | InsightFace model (buffalo_m/l/s) |
+| `INSIGHTFACE_MODEL` | `"buffalo_l"` | str | InsightFace model (buffalo_l/m/s) |
 | `INSIGHTFACE_DET_SIZE` | `1280` | int | Detection input size |
 | `INSIGHTFACE_PROVIDER` | `"CPUExecutionProvider"` | str | ONNX execution provider |
 | `DET_SCORE_MIN` | `0.40` | float | (Legacy — no longer used in detection flow) |
@@ -1259,7 +1259,7 @@ surveillance-system/
 │
 ├── utils/                           # Utilities
 │   ├── db_utils.py                  # MongoDB CRUD + vector search + quality-gated embedding updates (no backward-compat overwrite)
-│   ├── embedding_utils.py           # InsightFace singleton (buffalo_m, CLAHE preprocessing)
+│   ├── embedding_utils.py           # InsightFace singleton (buffalo_l, CLAHE preprocessing)
 │   ├── llm_client.py                # Ollama HTTP client (generate, chat, NL summaries)
 │   └── image_utils.py               # Image processing, crop, save, upload
 │

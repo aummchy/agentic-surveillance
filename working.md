@@ -91,7 +91,7 @@ Applied to every image BEFORE face detection.
 
 ```
 InsightFace singleton loaded once:
-    model = FaceAnalysis(name="buffalo_m", providers=["CPUExecutionProvider"])
+    model = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
     app.prepare(ctx_id=0, det_size=(1280, 1280))
 
 detect_faces_raw(image, min_score):
