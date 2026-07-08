@@ -53,13 +53,25 @@ class CameraAgent:
         """Open VideoCapture with configured backend (dshow/msmf/auto)."""
         source = CameraAgent._camera_source()
         backend = getattr(settings, "CAMERA_BACKEND", "")
+        import cv2
         if backend and isinstance(source, int):
-            import cv2
             be = getattr(cv2, f"CAP_{backend.upper()}", None)
             if be is not None:
-                return cv2.VideoCapture(source, be)
-        import cv2
-        return cv2.VideoCapture(source)
+                cap = cv2.VideoCapture(source, be)
+            else:
+                cap = cv2.VideoCapture(source)
+        else:
+            cap = cv2.VideoCapture(source)
+        # Set read timeout for network streams so read() doesn't block indefinitely
+        if isinstance(source, str):
+            for prop in ("CAP_PROP_READ_TIMEOUT_MSEC", "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                attr = getattr(cv2, prop, None)
+                if attr is not None:
+                    try:
+                        cap.set(attr, 1000)
+                    except Exception:
+                        pass
+        return cap
 
     def _apply_frame_props(self):
         """Set frame dimensions on the current capture and return actual resolution."""
@@ -74,17 +86,17 @@ class CameraAgent:
     def start(self):
         self._running = True
 
-        source = self._camera_source()
+        source = CameraAgent._camera_source()
 
         # Validate camera source
-        test_cap = self._open_capture()
+        test_cap = CameraAgent._open_capture()
         if not test_cap.isOpened():
             logger.error("camera_source_invalid", source=source)
             test_cap.release()
             return
         test_cap.release()
 
-        self._cap = self._open_capture()
+        self._cap = CameraAgent._open_capture()
         resolution = self._apply_frame_props()
 
         if not self._cap.isOpened():
@@ -110,7 +122,7 @@ class CameraAgent:
 
     def _loop(self):
         consecutive_failures = 0
-        max_failures = 30  # 3 seconds at 100ms sleep
+        max_failures = 10  # ~1 second at 100ms sleep
         while self._running:
             ret, frame = self._cap.read()
             if not ret:
@@ -120,7 +132,7 @@ class CameraAgent:
                     # Try to reconnect
                     self._cap.release()
                     time.sleep(1.0)
-                    self._cap = self._open_capture()
+                    self._cap = CameraAgent._open_capture()
                     if self._cap.isOpened():
                         resolution = self._apply_frame_props()
                         logger.info("camera_reconnected", resolution=resolution)

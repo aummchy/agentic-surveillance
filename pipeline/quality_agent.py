@@ -23,9 +23,9 @@ def compute_quality(face_crop: np.ndarray) -> QualityResult:
     bright_valid = settings.QUALITY_BRIGHTNESS_MIN <= brightness_raw <= settings.QUALITY_BRIGHTNESS_MAX
     area_valid = face_area >= settings.QUALITY_FACE_AREA_MIN
 
-    blur_norm = min(blur_raw / settings.QUALITY_BLUR_MAX, 1.0)
+    blur_norm = min(max(blur_raw - settings.QUALITY_BLUR_MIN, 0) / (settings.QUALITY_BLUR_MAX - settings.QUALITY_BLUR_MIN), 1.0)
     bright_norm = brightness_raw / 255.0
-    area_norm = min(face_area / settings.QUALITY_AREA_MAX, 1.0)
+    area_norm = min(max(face_area - settings.QUALITY_FACE_AREA_MIN, 0) / (settings.QUALITY_AREA_MAX - settings.QUALITY_FACE_AREA_MIN), 1.0)
 
     overall_score = (blur_norm * settings.QUALITY_WEIGHT_BLUR
                      + bright_norm * settings.QUALITY_WEIGHT_BRIGHT

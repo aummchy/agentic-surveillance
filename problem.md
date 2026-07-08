@@ -2,7 +2,7 @@
 
 Codebase audit performed 2026-06-25 (updated 2026-07-05). Issues are grouped by severity and verified against actual source lines.
 
-**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 89 prior issues FIXED. 13 improvements applied.**
+**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 90 prior issues FIXED. 13 improvements applied.**
 
 ---
 
@@ -120,6 +120,12 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 ---
 
 ## SOLVED — Issues Fixed
+
+### 2026-07-08 (pass 11) — 1 issue resolved
+
+| # | Severity | Issue | File:Line | Status |
+|---|----------|-------|-----------|--------|
+| 99 | LOW | Quality score normalization squashed — `blur_norm` and `area_norm` computed from zero instead of from their minimum thresholds, making `overall_score` nearly zero for most valid faces | `pipeline/quality_agent.py:26-28` | **FIXED** — shifted normalization baseline from 0 to `QUALITY_BLUR_MIN`/`QUALITY_FACE_AREA_MIN`. A barely-valid face now scores ~0.03 (was 0.05), and the full 0–1 range is usable for good-quality faces |
 
 ### 2026-07-05 (pass 10) — 5 accuracy issues resolved + 3 config tunes
 
@@ -291,7 +297,8 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 | 2026-07-03 (pass 8) | 4 | 2 | **2** |
 | 2026-07-05 (pass 9) | 4 | 0 | **4** |
 | 2026-07-05 (pass 10) | 5 | 5 | **0** |
-| **Total** | **98** | **91** | **7** |
+| 2026-07-08 (pass 11) | 1 | 1 | **0** |
+| **Total** | **99** | **92** | **7** |
 
 ### Open issue breakdown
 
