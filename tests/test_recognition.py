@@ -1,101 +1,186 @@
 """
-Phase 2.1 + 2.2 — Recognition & Policy Threshold Regression Tests
+Recognition & Policy Threshold Regression Tests (Unified Formula)
 
-These tests lock down the classification behavior so config changes can't
-silently shift what "known", "uncertain", and "unknown" mean.
+These tests lock down the classification behavior of the unified
+confidence formula from agents/scoring.py. Tests verify that:
+  - The confidence formula is in [1, 100]
+  - Status tiers work correctly with the match gate
+  - Mask penalty reduces confidence
+  - Missing quality defaults to 0.5
+  - Memory boost has a small effect
 
 Run: python -m pytest tests/test_recognition.py -v
 """
 
 import pytest
 from agents.recognition import recognize
+from agents.scoring import compute_confidence, normalize_cosine, clip
 from agents.policy import PolicyAgent
 from pipeline.models import DecisionResult, MatchResult
 from config import settings
 
 
-# ── Phase 2.1: Recognition decision bands ────────────────────────
+# ── Scorer unit tests ────────────────────────────────────────────
+
+class TestNormalizeCosine:
+    def test_minimum_maps_to_zero(self):
+        assert normalize_cosine(settings.SIM_NORM_MIN) == 0.0
+
+    def test_maximum_maps_to_one(self):
+        assert normalize_cosine(settings.SIM_NORM_MAX) == 1.0
+
+    def test_below_min_clips_to_zero(self):
+        assert normalize_cosine(0.0) == 0.0
+
+    def test_above_max_clips_to_one(self):
+        assert normalize_cosine(1.0) == 1.0
+
+    def test_midpoint(self):
+        mid = (settings.SIM_NORM_MIN + settings.SIM_NORM_MAX) / 2
+        expected = (mid - settings.SIM_NORM_MIN) / (settings.SIM_NORM_MAX - settings.SIM_NORM_MIN)
+        assert normalize_cosine(mid) == pytest.approx(expected, abs=0.01)
+
+
+class TestComputeConfidence:
+    def test_minimum_inputs(self):
+        conf = compute_confidence(0.0, 0.0, 0.0, 0.0, False)
+        assert 1 <= conf <= 100
+
+    def test_maximum_inputs(self):
+        conf = compute_confidence(1.0, 1.0, 10.0, 20.0, False)
+        assert conf == 100
+
+    def test_masked_lower_than_unmasked(self):
+        unmasked = compute_confidence(0.50, 0.8, 1.0, 0.0, False)
+        masked = compute_confidence(0.50, 0.8, 1.0, 0.0, True)
+        assert masked < unmasked
+
+    def test_quality_none_equals_half(self):
+        with_none = compute_confidence(0.60, None, 1.0, 0.0, False)
+        with_half = compute_confidence(0.60, 0.5, 1.0, 0.0, False)
+        assert with_none == with_half
+
+    def test_quality_zero_treated_as_missing(self):
+        with_zero = compute_confidence(0.60, 0.0, 1.0, 0.0, False)
+        with_half = compute_confidence(0.60, 0.5, 1.0, 0.0, False)
+        assert with_zero == with_half
+
+    def test_memory_small_effect(self):
+        no_memory = compute_confidence(0.55, 0.7, 1.0, 0.0, False)
+        with_memory = compute_confidence(0.55, 0.7, 1.0, 10.0, False)
+        assert no_memory < with_memory
+        assert with_memory - no_memory <= 5
+
+
+# ── RecognitionAgent integration tests ───────────────────────────
 
 class TestRecognitionBands:
-    """Assert exact classification for key similarity values at MATCH_THRESHOLD=0.45."""
-
-    def test_unknown_below_borderline(self):
-        """Similarity 0.30 → must be 'unknown' (below 0.45 * 0.8 = 0.36)."""
-        result = recognize(similarity=0.30, face_quality=0.8, track_duration=10)
+    def test_unknown_low_similarity(self):
+        """sim=0.30, good quality, short dur -> unknown (below threshold + low conf)."""
+        result = recognize(similarity=0.30, face_quality=0.8, track_duration=0.5)
         assert result["status"] == "unknown", (
-            f"similarity=0.30 should be 'unknown', got '{result['status']}'"
+            f"sim=0.30 should be 'unknown', got '{result['status']}'"
         )
 
-    def test_uncertain_at_borderline(self):
-        """Similarity 0.40 → must be 'uncertain' (above 0.36, below 0.45)."""
-        result = recognize(similarity=0.40, face_quality=0.9, track_duration=10)
-        assert result["status"] == "uncertain", (
-            f"similarity=0.40 should be 'uncertain', got '{result['status']}'"
-        )
-
-    def test_known_above_threshold(self):
-        """Similarity 0.50 → must be 'known' (above 0.45 with enough quality/duration)."""
+    def test_uncertain_below_threshold_with_max_boost(self):
+        """sim=0.44 (below 0.45), max everything -> uncertain (conf>=55, not matched)."""
         result = recognize(
-            similarity=0.50, face_quality=0.9, track_duration=15,
-            memory_context={"confidence_boost": 0}
+            similarity=0.44, face_quality=1.0, track_duration=2.0,
+            memory_context={"confidence_boost": 20},
         )
-        # Confidence = sim_score + quality_score + duration_score
-        # sim_score = min(60, (0.50-0.45)/(1.0-0.45)*60) = min(60, 5.45) = 5.45
-        # quality_score = 0.9 * 25 = 22.5
-        # duration_score = min(15, 15/10) = 1.5
-        # total = 5.45 + 22.5 + 1.5 = 29.45 → below 70 → "uncertain"
-        # With memory boost or higher quality/duration, it can reach "known"
-        # Test the threshold boundary: at 0.45 exactly, it enters Case 2
-        assert result["status"] in ("known", "uncertain"), (
-            f"similarity=0.50 should be 'known' or 'uncertain', got '{result['status']}'"
+        assert result["status"] == "uncertain", (
+            f"sim=0.44 with max boost should be 'uncertain', got '{result['status']}'"
         )
 
-    def test_known_at_very_high(self):
-        """Similarity 0.92 → must be 'known' (above VERY_HIGH_SIMILARITY=0.90)."""
-        result = recognize(similarity=0.92, face_quality=0.8, track_duration=10)
+    def test_known_with_good_match(self):
+        """sim=0.60, good quality/duration, memory=10 -> known (conf>=70, matched)."""
+        result = recognize(
+            similarity=0.60, face_quality=0.85, track_duration=2.0,
+            memory_context={"confidence_boost": 10},
+        )
         assert result["status"] == "known", (
-            f"similarity=0.92 should be 'known', got '{result['status']}'"
+            f"sim=0.60 should be 'known', got '{result['status']}'"
+        )
+        assert result["confidence"] >= 70
+
+    def test_known_at_very_high_similarity(self):
+        """sim=0.92 -> known (above threshold, very high confidence)."""
+        result = recognize(similarity=0.92, face_quality=0.8, track_duration=1.0)
+        assert result["status"] == "known", (
+            f"sim=0.92 should be 'known', got '{result['status']}'"
+        )
+        assert result["confidence"] >= 85
+
+    def test_masked_lowers_confidence(self):
+        """Masked produces lower confidence than unmasked, all else equal."""
+        unmasked = recognize(
+            similarity=0.50, face_quality=0.8, track_duration=1.0, is_masked=False,
+        )
+        masked = recognize(
+            similarity=0.50, face_quality=0.8, track_duration=1.0, is_masked=True,
+        )
+        assert masked["confidence"] < unmasked["confidence"]
+
+    def test_quality_none_fallback(self):
+        """quality=None or 0.0 -> uses DEFAULT_FACE_QUALITY=0.5, not 0."""
+        result = recognize(
+            similarity=0.60, face_quality=0.0, track_duration=1.0,
+        )
+        assert result["status"] in ("known", "uncertain")
+
+    def test_memory_boost_small_effect(self):
+        """Memory 10 vs 0 has a small positive effect on confidence."""
+        no_memory = recognize(
+            similarity=0.55, face_quality=0.7, track_duration=1.0,
+            memory_context={"confidence_boost": 0},
+        )
+        with_memory = recognize(
+            similarity=0.55, face_quality=0.7, track_duration=1.0,
+            memory_context={"confidence_boost": 10},
+        )
+        assert no_memory["confidence"] < with_memory["confidence"]
+        assert with_memory["confidence"] - no_memory["confidence"] <= 5
+
+    def test_match_threshold_gate(self):
+        """sim=0.44 (below threshold) + avg quality -> unknown (conf<55)."""
+        result = recognize(
+            similarity=0.44, face_quality=0.9, track_duration=1.0,
+        )
+        assert result["status"] == "unknown", (
+            f"sim=0.44 with avg quality should be 'unknown', got '{result['status']}'"
         )
 
-    def test_uncertain_band_uses_correct_threshold(self):
-        """The uncertain band is MATCH_THRESHOLD * 0.8 = 0.36 at current config."""
-        expected_band = settings.MATCH_THRESHOLD * 0.8
-        assert abs(expected_band - 0.36) < 0.01, (
-            f"Uncertain band should be ~0.36, got {expected_band}"
-        )
+    def test_confidence_range_1_to_100(self):
+        """All valid inputs produce confidence in [1, 100]."""
+        test_cases = [
+            (0.0, 0.0, 0.0, {"confidence_boost": 0}),
+            (0.30, 0.8, 0.5, {"confidence_boost": 0}),
+            (0.50, 0.8, 1.0, {"confidence_boost": 0}),
+            (0.65, 0.9, 1.5, {"confidence_boost": 5}),
+            (0.80, 1.0, 2.0, {"confidence_boost": 10}),
+            (0.92, 0.8, 1.0, {"confidence_boost": 0}),
+        ]
+        for sim, quality, dur, memory in test_cases:
+            result = recognize(similarity=sim, face_quality=quality, track_duration=dur, memory_context=memory)
+            assert 1 <= result["confidence"] <= 100, (
+                f"sim={sim}: confidence {result['confidence']} not in [1, 100]"
+            )
 
     def test_match_threshold_is_correct(self):
-        """Verify MATCH_THRESHOLD is 0.45 after Phase 1 fix."""
+        """Verify MATCH_THRESHOLD is 0.45."""
         assert settings.MATCH_THRESHOLD == 0.45, (
             f"MATCH_THRESHOLD should be 0.45, got {settings.MATCH_THRESHOLD}"
         )
 
 
-# ── Phase 2.2: Policy and recognition use the same threshold ─────
+# ── Threshold consistency between recognition and policy ─────────
 
 class TestThresholdConsistency:
-    """Regression: policy.py and recognition.py must always read the same threshold."""
-
     def test_both_read_same_threshold(self):
-        """Both agents use settings.MATCH_THRESHOLD — verify no hardcoded drift."""
-        # Recognition agent uses settings.MATCH_THRESHOLD in _compute_confidence (line 166)
-        # and in _decide (line 110, 132)
-        # Policy agent uses settings.MATCH_THRESHOLD in _decide (line 211)
-        # This test verifies they both resolve to the same value at runtime
+        """Both agents use settings.MATCH_THRESHOLD."""
         from config import settings as s
-        rec_threshold = s.MATCH_THRESHOLD  # what recognition.py sees
-        policy_threshold = s.MATCH_THRESHOLD  # what policy.py sees
+        rec_threshold = s.MATCH_THRESHOLD
+        policy_threshold = s.MATCH_THRESHOLD
         assert rec_threshold == policy_threshold, (
             f"Threshold mismatch: recognition={rec_threshold}, policy={policy_threshold}"
-        )
-
-    def test_uncertain_band_is_80_percent_of_threshold(self):
-        """recognition.py line 132: similarity >= MATCH_THRESHOLD * 0.8."""
-        # This is a documentation test — if someone changes the multiplier,
-        # this test forces them to update the assertion
-        expected_multiplier = 0.8
-        expected_band = settings.MATCH_THRESHOLD * expected_multiplier
-        # At 0.45 threshold, band should be 0.36
-        assert expected_band == pytest.approx(0.36, abs=0.01), (
-            f"Uncertain band should be ~0.36, got {expected_band}"
         )

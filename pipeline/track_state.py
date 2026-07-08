@@ -2,7 +2,7 @@ import threading
 import time
 import cv2
 import numpy as np
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional
 from config import settings
 from pipeline.models import Track
 

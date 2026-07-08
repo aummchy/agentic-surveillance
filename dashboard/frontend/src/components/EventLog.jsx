@@ -175,7 +175,7 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
       ) : (
         <div className="events-list">
           {events.map((event) => (
-            <div key={event.track_id || event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
+            <div key={event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
               {getImageUrl(event.image_url || event.person_image) ? (
                 <img
                   src={getImageUrl(event.image_url || event.person_image)}

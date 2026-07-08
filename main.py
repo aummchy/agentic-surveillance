@@ -131,7 +131,7 @@ def process_finalized_track(track: Track):
             recognition_result = rec_agent.run({
                 "similarity": match_result.similarity_score if match_result.matched else 0.0,
                 "is_masked": track.is_masked,
-                "face_quality": track.best_face_score if track.best_face_score > 0 else 0.0,
+                "face_quality": track.best_face_score if track.best_face_score > 0 else None,
                 "track_duration": track_duration,
                 "memory_context": memory_context or {},
             })

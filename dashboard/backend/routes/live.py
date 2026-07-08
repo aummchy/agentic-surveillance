@@ -13,6 +13,17 @@ MAX_FRAME_SIZE = 1024 * 1024  # 1MB max frame size
 _frame_counter = 0
 FRAME_SKIP = 2  # broadcast every Nth frame to reduce load
 
+_SEND_TIMEOUT = 3.0
+
+
+async def _send_or_disconnect(client, message, label=""):
+    try:
+        await asyncio.wait_for(client.send_text(message), timeout=_SEND_TIMEOUT)
+        return client, True
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning("client_send_timeout", client=client, label=label, error=str(e))
+        return client, False
+
 
 async def broadcast_frame(frame_data: bytes):
     global _frame_counter
@@ -35,21 +46,16 @@ async def broadcast_frame(frame_data: bytes):
     if _frame_counter % 100 == 1:
         logger.info("frame_broadcast", frame_num=_frame_counter, clients=len(connected_clients), size=len(frame_data))
 
-    async def _send(client):
-        try:
-            await asyncio.wait_for(client.send_text(message), timeout=1.0)
-            return client, True
-        except (asyncio.TimeoutError, Exception):
-            return client, False
-
-    results = await asyncio.gather(*[_send(c) for c in list(connected_clients)], return_exceptions=True)
+    results = await asyncio.gather(*[_send_or_disconnect(c, message, "frame") for c in list(connected_clients)], return_exceptions=True)
     disconnected = set()
     for result in results:
         if isinstance(result, tuple):
             client, ok = result
             if not ok:
                 disconnected.add(client)
-    connected_clients.difference_update(disconnected)
+    if disconnected:
+        connected_clients.difference_update(disconnected)
+        logger.warning("clients_dropped_silent", count=len(disconnected), remaining=len(connected_clients))
 
 
 async def broadcast_event(event: dict):
@@ -61,21 +67,15 @@ async def broadcast_event(event: dict):
         "data": event
     })
 
-    async def _send(client):
-        try:
-            await asyncio.wait_for(client.send_text(message), timeout=1.0)
-            return client, True
-        except (asyncio.TimeoutError, Exception):
-            return client, False
-
-    results = await asyncio.gather(*[_send(c) for c in list(connected_clients)], return_exceptions=True)
+    results = await asyncio.gather(*[_send_or_disconnect(c, message, "event") for c in list(connected_clients)], return_exceptions=True)
     disconnected = set()
     for result in results:
         if isinstance(result, tuple):
             client, ok = result
             if not ok:
                 disconnected.add(client)
-    connected_clients.difference_update(disconnected)
+    if disconnected:
+        connected_clients.difference_update(disconnected)
 
 
 async def broadcast_alert(alert_data: dict):
@@ -87,21 +87,15 @@ async def broadcast_alert(alert_data: dict):
         "data": alert_data
     })
 
-    async def _send(client):
-        try:
-            await asyncio.wait_for(client.send_text(message), timeout=1.0)
-            return client, True
-        except (asyncio.TimeoutError, Exception):
-            return client, False
-
-    results = await asyncio.gather(*[_send(c) for c in list(connected_clients)], return_exceptions=True)
+    results = await asyncio.gather(*[_send_or_disconnect(c, message, "alert") for c in list(connected_clients)], return_exceptions=True)
     disconnected = set()
     for result in results:
         if isinstance(result, tuple):
             client, ok = result
             if not ok:
                 disconnected.add(client)
-    connected_clients.difference_update(disconnected)
+    if disconnected:
+        connected_clients.difference_update(disconnected)
 
 
 @router.websocket("/live")

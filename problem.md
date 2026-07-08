@@ -2,7 +2,7 @@
 
 Codebase audit performed 2026-06-25 (updated 2026-07-05). Issues are grouped by severity and verified against actual source lines.
 
-**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 90 prior issues FIXED. 13 improvements applied.**
+**Status: 7 issues remaining (1 CRITICAL, 1 HIGH, 3 MEDIUM, 2 LOW). 92 prior issues FIXED. 16 improvements applied.**
 
 ---
 
@@ -121,11 +121,13 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 
 ## SOLVED — Issues Fixed
 
-### 2026-07-08 (pass 11) — 1 issue resolved
+### 2026-07-08 (pass 11) — 3 issues resolved
 
 | # | Severity | Issue | File:Line | Status |
 |---|----------|-------|-----------|--------|
 | 99 | LOW | Quality score normalization squashed — `blur_norm` and `area_norm` computed from zero instead of from their minimum thresholds, making `overall_score` nearly zero for most valid faces | `pipeline/quality_agent.py:26-28` | **FIXED** — shifted normalization baseline from 0 to `QUALITY_BLUR_MIN`/`QUALITY_FACE_AREA_MIN`. A barely-valid face now scores ~0.03 (was 0.05), and the full 0–1 range is usable for good-quality faces |
+| 100 | MEDIUM | Live feed freezes after ~30s — 1s WebSocket send timeout too tight for 1080p at ~17FPS (2.5MB/s), browser receive buffer fills, client silently dropped | `dashboard/backend/routes/live.py:40` | **FIXED** — resolution 1920×1080→1280×720, JPEG broadcast quality 65→50, send timeout 1.0s→3.0s, added logging for dropped clients |
+| 101 | LOW | React warning: "Encountered two children with the same key" — `log_event()` uses `insert_one`, so multiple DB documents share the same `track_id`. Frontend used `track_id` as React key, causing duplicates | `dashboard/frontend/src/components/EventLog.jsx:178` | **FIXED** — changed React key from `track_id || _id` to just `_id` (always unique). Duplicate DB entries remain; cleanest fix would be backend upsert via `update_one` |
 
 ### 2026-07-05 (pass 10) — 5 accuracy issues resolved + 3 config tunes
 
@@ -297,8 +299,8 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 | 2026-07-03 (pass 8) | 4 | 2 | **2** |
 | 2026-07-05 (pass 9) | 4 | 0 | **4** |
 | 2026-07-05 (pass 10) | 5 | 5 | **0** |
-| 2026-07-08 (pass 11) | 1 | 1 | **0** |
-| **Total** | **99** | **92** | **7** |
+| 2026-07-08 (pass 11) | 3 | 3 | **0** |
+| **Total** | **101** | **94** | **7** |
 
 ### Open issue breakdown
 
@@ -335,3 +337,5 @@ When no face crop is available, a dummy quality object is created with `type('Q'
 | 2026-07-05 | Removed 112×112 resize before finalization face detection | `camera_agent.py:424-425` | Improves finalization detection success rate by using native crop resolution |
 | 2026-07-05 | Removed backward-compat unconditional `latest_embedding` overwrite | `db_utils.py:392-394` | DB embedding can no longer be silently degraded by a low-quality registration |
 | 2026-07-05 | Lowered `set_best_face` buffer 0.1 → 0.03 | `track_state.py:124` | Allows gradual face quality improvement within a single track |
+| 2026-07-08 | **Unified confidence formula** (70/15/10/5 weighting, sim_norm starts at 0.25, 4 confidence tiers, single scoring module) | `agents/scoring.py`, `agents/recognition.py`, `config/settings.py` | Eliminates discontinuous confidence jumps, fixes unknown=70+ bug, constrains memory boost to 5% weight, centralizes all tunables |
+| 2026-07-08 | **Tuned face quality formula** (center-radius brightness, validity gates split from scoring, 50/25/25 weights, _safe_norm guards) | `pipeline/quality_agent.py`, `config/settings.py`, `config/config.jsonc` | Typical indoor faces now score 0.4–0.7 (was 0.2–0.3), washed-out faces penalized, validity gates lenient (area >= 1200) while scoring starts at 1500 |

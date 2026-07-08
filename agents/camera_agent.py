@@ -335,7 +335,7 @@ class CameraAgent:
             recognition_result = self.recognition_agent.run({
                 "similarity": match_result.similarity_score if match_result.matched else 0.0,
                 "is_masked": best["is_masked"],
-                "face_quality": quality.overall_score if hasattr(quality, 'overall_score') else 0.0,
+                "face_quality": quality.overall_score if hasattr(quality, 'overall_score') and quality.overall_score > 0 else None,
                 "track_duration": track_duration,
                 "memory_context": memory_context,
             })
