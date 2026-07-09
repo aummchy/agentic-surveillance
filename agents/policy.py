@@ -212,14 +212,15 @@ class PolicyAgent(BaseAgent):
                     should_register=False
                 )
             elif similarity >= settings.MATCH_THRESHOLD:
+                # Matched an existing identity but not memory-confirmed as known
                 return DecisionResult(
-                    status="known_visitor",
+                    status="unknown",
                     alert_level="low",
                     person_id=person_id,
                     name=name,
-                    reason=f"Known visitor: {name}. Match above threshold (similarity={similarity:.2%}).",
+                    reason=f"Matched identity but not confirmed known (similarity={similarity:.2%}).",
                     should_alert=False,
-                    should_register=False
+                    should_register=False   # already linked to existing record
                 )
             else:
                 return DecisionResult(
