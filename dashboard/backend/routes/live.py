@@ -100,6 +100,12 @@ async def broadcast_alert(alert_data: dict):
 
 @router.websocket("/live")
 async def websocket_live(websocket: WebSocket):
+    origin = websocket.headers.get("origin", "")
+    allowed_origins = {"http://localhost:5173", "http://localhost:3000"}
+    if origin and origin not in allowed_origins:
+        await websocket.close(code=4003, reason="origin not allowed")
+        return
+
     await websocket.accept()
     connected_clients.add(websocket)
     logger.info(f"Client connected. Total clients: {len(connected_clients)}")

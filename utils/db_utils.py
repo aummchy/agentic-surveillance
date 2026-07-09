@@ -3,7 +3,7 @@ import uuid
 import threading
 from datetime import datetime
 from typing import Optional
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from config import settings
 from utils.embedding_utils import compare_similarity, atlas_score_to_cosine
@@ -605,7 +605,7 @@ def get_or_create_memory(person_id: str) -> dict:
             "updated_at": now,
         }},
         upsert=True,
-        return_document=True,
+        return_document=ReturnDocument.AFTER,
     )
     return result
 
@@ -654,7 +654,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
             },
         },
         upsert=True,
-        return_document=True,
+        return_document=ReturnDocument.AFTER,
     )
 
     # Return a summary consistent with what callers expect (memory.py only

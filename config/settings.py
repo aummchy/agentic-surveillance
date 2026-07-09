@@ -111,7 +111,11 @@ def _get(env_key: str, config_key: str, default, cast=str):
     val = os.getenv(env_key)
     if val is not None:
         if cast is list:
-            return [v.strip() for v in val.split(",")]
+            items = [v.strip() for v in val.split(",")]
+            if items and default and len(default) > 0:
+                elem_type = type(default[0])
+                return [elem_type(v) for v in items]
+            return items
         return cast(val)
     return cast(_config.get(config_key, default))
 
