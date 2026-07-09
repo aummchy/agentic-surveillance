@@ -68,7 +68,7 @@ class RecognitionAgent(BaseAgent):
         margin = input_data.get("margin")
         name = input_data.get("name")
 
-        result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context)
+        result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context, margin=margin)
 
         logger.info("recognition_decision",
                     status=result.status,
@@ -88,7 +88,8 @@ class RecognitionAgent(BaseAgent):
 
     def _decide(self, similarity: float, is_masked: bool,
                 face_quality: float, track_duration: float,
-                memory_context: Optional[Dict] = None) -> RecognitionResult:
+                memory_context: Optional[Dict] = None,
+                margin: float = None) -> RecognitionResult:
         """Core decision logic that delegates to the scorer module."""
         memory_boost = 0.0
         if memory_context:
@@ -102,6 +103,7 @@ class RecognitionAgent(BaseAgent):
             track_seconds=track_duration,
             memory_boost=memory_boost,
             is_masked=is_masked,
+            margin=margin,
         )
 
         status = confidence_status(confidence, matched)
@@ -153,7 +155,8 @@ class RecognitionAgent(BaseAgent):
 
 def recognize(similarity: float, is_masked: bool = False,
               face_quality: float = 0.0, track_duration: float = 0.0,
-              memory_context: Optional[Dict] = None) -> dict:
+              memory_context: Optional[Dict] = None,
+              margin: float = None) -> dict:
     """Quick recognition without instantiating the agent."""
     agent = RecognitionAgent()
     return agent.run({
@@ -162,4 +165,5 @@ def recognize(similarity: float, is_masked: bool = False,
         "face_quality": face_quality,
         "track_duration": track_duration,
         "memory_context": memory_context or {},
+        "margin": margin,
     })

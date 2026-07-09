@@ -105,42 +105,44 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> d
 
         results = list(collection.aggregate(pipeline, maxTimeMS=5000))
 
-        matches = []
+        all_results = []
         for r in results:
             raw_cosine = atlas_score_to_cosine(r.get("score", 0))
-            if compare_similarity(raw_cosine):
-                matches.append({
-                    "person_id": r.get("person_id"),
-                    "name": r.get("name"),
-                    "role": r.get("role"),
-                    "tags": r.get("tags", []),
-                    "similarity_score": raw_cosine,
-                    "image_url": r.get("images", [{}])[0].get("url") if r.get("images") else None,
-                    "verified": r.get("verified", False),
-                    "alert_level": r.get("alert_level", "low")
-                })
+            all_results.append({
+                "person_id": r.get("person_id"),
+                "name": r.get("name"),
+                "role": r.get("role"),
+                "tags": r.get("tags", []),
+                "similarity_score": raw_cosine,
+                "image_url": r.get("images", [{}])[0].get("url") if r.get("images") else None,
+                "verified": r.get("verified", False),
+                "alert_level": r.get("alert_level", "low")
+            })
 
         top2 = None
         margin = None
-        if len(matches) >= 2:
-            top2 = matches[1]["similarity_score"]
-            margin = matches[0]["similarity_score"] - top2
+        if len(all_results) >= 2:
+            top2 = all_results[1]["similarity_score"]
+            margin = all_results[0]["similarity_score"] - top2
 
-        logger.debug("atlas_search_result", match_count=len(matches),
+        matches = [r for r in all_results if compare_similarity(r["similarity_score"])]
+
+        logger.debug("atlas_search_result", match_count=len(matches), total_count=len(all_results),
                      scores=[round(m["similarity_score"], 4) for m in matches])
         return {"matches": matches, "top2": top2, "margin": margin}
 
     except Exception as e:
         logger.warning("atlas_vector_search_failed", error=str(e))
-        results = _python_cosine_scan(embedding, filter_role, limit)
+        all_results = _python_cosine_scan(embedding, filter_role, limit)
         top2 = None
         margin = None
-        if len(results) >= 2:
-            top2 = results[1]["similarity_score"]
-            margin = results[0]["similarity_score"] - top2
-        logger.info("python_scan_fallback_result", match_count=len(results),
-                     scores=[round(m["similarity_score"], 4) for m in results])
-        return {"matches": results, "top2": top2, "margin": margin}
+        if len(all_results) >= 2:
+            top2 = all_results[1]["similarity_score"]
+            margin = all_results[0]["similarity_score"] - top2
+        matches = [r for r in all_results if compare_similarity(r["similarity_score"])]
+        logger.info("python_scan_fallback_result", match_count=len(matches), total_count=len(all_results),
+                     scores=[round(m["similarity_score"], 4) for m in matches])
+        return {"matches": matches, "top2": top2, "margin": margin}
 
 
 def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5) -> list:
@@ -203,7 +205,7 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
                         reason="empty or invalid latest_embedding")
 
     scored.sort(key=lambda x: x["similarity_score"], reverse=True)
-    return [s for s in scored[:limit] if compare_similarity(s["similarity_score"])]
+    return scored[:limit]
 
 
 def find_similar_unknowns(embedding: list, threshold: float = None) -> list:

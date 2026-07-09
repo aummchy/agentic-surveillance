@@ -47,7 +47,7 @@ class TestComputeConfidence:
         assert 1 <= conf <= 100
 
     def test_maximum_inputs(self):
-        conf = compute_confidence(1.0, 1.0, 10.0, 20.0, False)
+        conf = compute_confidence(1.0, 1.0, 10.0, 20.0, False, margin=0.30)
         assert conf == 100
 
     def test_masked_lower_than_unmasked(self):
@@ -93,10 +93,11 @@ class TestRecognitionBands:
         )
 
     def test_known_with_good_match(self):
-        """sim=0.60, good quality/duration, memory=10 -> known (conf>=70, matched)."""
+        """sim=0.60, good quality/duration, memory=10, margin=0.20 -> known (conf>=70, matched)."""
         result = recognize(
             similarity=0.60, face_quality=0.85, track_duration=2.0,
             memory_context={"confidence_boost": 10},
+            margin=0.20,
         )
         assert result["status"] == "known", (
             f"sim=0.60 should be 'known', got '{result['status']}'"

@@ -41,25 +41,35 @@ def normalize_mask(is_masked: bool) -> float:
     return 1.0 if is_masked else 0.0
 
 
+def normalize_margin(margin: float | None) -> float:
+    """Map margin [0..MARGIN_NORM_MAX] -> [0..1]. None -> 0.5 (neutral)."""
+    if margin is None:
+        return 0.5
+    return clip(margin / settings.MARGIN_NORM_MAX, 0.0, 1.0)
+
+
 def compute_confidence(
     raw_cosine: float,
     face_quality: float | None,
     track_seconds: float,
     memory_boost: float,
-    is_masked: bool
+    is_masked: bool,
+    margin: float | None = None
 ) -> int:
     """Compute confidence score 1-100 from normalized components."""
     sim_norm = normalize_cosine(raw_cosine)
     quality_norm = normalize_quality(face_quality)
     track_norm = normalize_track_duration(track_seconds)
     memory_norm = normalize_memory(memory_boost)
+    margin_norm = normalize_margin(margin)
     mask_norm = normalize_mask(is_masked)
 
     base = (
         settings.WEIGHT_SIMILARITY * sim_norm +
         settings.WEIGHT_QUALITY * quality_norm +
         settings.WEIGHT_TRACK * track_norm +
-        settings.WEIGHT_MEMORY * memory_norm
+        settings.WEIGHT_MEMORY * memory_norm +
+        settings.WEIGHT_MARGIN * margin_norm
     )
 
     adjusted = base * (1.0 - settings.MASK_PENALTY_MAX * mask_norm)
