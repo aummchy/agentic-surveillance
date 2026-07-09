@@ -153,7 +153,7 @@ class CameraAgent:
 
             active_ids = set()
             for t in tracks:
-                composite_id = self.track_state._make_composite_id(settings.CAMERA_ID, t["track_id"])
+                composite_id = self.track_state.make_composite_id(settings.CAMERA_ID, t["track_id"])
                 active_ids.add(composite_id)
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
 

@@ -14,12 +14,12 @@ class TrackState:
         self._session_epoch = int(time.time())
         self._in_flight: Dict[str, int] = {}  # track_id → active recognition count
 
-    def _make_composite_id(self, camera_id: str, byte_track_id: int) -> str:
+    def make_composite_id(self, camera_id: str, byte_track_id: int) -> str:
         return f"{camera_id}_{self._session_epoch}_{byte_track_id}"
 
     def update(self, camera_id: str, track_id: int, box: tuple,
                frame: np.ndarray = None) -> Optional[Track]:
-        composite_id = self._make_composite_id(camera_id, track_id)
+        composite_id = self.make_composite_id(camera_id, track_id)
 
         with self._lock:
             if composite_id in self._tracks:
@@ -141,10 +141,10 @@ class TrackState:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                if track.embedding is None or det_score > getattr(track, '_embedding_det_score', 0.0) + 0.05:
+                if track.embedding is None or det_score > track.embedding_det_score + 0.05:
                     track.embedding = embedding
                     track.is_masked = is_masked
-                    track._embedding_det_score = det_score
+                    track.embedding_det_score = det_score
 
     def set_decision(self, composite_id: str, decision: str, alerted: bool = False):
         with self._lock:

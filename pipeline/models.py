@@ -17,6 +17,7 @@ class Track:
     best_frame_jpeg: Optional[bytes] = None  # Compressed JPEG (~50KB vs ~921KB raw)
     is_masked: bool = False
     embedding: Optional[list] = None
+    embedding_det_score: float = 0.0  # Detection score for quality-gated updates
     decision: Optional[str] = None
     person_name: Optional[str] = None  # Name from match result
     alerted: bool = False
