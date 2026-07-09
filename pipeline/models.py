@@ -19,6 +19,7 @@ class Track:
     embedding: Optional[list] = None
     embedding_det_score: float = 0.0  # Detection score for quality-gated updates
     decision: Optional[str] = None
+    confidence: int = 0  # Highest confidence seen — only upgrades, never downgrades
     person_name: Optional[str] = None  # Name from match result
     alerted: bool = False
     image_url: Optional[str] = None  # Cloudinary URL (set after upload)

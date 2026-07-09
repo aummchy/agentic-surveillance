@@ -372,6 +372,8 @@ class CameraAgent:
             # Only dispatch CRITICAL alerts (blacklist) during progressive recognition.
             # All other alerts are deferred to finalization to avoid premature alerts
             # for verified/known users when early recognition attempts produce low similarity.
+            new_confidence = int(recognition_result.get("confidence", 0))
+
             if decision.should_alert and decision.alert_level == "critical" and not track.alerted:
                 with self._track_sets_lock:
                     already_finalized = track.track_id in self._finalized_track_ids
@@ -386,17 +388,26 @@ class CameraAgent:
                         track.image_url = image_url
                     dispatch(track, decision, image_url)
                     self.track_state.set_decision(track.track_id, decision.status, True)
+                    track.confidence = new_confidence
                     logger.info("progressive_critical_alert",
                                 track_id=track.track_id,
                                 alert_level=decision.alert_level,
                                 status=decision.status)
-            else:
+            elif new_confidence > track.confidence:
+                # Only upgrade — never downgrade confidence across recognition passes
                 self.track_state.set_decision(track.track_id, decision.status, track.alerted)
+                track.confidence = new_confidence
                 if decision.should_alert:
                     logger.debug("progressive_alert_deferred_to_finalization",
                                  track_id=track.track_id,
                                  alert_level=decision.alert_level,
                                  status=decision.status)
+            else:
+                logger.debug("confidence_not_upgraded",
+                             track_id=track.track_id,
+                             new=new_confidence,
+                             existing=track.confidence,
+                             status=decision.status)
 
             # Record quality snapshot for throttle decisions
             self.track_state.set_recognition_snapshot(
