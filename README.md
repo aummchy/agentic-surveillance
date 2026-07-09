@@ -293,28 +293,28 @@ raw_cosine = (atlas_score × 2) − 1
 
 | Metric | Raw Value | Normalization | Weight |
 |--------|-----------|---------------|--------|
-| **Blur** | Laplacian variance of face crop | `min(variance / 1000, 1.0)` | 60% |
-| **Brightness** | Mean V-channel in HSV | `brightness / 255.0` | 25% |
-| **Area** | Face pixel area (h × w) | `min(area / 10000, 1.0)` | 15% |
+| **Blur** | Laplacian variance of face crop | shifted: `(var - 40) / (350 - 40)`, clipped [0,1] | 50% |
+| **Brightness** | Mean V-channel in HSV | center-radius: `1 - |V - 145| / 110`, clipped [0,1] | 25% |
+| **Area** | Face pixel area (h × w) | shifted: `(area - 1500) / (10000 - 1500)`, clipped [0,1] | 25% |
 
 ### Quality Score Formula
 
 ```
-overall_score = blur_norm × 0.60 + brightness_norm × 0.25 + area_norm × 0.15
+overall_score = blur_norm × 0.50 + brightness_norm × 0.25 + area_norm × 0.25
 
 where:
-  blur_norm     = min(Laplacian_var / 1000, 1.0)
-  brightness_norm = V_channel_mean / 255.0
-  area_norm     = min(face_area / 10000, 1.0)
+  blur_norm     = min(max(Laplacian_var - 40, 0) / (350 - 40), 1.0)
+  brightness_norm = 1 - min(|V_channel_mean - 145| / 110, 1.0)
+  area_norm     = min(max(face_area - 1500, 0) / (10000 - 1500), 1.0)
 ```
 
 ### Validity Criteria (all must pass)
 
 | Criterion | Threshold |
 |-----------|-----------|
-| Blur (Laplacian variance) | ≥ 15 (relaxed from 30 to accept slightly blurry crops that still embed well) |
-| Brightness (V-channel mean) | 30–240 |
-| Face area (pixels) | ≥ 800 (~28×28 px, relaxed from 40×40 for distant persons) |
+| Blur (Laplacian variance) | ≥ 40 |
+| Brightness (V-channel mean) | 35–255 |
+| Face area (pixels) | ≥ 1200 |
 
 ### Best Face Selection
 
@@ -403,40 +403,45 @@ if quality_score is not None:
 
 ## Recognition Agent — Confidence Computation
 
-### Classification Cases
-
-| Case | Condition | Status |
-|------|-----------|--------|
-| Very high similarity | `similarity >= 0.90` | `"known"` |
-| Above threshold | `similarity >= MATCH_THRESHOLD (0.45)` | `"known"` if confidence ≥ 70, else `"uncertain"` |
-| Below threshold but good quality | `quality >= 0.8 AND similarity >= 0.36` | `"uncertain"` |
-| Low similarity | Default | `"unknown"` |
-
-### Confidence Formula
+### Confidence Formula (Weighted Normalization)
 
 ```
-sim_score = min(60, (similarity − MATCH_THRESHOLD) / (1.0 − MATCH_THRESHOLD) × 60)
-quality_score = face_quality × 25
-duration_score = min(15, track_duration / 10)
-memory_boost = clamp(−10, +20, boost)   // from Memory Agent
-
-confidence = sim_score + quality_score + duration_score + memory_boost
-
-if is_masked:
-    confidence ×= 0.85   // 15% penalty for masked faces
-
-confidence = clamp(0, 100, confidence)
+base = 0.65×sim_norm + 0.15×quality_norm + 0.10×track_norm + 0.05×memory_norm + 0.05×margin_norm
+adjusted = base × (1 - 0.15×mask_norm)
+confidence = int(round(1 + 99 × clip(adjusted, 0, 1)))
 ```
 
-### Confidence Component Ranges
+### Normalization Functions
 
-| Component | Range | Description |
-|-----------|-------|-------------|
-| `sim_score` | 0–60 | Linear interpolation from threshold to 1.0 |
-| `quality_score` | 0–25 | Face quality composite score |
-| `duration_score` | 0–15 | 1 point per 10 seconds tracked |
-| `memory_boost` | −10 to +20 | Visit history adjustment |
-| Mask penalty | ×0.85 | Applied when face is masked |
+| Component | Function | Input | Output | Notes |
+|-----------|----------|-------|--------|-------|
+| `sim_norm` | `normalize_cosine(raw)` | raw cosine `[-1, 1]` | `[0, 1]` | `(raw - 0.25) / (0.80 - 0.25)`, clipped |
+| `quality_norm` | `normalize_quality(q)` | `float [0, 1]` or `None` | `[0, 1]` | `None`/`0` → fallback `0.50` |
+| `track_norm` | `normalize_track_duration(secs)` | seconds | `[0, 1]` | `min(secs / 1.5, 1.0)` — saturates at 1.5s |
+| `memory_norm` | `normalize_memory(boost)` | boost `[-10, +20]` | `[0, 1]` | `clip(boost, 0, 20) / 20` |
+| `margin_norm` | `normalize_margin(margin)` | margin `[0, 1]` | `[0, 1]` | `clip(margin / 0.30, 1.0)`, `None` → `0.50` |
+| `mask_norm` | `normalize_mask(masked)` | bool | `0.0` or `1.0` | `1.0` if masked |
+
+### Weight Breakdown
+
+| Component | Weight | Normalization | Effective range |
+|-----------|:------:|:-------------:|:---------------:|
+| Similarity | 0.65 | `[0.25..0.80]` → `[0..1]` | 0–0.65 |
+| Face Quality | 0.15 | `[0..1]` direct | 0–0.15 |
+| Track Duration | 0.10 | `secs / 1.5` saturated | 0–0.10 |
+| Memory Boost | 0.05 | `[0..20]` → `[0..1]` | 0–0.05 |
+| Margin | 0.05 | `[0..0.30]` → `[0..1]` | 0–0.05 |
+| **Base total** | **1.00** | | **0–1.00** |
+| Mask penalty | ×(1 - 0.15×mask) | | ×1.0 or ×0.85 |
+
+### Status Mapping
+
+| Condition | Status |
+|-----------|--------|
+| `matched=True` + `confidence ≥ 70` | `"known"` |
+| `matched=True` + `confidence ≥ 55` | `"uncertain"` |
+| `matched=False` + `confidence ≥ 55` | `"uncertain"` |
+| All other cases | `"unknown"` |
 
 ---
 
@@ -1105,16 +1110,9 @@ where:
 ### Recognition Confidence
 
 ```
-C = sim_score + quality_score + duration_score + memory_boost
-
-where:
-  sim_score      = min(60, (sim − threshold) / (1 − threshold) × 60)
-  quality_score  = face_quality × 25
-  duration_score = min(15, track_duration / 10)
-  memory_boost   = clamp(−10, +20, boost)
-
-if is_masked: C ×= 0.85
-C = clamp(0, 100, C)
+base = 0.65×sim_norm + 0.15×quality_norm + 0.10×track_norm + 0.05×memory_norm + 0.05×margin_norm
+adjusted = base × (1 - 0.15×mask_norm)
+confidence = int(round(1 + 99 × clip(adjusted, 0, 1)))
 ```
 
 ### Memory Confidence Boost
@@ -1244,11 +1242,11 @@ surveillance-system/
 │   ├── matching_agent.py            # Embedding + MongoDB vector search
 │   ├── decision_agent.py            # Delegates to PolicyAgent
 │   ├── recognition.py               # Multi-signal identity classification
+│   ├── scoring.py                   # Confidence scoring (weighted normalization + logging)
 │   ├── memory.py                    # Visit history tracking
 │   ├── policy.py                    # Business rule evaluation
-│   ├── alert.py                     # Alert dispatch (console/email/sms/webhook)
-│   ├── report.py                    # Report generation
-│   └── alert_agent.py               # Legacy alert dispatch
+│   ├── alert_agent.py               # Alert dispatch (console/email/sms/webhook)
+│   └── report.py                    # Report generation
 │
 ├── pipeline/                        # CV Pipeline
 │   ├── models.py                    # Dataclasses (Track, MatchResult, DecisionResult, etc.)
@@ -1272,7 +1270,9 @@ surveillance-system/
 │   └── yolov8s_openvino_model/      # OpenVINO IR export (for Intel iGPU)
 │
 ├── logs/                            # System logs (gitignored)
-│   └── surveillance.log             # Rotating: 5MB × 5 backups
+│   ├── surveillance.jsonl           # JSON lines: 5MB × 5 rotating
+│   ├── surveillance.debug.log       # Full debug: 10MB × 3 rotating
+│   └── calculation.log              # Confidence formula breakdown per recognition
 │
 └── dashboard/
     ├── backend/

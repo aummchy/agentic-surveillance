@@ -16,7 +16,7 @@ pip install -r requirements.txt
 cd dashboard/frontend && npm install
 ```
 
-No test suite, linter, or CI pipeline exists.
+No test suite, linter, or CI pipeline exists. Run tests with: `python -m pytest tests/ -v`
 
 **Python version:** 3.11 required — InsightFace/onnxruntime wheels are unreliable on other versions.
 
@@ -24,7 +24,7 @@ No test suite, linter, or CI pipeline exists.
 
 ```
 main.py
-├── CameraAgent         — capture loop, ByteTrack, progressive recognition (every 20 frames)
+├── CameraAgent         — capture loop, ByteTrack, progressive recognition (every 10 frames)
 ├── track_queue         — Queue decouples camera from blocking I/O (2 worker threads)
 ├── uvicorn/FastAPI     — started in a daemon thread sharing the same asyncio event loop
 ├── Ollama LLM          — Gemma 3 4B / Qwen 3.5 4B for NL summaries + chat
@@ -60,7 +60,7 @@ main.py
 ### Key data flow details
 
 - **Track IDs** are composite: `{camera_id}_{session_epoch}_{byte_track_id}` — unique across restarts.
-- **Progressive recognition** runs every `RECOGNITION_INTERVAL_FRAMES` (default 20) frames. Results (`pending_match_result`, `pending_recognition`) are stored on the `Track` object and reused at finalization to avoid double work.
+- **Progressive recognition** runs every `RECOGNITION_INTERVAL_FRAMES` (default 10) frames. Results (`pending_match_result`, `pending_recognition`) are stored on the `Track` object and reused at finalization to avoid double work. Quality-gated: skips if face quality didn't improve by ≥ 0.10. Max-confidence gate: recognition never downgrades, only upgrades confidence.
 - **`TrackState`** is the single source of truth for live tracks, protected by `threading.Lock`. All mutations go through its setter methods.
 - **InsightFace** is a double-checked locking singleton in `utils/embedding_utils.py`. Never instantiate it directly; always call `get_insightface()`.
 - **YOLO/ByteTrack** model is loaded once at import time in `pipeline/tracker.py`.
@@ -74,13 +74,13 @@ raw_cosine = (atlas_score * 2) - 1   # in atlas_score_to_cosine()
 compare_similarity(raw_cosine)         # compares against settings.MATCH_THRESHOLD
 ```
 
-Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.25). Higher values reject genuine same-person matches under indoor lighting. If Atlas Vector Search is unavailable, `vector_search()` falls back to a Python cosine scan (capped at 500 docs).
+Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.45). Higher values reject genuine same-person matches under indoor lighting. If Atlas Vector Search is unavailable, `vector_search()` falls back to a Python cosine scan (capped at 500 docs).
 
 ### Dashboard
 
 - FastAPI (`dashboard/backend/main.py`) serves REST + WebSocket. Started inside `main.py` via uvicorn in a daemon thread.
 - Vite (`dashboard/frontend/vite.config.js`) proxies `/api` → `:8000` and `/ws` → `:8000` so the frontend only talks to `:5173`.
-- Live feed and alerts flow over WebSocket `/ws/live`. Frames are JPEG-encoded at 80% quality, base64-wrapped in JSON.
+- Live feed and alerts flow over WebSocket `/ws/live`. Frames are JPEG-encoded at 65% quality, base64-wrapped in JSON.
 - `broadcast_frame` / `broadcast_alert` in `routes/live.py` must be called with `asyncio.run_coroutine_threadsafe(...)` from any non-async thread.
 
 ## Critical gotchas
@@ -112,10 +112,10 @@ Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.25). Higher values reject genuine sam
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `MONGODB_URI` | — | **Required** |
-| `MATCH_THRESHOLD` | `0.25` | Max 0.45 |
-| `TRACK_TIMEOUT_SECS` | `8.0` | Seconds before track expires |
-| `RECOGNITION_INTERVAL_FRAMES` | `20` | Frames between recognition runs |
-| `DET_SCORE_MIN` | `0.50` | Face detection threshold |
+| `MATCH_THRESHOLD` | `0.45` | Max 0.45 |
+| `TRACK_TIMEOUT_SECS` | `3.0` | Seconds before track expires |
+| `RECOGNITION_INTERVAL_FRAMES` | `10` | Frames between recognition runs |
+| `DET_SCORE_MIN` | `0.40` | Face detection threshold |
 | `ALERT_CHANNELS` | `console` | `console,email,sms,webhook` |
 | `CAMERA_SOURCE` | `""` | HTTP/RTSP URL for mobile camera (e.g. `http://192.168.x.x:8080/video`). Overrides `CAMERA_INDEX`. |
 | `CAMERA_INDEX` | `0` | Webcam device index (ignored if `CAMERA_SOURCE` is set) |
@@ -124,4 +124,4 @@ Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.25). Higher values reject genuine sam
 | `CLOUDINARY_*` | — | Optional image archival |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `gemma3:4b` | Swap to `qwen3.5:4b` for better reasoning |
-| `OLLAMA_TIMEOUT` | `120` | LLM request timeout (seconds) |
+| `OLLAMA_TIMEOUT` | `30` | LLM request timeout (seconds) |

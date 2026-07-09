@@ -13,7 +13,7 @@
 | **MongoDB** | Atlas with 3 collections | `faces` (person DB + embeddings + vector index), `events` (track log), `visit_memory` (visit history). Thread-safe lazy singleton client. |
 | **Image storage** | Cloudinary + local fallback | `utils/image_utils.py:upload_to_cloudinary()`. Pre-encoded JPEG bytes also accepted (`upload_jpeg_to_cloudinary`). Falls to `captures/{track_id}.jpg`. |
 | **LLM** | Ollama (Gemma 3 4B / Qwen 3.5 4B) via `httpx` | `utils/llm_client.py` — connection-pooled HTTP client. `generate_nl_summary()` for alert descriptions, `chat_completion()` for dashboard chat. 3 retries, cached health check (10s). Graceful fallback to templates. |
-| **Recognition logic** | Custom `RecognitionAgent` (`agents/recognition.py`) | Multi-factor: similarity (0-60) + face quality (0-25) + track duration (0-15) + memory boost (-10/+20). Mask penalty ×0.85. Replaces simple threshold check. |
+| **Recognition logic** | Custom `RecognitionAgent` (`agents/recognition.py`) + `agents/scoring.py` | Weighted normalization: 0.65×sim + 0.15×quality + 0.10×track + 0.05×memory + 0.05×margin. Mask penalty ×0.85. Max-confidence gate prevents downgrades. |
 | **Memory** | Custom `MemoryAgent` (`agents/memory.py`) | Visit count, typical hours, confidence boost. Stored in MongoDB `visit_memory` collection. Boosts recognition confidence +10 for returning visitors. |
 | **Policy** | Custom `PolicyAgent` (`agents/policy.py`) | 9-rule priority tree: blacklist > authorized > verified > known_visitor > hidden > masked > after-hours > office-hours unknown. Also considers loitering time. |
 | **Alerts** | Console/SMTP/Twilio/Webhook | `agents/alert_agent.py:dispatch()`. LLM summary generated async. Per-alert-level cooldown dedup (60s). Blacklist dispatched immediately; all others deferred to track finalization. |
@@ -85,7 +85,7 @@ main.py
 | EMBEDDING_DET_SCORE_MIN | 0.40 | Minimum score to generate embedding. |
 | DET_SCORE_RELAXED | 0.20 | Entry gate for face detection (single tier, `DET_SCORE_MIN` removed). |
 | EMBEDDING_CACHE_COSINE_THRESHOLD | 0.005 | Skip Atlas search if cosine dist from last searched < threshold. |
-| QUALITY_BLUR_MIN | 15 | Minimum Laplacian variance (relaxed from 30). |
-| QUALITY_FACE_AREA_MIN | 800 | Min face area ~28×28 px (relaxed from 40×40). |
+| QUALITY_BLUR_MIN | 40 | Minimum Laplacian variance for scoring normalization. |
+| QUALITY_FACE_AREA_MIN | 1500 | Min face area for scoring normalization. |
 | TRACK_TIMEOUT_SECS | 3.0 | Person gone for 3s = track ends. |
 | ALERT_COOLDOWN_SECS | 60 | Per-level dedup window. |

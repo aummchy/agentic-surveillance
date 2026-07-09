@@ -6,6 +6,7 @@ The surveillance system uses a 3-tier logging architecture:
 - **Terminal** — Compact one-liner with ANSI colors (human operator)
 - **JSON file** (`logs/surveillance.jsonl`) — Machine-readable JSON lines
 - **Debug file** (`logs/surveillance.debug.log`) — Full verbose output
+- **Calculation log** (`logs/calculation.log`) — Full tabular confidence formula breakdown per recognition
 
 ## Event Flow (Per Track)
 

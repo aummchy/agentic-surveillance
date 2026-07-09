@@ -171,19 +171,22 @@ brightness_raw = mean(HSV_V channel)
 face_area = height × width (in pixels)
 
 VALIDITY GATES (all must pass):
-    blur_valid  = blur_raw   >= QUALITY_BLUR_MIN          (default 30)
-    bright_valid = QUALITY_BRIGHTNESS_MIN <= brightness_raw <= QUALITY_BRIGHTNESS_MAX  (default 30–240)
-    area_valid  = face_area  >= QUALITY_FACE_AREA_MIN      (default 1600 = 40×40)
+    blur_valid  = blur_raw   >= QUALITY_VALID_BLUR_MIN      (default 40)
+    bright_valid = QUALITY_VALID_BRIGHTNESS_MIN <= brightness_raw <= QUALITY_VALID_BRIGHTNESS_MAX  (default 35–255)
+    area_valid  = face_area  >= QUALITY_VALID_FACE_AREA_MIN  (default 1200)
 
 NORMALIZATION:
-    blur_norm   = min(blur_raw / QUALITY_BLUR_MAX, 1.0)   — default max 1000
-    bright_norm = brightness_raw / 255.0
-    area_norm   = min(face_area / QUALITY_AREA_MAX, 1.0)  — default max 10000
+    blur_norm   = min(max(blur_raw - QUALITY_BLUR_MIN, 0) / (QUALITY_BLUR_MAX - QUALITY_BLUR_MIN), 1.0)
+                  — shifted: 40=weak, 350=maxed
+    bright_norm = 1 - min(|brightness_raw - QUALITY_BRIGHTNESS_CENTER| / QUALITY_BRIGHTNESS_RADIUS, 1.0)
+                  — center-radius: peak at 145, radius 110
+    area_norm   = min(max(face_area - QUALITY_FACE_AREA_MIN, 0) / (QUALITY_AREA_MAX - QUALITY_FACE_AREA_MIN), 1.0)
+                  — shifted: 1500=weak, 10000=maxed
 
 WEIGHTED SCORE:
-    overall_score = blur_norm   × QUALITY_WEIGHT_BLUR      (default 0.60)
+    overall_score = blur_norm   × QUALITY_WEIGHT_BLUR      (default 0.50)
                   + bright_norm × QUALITY_WEIGHT_BRIGHT     (default 0.25)
-                  + area_norm   × QUALITY_WEIGHT_AREA       (default 0.15)
+                  + area_norm   × QUALITY_WEIGHT_AREA       (default 0.25)
 
 is_valid = blur_valid AND bright_valid AND area_valid
 ```
@@ -358,49 +361,44 @@ is_known = (visit_count > 0) AND (last_status in ["known", "verified", "authoriz
 
 ---
 
-## 12. Recognition Agent — confidence computation (`agents/recognition.py`)
+## 12. Recognition Agent — confidence computation (`agents/recognition.py`, `agents/scoring.py`)
 
-### 12.1 Case routing
-
-```
-CASE 1: similarity >= VERY_HIGH_SIMILARITY (0.90)
-    confidence = min(95, 70 + (similarity - 0.90) × 250 + memory_boost)
-    status = "known"
-
-CASE 2: similarity >= MATCH_THRESHOLD (0.45)
-    confidence = compute_confidence(...)
-    IF confidence >= 70: status = "known"
-    ELSE:                status = "uncertain"
-
-CASE 3: face_quality >= BORDERLINE_FACE_QUALITY (0.8)
-        AND similarity >= MATCH_THRESHOLD × 0.8 (= 0.36)
-    confidence = 40 + similarity × 30 + memory_boost
-    status = "uncertain"
-
-CASE 4: else (low similarity)
-    confidence = max(60, 100 - similarity × 100)
-    status = "unknown"
-```
-
-### 12.2 Confidence formula (`_compute_confidence`)
+### 12.1 Confidence formula (weighted normalization)
 
 ```
-sim_score = min(60, (similarity - MATCH_THRESHOLD) / (1.0 - MATCH_THRESHOLD) × 60)
-    — Maps similarity from [MATCH_THRESHOLD, 1.0] to [0, 60]
-
-quality_score = face_quality × 25
-    — Maps face_quality [0, 1] to [0, 25]
-
-duration_score = min(15, track_duration / 10)
-    — Maps seconds [0, 150] to [0, 15]
-
-confidence = sim_score + quality_score + duration_score + memory_boost
-
-IF is_masked:
-    confidence ×= MASK_CONFIDENCE_PENALTY (0.85)
-
-confidence = clamp(confidence, 0, 100)
+base = 0.65×sim_norm + 0.15×quality_norm + 0.10×track_norm + 0.05×memory_norm + 0.05×margin_norm
+adjusted = base × (1 - 0.15×mask_norm)
+confidence = int(round(1 + 99 × clip(adjusted, 0, 1)))
 ```
+
+### 12.2 Normalization functions (`agents/scoring.py`)
+
+```
+sim_norm     = clip((raw_cosine - 0.25) / (0.80 - 0.25), 0, 1)
+quality_norm = clip(face_quality, 0, 1)   — None/0 → fallback 0.50
+track_norm   = min(track_seconds / 1.5, 1.0)   — saturates at 1.5s
+memory_norm  = clip(memory_boost, 0, 20) / 20
+margin_norm  = clip(margin / 0.30, 0, 1)   — None → 0.50
+mask_norm    = 1.0 if masked else 0.0
+```
+
+### 12.3 Status mapping (`confidence_status`)
+
+```
+matched=True  + confidence >= 70  → "known"
+matched=True  + confidence >= 40  → "uncertain"
+matched=True  + confidence <  40  → "unknown"
+matched=False + confidence >= 40  → "uncertain"
+matched=False + confidence <  40  → "unknown"
+```
+
+### 12.4 Max-confidence gate
+
+Recognition never downgrades. If the new confidence score is lower than the existing value on the Track, the update is skipped. Critical alerts always update regardless.
+
+### 12.5 Quality-gated throttle
+
+Progressive recognition skips if face quality didn't improve by ≥ `MIN_QUALITY_IMPROVEMENT` (0.10) since the last recognition. Prevents wasted CPU when lighting/pose haven't changed.
 
 ---
 
@@ -751,15 +749,15 @@ Thread safety:
 | TRACK_TIMEOUT_SECS | 3.0 | Drop track unseen this long |
 | MAX_TRACK_SECS | 300 | Force-finalize after this many seconds |
 | LOITER_SECS | 30 | Masked unknown beyond this = high alert |
-| QUALITY_BLUR_MIN | 30 | Minimum Laplacian variance |
-| QUALITY_BRIGHTNESS_MIN | 30 | Min HSV-V brightness |
-| QUALITY_BRIGHTNESS_MAX | 240 | Max HSV-V brightness |
-| QUALITY_FACE_AREA_MIN | 1600 | Min face area (40×40 px) |
-| QUALITY_BLUR_MAX | 1000 | Blur normalization cap |
+| QUALITY_BLUR_MIN | 40 | Minimum Laplacian variance for scoring normalization |
+| QUALITY_BRIGHTNESS_MIN | 35 | Min HSV-V brightness (validity gate) |
+| QUALITY_BRIGHTNESS_MAX | 255 | Max HSV-V brightness (validity gate) |
+| QUALITY_FACE_AREA_MIN | 1500 | Min face area for scoring normalization |
+| QUALITY_BLUR_MAX | 350 | Blur normalization cap |
 | QUALITY_AREA_MAX | 10000 | Area normalization cap |
-| QUALITY_WEIGHT_BLUR | 0.60 | Blur weight in overall score |
+| QUALITY_WEIGHT_BLUR | 0.50 | Blur weight in overall score |
 | QUALITY_WEIGHT_BRIGHT | 0.25 | Brightness weight |
-| QUALITY_WEIGHT_AREA | 0.15 | Area weight |
+| QUALITY_WEIGHT_AREA | 0.25 | Area weight |
 | CLAHE_CLIP_LIMIT | 2.0 | CLAHE contrast clip limit |
 | CLAHE_TILE_SIZE | 8 | CLAHE tile grid size |
 | EMBEDDING_CACHE_COSINE_THRESHOLD | 0.005 | Skip Atlas if embedding nearly identical |

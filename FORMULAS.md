@@ -22,29 +22,29 @@ Shifted so a face at the minimum validity threshold scores near zero, and the fu
 
 ```
 blur_norm    = min(max(blur_raw - QUALITY_BLUR_MIN, 0) / (QUALITY_BLUR_MAX - QUALITY_BLUR_MIN), 1.0)
-bright_norm  = brightness_raw / 255.0
+bright_norm  = 1 - min(|brightness_raw - QUALITY_BRIGHTNESS_CENTER| / QUALITY_BRIGHTNESS_RADIUS, 1.0)
 area_norm    = min(max(face_area - QUALITY_FACE_AREA_MIN, 0) / (QUALITY_AREA_MAX - QUALITY_FACE_AREA_MIN), 1.0)
 ```
 
 | Metric | Norm at min threshold | Norm at max |
 |--------|:--------------------:|:-----------:|
-| Blur (15 → 1000) | `(15-15)/985 = 0` | `1.0` |
-| Brightness (0 → 255) | `0/255 = 0` | `1.0` |
-| Area (800 → 10000) | `(800-800)/9200 = 0` | `1.0` |
+| Blur (40 → 350) | `(40-40)/310 = 0` | `1.0` |
+| Brightness (center=145, radius=110) | `1-|V-145|/110` | `1.0` at V=145 |
+| Area (1500 → 10000) | `(1500-1500)/8500 = 0` | `1.0` |
 
 ### Validity check vs. overall_score
 
-- **`is_valid`** = whether the face is usable (passes minimum thresholds: blur ≥ 15, brightness 30–240, area ≥ 800).
+- **`is_valid`** = whether the face is usable (passes minimum thresholds: blur ≥ 40, brightness 35–255, area ≥ 1200).
 - **`overall_score`** = how good the face is relative to the full range. A barely-valid face scores ~0.03 ("low"). An excellent face scores 0.8+ ("high").
 
 ### Examples
 
 | Condition | Blur | Bright | Area | `overall_score` | Label |
 |-----------|:----:|:------:|:----:|:---------------:|:-----:|
-| Barely valid | 15 | 30 | 800 | `0×0.60 + 0.118×0.25 + 0×0.15 = 0.03` | low |
-| Typical | 200 | 120 | 3000 | `0.188×0.60 + 0.471×0.25 + 0.239×0.15 = 0.27` | low |
-| Good | 500 | 150 | 5400 | `0.492×0.60 + 0.588×0.25 + 0.500×0.15 = 0.52` | medium |
-| Excellent | 1000 | 200 | 10000 | `1.0×0.60 + 0.784×0.25 + 1.0×0.15 = 0.95` | high |
+| Barely valid | 40 | 35 | 1200 | `0×0.50 + 0.182×0.25 + 0×0.25 = 0.05` | low |
+| Typical | 200 | 120 | 3000 | `0.516×0.50 + 0.227×0.25 + 0.176×0.25 = 0.37` | low |
+| Good | 500 | 150 | 5400 | `1.0×0.50 + 0.055×0.25 + 0.459×0.25 = 0.63` | medium |
+| Excellent | 1000 | 200 | 10000 | `1.0×0.50 + 0.591×0.25 + 1.0×0.25 = 0.90` | high |
 
 ### Validity gate
 
@@ -52,9 +52,9 @@ area_norm    = min(max(face_area - QUALITY_FACE_AREA_MIN, 0) / (QUALITY_AREA_MAX
 
 | Check | Threshold |
 |-------|-----------|
-| `blur_valid` | `blur_raw >= 15` |
-| `bright_valid` | `30 <= brightness_raw <= 240` |
-| `area_valid` | `face_area >= 800` px² (~28×28) |
+| `blur_valid` | `blur_raw >= 40` |
+| `bright_valid` | `35 <= brightness_raw <= 255` |
+| `area_valid` | `face_area >= 1200` px² |
 
 ### Quality level labels (used in recognition reason string)
 
@@ -68,15 +68,19 @@ area_norm    = min(max(face_area - QUALITY_FACE_AREA_MIN, 0) / (QUALITY_AREA_MAX
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
-| `QUALITY_BLUR_MIN` | 15 | Min Laplacian variance for valid face |
-| `QUALITY_BRIGHTNESS_MIN` | 30 | Min HSV-V brightness |
-| `QUALITY_BRIGHTNESS_MAX` | 240 | Max HSV-V brightness |
-| `QUALITY_FACE_AREA_MIN` | 800 | Min face area (px²) |
-| `QUALITY_BLUR_MAX` | 1000 | Normalization cap for blur |
+| `QUALITY_BLUR_MIN` | 40 | Min Laplacian variance for scoring normalization |
+| `QUALITY_BLUR_MAX` | 350 | Normalization cap for blur |
+| `QUALITY_BRIGHTNESS_CENTER` | 145 | Center of brightness model (peak score) |
+| `QUALITY_BRIGHTNESS_RADIUS` | 110 | Radius of brightness model |
+| `QUALITY_FACE_AREA_MIN` | 1500 | Min face area for scoring normalization |
 | `QUALITY_AREA_MAX` | 10000 | Normalization cap for area |
-| `QUALITY_WEIGHT_BLUR` | 0.60 | Weight of blur in score |
+| `QUALITY_WEIGHT_BLUR` | 0.50 | Weight of blur in score |
 | `QUALITY_WEIGHT_BRIGHT` | 0.25 | Weight of brightness |
-| `QUALITY_WEIGHT_AREA` | 0.15 | Weight of area |
+| `QUALITY_WEIGHT_AREA` | 0.25 | Weight of area |
+| `QUALITY_VALID_BLUR_MIN` | 40 | Validity gate: min blur |
+| `QUALITY_VALID_BRIGHTNESS_MIN` | 35 | Validity gate: min brightness |
+| `QUALITY_VALID_BRIGHTNESS_MAX` | 255 | Validity gate: max brightness |
+| `QUALITY_VALID_FACE_AREA_MIN` | 1200 | Validity gate: min face area |
 
 ---
 

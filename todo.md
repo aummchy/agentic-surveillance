@@ -1,13 +1,12 @@
 # TODO — Visitor Surveillance System
 
-## Status: 2 remaining (1 env credentials, 1 visibility analyzer). 59 issues fixed (2026-06-24).
+## Status: 1 remaining (env credentials). All recognition/throttle/confidence/visibility fixes complete (2026-07-09).
 
 ---
 
 ## Remaining
 
 - [ ] **#50: Rotate `.env` credentials** — MongoDB URI, Cloudinary key/secret exposed in working directory
-- [ ] **Face Visibility Analyzer** — add `max_face_ratio` + `frames_with_detectable_face` to Track, compute `face_area/person_area` ratio per frame, classify visibility (`visible`/`partial`/`hidden`/`unknown`), and implement `intentionally_hidden` → HIGH alert path (target spec §5 Phase 3)
 
 ---
 

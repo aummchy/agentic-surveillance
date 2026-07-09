@@ -58,6 +58,7 @@ main.py (entry point, wires everything)
 ├── agents/memory.py          — visit history tracking
 ├── agents/alert_agent.py     — alert dispatch (console/email/sms/webhook)
 ├── agents/recognition.py     — multi-signal identity classification
+├── agents/scoring.py         — confidence scoring (weighted normalization + logging)
 ├── agents/policy.py          — business rule evaluation
 ├── pipeline/tracker.py       — YOLOv8 + ByteTrack (single model instance)
 ├── pipeline/face.py          — SCRFD detection + ArcFace embedding + mask heuristic
@@ -130,10 +131,15 @@ See `TERMINAL_OUTPUT.md` for full event format reference.
 
 ## Recent fixes
 
-- **2026-07-09**: Fixed auto-registered unknowns being promoted to `known_visitor` — Policy Rule 5 mid-range match now returns `unknown` instead of `known_visitor`; memory `is_known` gate no longer includes `known_visitor` status. Fixes permanent feedback loop where repeated sightings cemented incorrect classification.
+- **2026-07-09**: Added weighted normalization confidence formula — 5 components (sim 65%, quality 15%, track 10%, memory 5%, margin 5%) in `agents/scoring.py`. Replaces old point-based formula.
+- **2026-07-09**: Added calculation log — full tabular breakdown per confidence computation written to `logs/calculation.log`. Formula header written at startup.
+- **2026-07-09**: Added quality-gated recognition throttle — skips recognition if face quality didn't improve by ≥ 0.10 (`MIN_QUALITY_IMPROVEMENT`). No timers or counters.
+- **2026-07-09**: Added max-confidence gate — recognition never downgrades, only upgrades confidence. Critical alerts always update.
+- **2026-07-09**: Fixed auto-registered unknowns being promoted to `known_visitor` — Policy Rule 5 mid-range match now returns `unknown` instead of `known_visitor`; memory `is_known` gate no longer includes `known_visitor` status.
 - **2026-07-09**: Fixed `OFFICE_DAYS` env var type mismatch — `_get()` now casts list elements to the default's element type, so `OFFICE_DAYS=0,1,2,3,4` produces `[0,1,2,3,4]` (ints) not strings.
 - **2026-07-09**: Fixed PyMongo `return_document=True` → `ReturnDocument.AFTER` in `get_or_create_memory()` and `update_visit_memory()`.
 - **2026-07-09**: Added WebSocket origin validation to `/ws/live` endpoint to prevent cross-origin hijacking.
 - **2026-07-09**: Added lock-protected setters for `cached_embedding` and `pending_recognition` in `TrackState`.
 - **2026-07-09**: Fixed LLM client shutdown — replaced deprecated `asyncio.get_event_loop()` with `get_running_loop()` + `asyncio.run()` fallback.
 - **2026-07-09**: Tightened CORS to explicit methods/headers.
+- **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→65.
