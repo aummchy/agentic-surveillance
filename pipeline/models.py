@@ -22,8 +22,6 @@ class Track:
     alerted: bool = False
     image_url: Optional[str] = None  # Cloudinary URL (set after upload)
     last_recognition_frame: int = 0
-    pending_embedding: Optional[list] = None
-    pending_match: Optional[dict] = None
     pending_recognition: Optional[dict] = None  # Phase 2.1: Recognition Agent output
     pending_match_result: Optional[MatchResult] = None  # Full match result from progressive recognition
     pending_memory_context: Optional[dict] = None  # Cached memory context from progressive recognition

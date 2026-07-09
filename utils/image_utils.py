@@ -105,7 +105,7 @@ def _put_label_with_bg(img, text, pos, font_scale, color, thickness=1, bg_color=
     cv2.putText(img, text, (tx + 2, ty - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
 
 
-def draw_annotations(frame: np.ndarray, tracks: list, decisions: dict = None) -> np.ndarray:
+def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
     if not tracks:
         return frame
     annotated = frame.copy()

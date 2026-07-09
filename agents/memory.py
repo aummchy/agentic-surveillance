@@ -30,7 +30,7 @@ import structlog
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from agents.base import BaseAgent
-from utils.db_utils import get_or_create_memory, update_visit_memory, get_visit_history
+from utils.db_utils import get_or_create_memory, update_visit_memory
 
 logger = structlog.get_logger(__name__)
 

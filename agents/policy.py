@@ -29,7 +29,7 @@ import structlog
 from datetime import datetime
 from typing import Any, Dict, Optional
 from agents.base import BaseAgent
-from pipeline.models import Track, MatchResult, DecisionResult
+from pipeline.models import Track, DecisionResult
 from config import settings
 
 logger = structlog.get_logger(__name__)

@@ -165,17 +165,6 @@ class TrackState:
             if track:
                 track.best_face_crop_path = path
 
-    def set_pending_recognition(self, composite_id: str, frame_num: int,
-                                embedding: list = None, match: dict = None):
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if track:
-                track.last_recognition_frame = frame_num
-                if embedding:
-                    track.pending_embedding = embedding
-                if match:
-                    track.pending_match = match
-
     def set_pending_match_result(self, composite_id: str, match_result):
         with self._lock:
             track = self._tracks.get(composite_id)

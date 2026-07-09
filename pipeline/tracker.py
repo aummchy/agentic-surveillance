@@ -1,6 +1,4 @@
 import logging
-import io
-import contextlib
 import structlog
 import numpy as np
 from config import settings

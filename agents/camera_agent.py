@@ -384,13 +384,6 @@ class CameraAgent:
                                  alert_level=decision.alert_level,
                                  status=decision.status)
 
-            self.track_state.set_pending_recognition(
-                track.track_id,
-                self._frame_count,
-                embedding_list,
-                {"matched": match_result.matched, "person_id": match_result.person_id}
-            )
-
             # Store full match result for finalization to reuse
             self.track_state.set_pending_match_result(track.track_id, match_result)
 

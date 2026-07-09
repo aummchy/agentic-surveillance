@@ -11,7 +11,6 @@ warnings.filterwarnings("ignore", message=".*estimate.*deprecated.*", category=F
 
 from insightface.app import FaceAnalysis
 from config import settings
-from pipeline.models import EmbeddingResult
 
 logger = structlog.get_logger(__name__)
 
