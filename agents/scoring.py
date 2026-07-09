@@ -4,7 +4,114 @@ Pure scoring functions for recognition confidence.
 All tunables come from config.settings — no hardcoded values here.
 """
 
+import os
+import datetime
 from config import settings
+
+_CALC_LOG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "logs", "calculation.log"
+)
+_calc_log_initialized = False
+
+
+def _ensure_log_dir():
+    log_dir = os.path.dirname(_CALC_LOG_PATH)
+    if not os.path.isdir(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
+
+def _ts() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log_formula_header():
+    """Write the formula header to calculation.log once at startup."""
+    global _calc_log_initialized
+    if _calc_log_initialized:
+        return
+    _ensure_log_dir()
+    _calc_log_initialized = True
+
+    lines = [
+        "",
+        "═" * 72,
+        "                      CONFIDENCE SCORING FORMULA",
+        "═" * 72,
+        "",
+        "  base = 0.65×sim + 0.15×quality + 0.10×track + 0.05×memory + 0.05×margin",
+        "  adjusted = base × (1 - 0.15×mask)",
+        "  confidence = int(round(1 + 99 × clip(adjusted, 0, 1)))",
+        "",
+        "─" * 72,
+        f"  Weights:     sim={settings.WEIGHT_SIMILARITY}  "
+        f"quality={settings.WEIGHT_QUALITY}  "
+        f"track={settings.WEIGHT_TRACK}  "
+        f"memory={settings.WEIGHT_MEMORY}  "
+        f"margin={settings.WEIGHT_MARGIN}",
+        f"  Normalize:   SIM=[{settings.SIM_NORM_MIN}..{settings.SIM_NORM_MAX}]  "
+        f"TRACK_SAT={settings.TRACK_SATURATION_SECS}s  "
+        f"MEM_MAX={settings.MEMORY_NORM_MAX}  "
+        f"MAR_MAX={settings.MARGIN_NORM_MAX}",
+        f"  Thresholds:  match>={settings.MATCH_THRESHOLD}  "
+        f"known>={settings.CONFIDENCE_KNOWN_MIN}  "
+        f"uncertain>={settings.CONFIDENCE_UNCERTAIN_MIN}  "
+        f"unknown<{settings.CONFIDENCE_UNCERTAIN_MIN}",
+        f"  Mask penalty: max={settings.MASK_PENALTY_MAX}",
+        "═" * 72,
+        "",
+    ]
+
+    with open(_CALC_LOG_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def _log_calculation(track_id: str, raw_cosine: float, face_quality,
+                     track_seconds: float, memory_boost: float,
+                     is_masked: bool, margin,
+                     sim_norm: float, quality_norm: float, track_norm: float,
+                     memory_norm: float, margin_norm: float, mask_norm: float,
+                     base: float, adjusted: float, confidence: int,
+                     matched: bool, status: str):
+    """Write a full calculation breakdown to calculation.log."""
+    _ensure_log_dir()
+    ts = _ts()
+    w_sim = settings.WEIGHT_SIMILARITY * sim_norm
+    w_qual = settings.WEIGHT_QUALITY * quality_norm
+    w_track = settings.WEIGHT_TRACK * track_norm
+    w_mem = settings.WEIGHT_MEMORY * memory_norm
+    w_mar = settings.WEIGHT_MARGIN * margin_norm
+
+    mask_label = f"{mask_norm} (masked)" if is_masked else f"{mask_norm} (unmasked)"
+    mask_effect = f"× {1.0 - settings.MASK_PENALTY_MAX * mask_norm:.4f}" if is_masked else "→ no penalty"
+
+    quality_display = f"{face_quality}" if face_quality is not None and face_quality > 0 else "N/A"
+    margin_display = f"{margin}" if margin is not None else "N/A"
+    margin_norm_display = f"{margin_norm:.3f}" if margin is not None else "0.500 (neutral)"
+
+    lines = [
+        f"─" * 72,
+        f"  track={track_id}  │  {ts}",
+        f"─" * 72,
+        f"  {'Component':<20} {'Raw':>10} {'Normalized':>12} {'Weighted':>28}",
+        f"  {'─'*20} {'─'*10} {'─'*12} {'─'*28}",
+        f"  {'Similarity':<20} {raw_cosine:>10.3f} {sim_norm:>12.3f} {settings.WEIGHT_SIMILARITY}×{sim_norm:.3f} = {w_sim:.3f}",
+        f"  {'Face Quality':<20} {quality_display:>10} {quality_norm:>12.3f} {settings.WEIGHT_QUALITY}×{quality_norm:.3f} = {w_qual:.3f}",
+        f"  {'Track Duration':<20} {track_seconds:>9.1f}s {track_norm:>12.3f} {settings.WEIGHT_TRACK}×{track_norm:.3f} = {w_track:.3f}",
+        f"  {'Memory Boost':<20} {memory_boost:>10.1f} {memory_norm:>12.3f} {settings.WEIGHT_MEMORY}×{memory_norm:.3f} = {w_mem:.3f}",
+        f"  {'Margin':<20} {margin_display:>10} {margin_norm_display:>12} {settings.WEIGHT_MARGIN}×{margin_norm:.3f} = {w_mar:.3f}",
+        f"  {'─'*20} {'─'*10} {'─'*12} {'─'*28}",
+        f"  BASE = {w_sim:.3f} + {w_qual:.3f} + {w_track:.3f} + {w_mem:.3f} + {w_mar:.3f} = {base:.3f}",
+        f"  MASK = {mask_label} {mask_effect}",
+        f"  ADJUSTED = {base:.3f} × {1.0 - settings.MASK_PENALTY_MAX * mask_norm:.4f} = {adjusted:.3f}",
+        f"  {'─'*70}",
+        f"  CONFIDENCE = 1 + 99 × {adjusted:.3f} = {confidence}",
+        f"  STATUS = {status}  (matched={str(matched).lower()}, threshold={settings.MATCH_THRESHOLD})",
+        f"─" * 72,
+        "",
+    ]
+
+    with open(_CALC_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 
 def clip(x: float, lo: float, hi: float) -> float:
@@ -54,7 +161,8 @@ def compute_confidence(
     track_seconds: float,
     memory_boost: float,
     is_masked: bool,
-    margin: float | None = None
+    margin: float | None = None,
+    track_id: str = "unknown"
 ) -> int:
     """Compute confidence score 1-100 from normalized components."""
     sim_norm = normalize_cosine(raw_cosine)
@@ -73,7 +181,33 @@ def compute_confidence(
     )
 
     adjusted = base * (1.0 - settings.MASK_PENALTY_MAX * mask_norm)
-    return int(round(1 + 99 * clip(adjusted, 0.0, 1.0)))
+    confidence = int(round(1 + 99 * clip(adjusted, 0.0, 1.0)))
+
+    matched = is_match(raw_cosine)
+    status = confidence_status(confidence, matched)
+
+    _log_calculation(
+        track_id=track_id,
+        raw_cosine=raw_cosine,
+        face_quality=face_quality,
+        track_seconds=track_seconds,
+        memory_boost=memory_boost,
+        is_masked=is_masked,
+        margin=margin,
+        sim_norm=sim_norm,
+        quality_norm=quality_norm,
+        track_norm=track_norm,
+        memory_norm=memory_norm,
+        margin_norm=margin_norm,
+        mask_norm=mask_norm,
+        base=base,
+        adjusted=adjusted,
+        confidence=confidence,
+        matched=matched,
+        status=status,
+    )
+
+    return confidence
 
 
 def is_match(raw_cosine: float) -> bool:

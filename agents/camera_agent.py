@@ -356,6 +356,7 @@ class CameraAgent:
                 "top2": match_result.second_best_similarity if match_result else None,
                 "margin": match_result.margin if match_result else None,
                 "name": match_result.name if match_result and match_result.matched else None,
+                "track_id": track.track_id,
             })
 
             # Store recognition result in track for later use

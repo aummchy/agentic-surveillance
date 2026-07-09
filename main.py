@@ -15,6 +15,7 @@ from agents.camera_agent import CameraAgent
 from agents.decision_agent import decide
 from agents.alert_agent import dispatch
 from agents.memory import MemoryAgent
+from agents.scoring import log_formula_header
 from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings, close_client
 from utils.image_utils import save_image, upload_to_cloudinary, upload_jpeg_to_cloudinary
 from pipeline.models import Track
@@ -323,6 +324,8 @@ def main():
     except ValueError as e:
         logger.error("config_validation_failed", error=str(e))
         sys.exit(1)
+
+    log_formula_header()
 
     logger.info("starting_surveillance",
                 camera_id=settings.CAMERA_ID,

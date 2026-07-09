@@ -67,8 +67,9 @@ class RecognitionAgent(BaseAgent):
         top2 = input_data.get("top2")
         margin = input_data.get("margin")
         name = input_data.get("name")
+        track_id = input_data.get("track_id", "unknown")
 
-        result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context, margin=margin)
+        result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context, margin=margin, track_id=track_id)
 
         logger.info("recognition_decision",
                     status=result.status,
@@ -89,7 +90,8 @@ class RecognitionAgent(BaseAgent):
     def _decide(self, similarity: float, is_masked: bool,
                 face_quality: float, track_duration: float,
                 memory_context: Optional[Dict] = None,
-                margin: float = None) -> RecognitionResult:
+                margin: float = None,
+                track_id: str = "unknown") -> RecognitionResult:
         """Core decision logic that delegates to the scorer module."""
         memory_boost = 0.0
         if memory_context:
@@ -104,6 +106,7 @@ class RecognitionAgent(BaseAgent):
             memory_boost=memory_boost,
             is_masked=is_masked,
             margin=margin,
+            track_id=track_id,
         )
 
         status = confidence_status(confidence, matched)
@@ -156,7 +159,8 @@ class RecognitionAgent(BaseAgent):
 def recognize(similarity: float, is_masked: bool = False,
               face_quality: float = 0.0, track_duration: float = 0.0,
               memory_context: Optional[Dict] = None,
-              margin: float = None) -> dict:
+              margin: float = None,
+              track_id: str = "unknown") -> dict:
     """Quick recognition without instantiating the agent."""
     agent = RecognitionAgent()
     return agent.run({
@@ -166,4 +170,5 @@ def recognize(similarity: float, is_masked: bool = False,
         "track_duration": track_duration,
         "memory_context": memory_context or {},
         "margin": margin,
+        "track_id": track_id,
     })
