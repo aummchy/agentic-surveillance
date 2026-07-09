@@ -81,32 +81,40 @@ def _log_calculation(track_id: str, raw_cosine: float, face_quality,
     w_mem = settings.WEIGHT_MEMORY * memory_norm
     w_mar = settings.WEIGHT_MARGIN * margin_norm
 
-    mask_label = f"{mask_norm} (masked)" if is_masked else f"{mask_norm} (unmasked)"
+    mask_label = f"{mask_norm:.1f} (masked)" if is_masked else f"{mask_norm:.1f} (unmasked)"
     mask_effect = f"× {1.0 - settings.MASK_PENALTY_MAX * mask_norm:.4f}" if is_masked else "→ no penalty"
 
-    quality_display = f"{face_quality}" if face_quality is not None and face_quality > 0 else "N/A"
-    margin_display = f"{margin}" if margin is not None else "N/A"
-    margin_norm_display = f"{margin_norm:.3f}" if margin is not None else "0.500 (neutral)"
+    quality_raw = f"{face_quality:.3f}" if face_quality is not None and face_quality > 0 else "N/A"
+    margin_raw = f"{margin:.3f}" if margin is not None else "N/A"
+    margin_norm_str = f"{margin_norm:.3f}" if margin is not None else "0.500"
+
+    # Fixed-width column layout
+    C1 = 20  # Component
+    C2 = 10  # Raw
+    C3 = 12  # Normalized
+    C4 = 28  # Weighted
+
+    sep = "─" * 72
 
     lines = [
-        f"─" * 72,
+        sep,
         f"  track={track_id}  │  {ts}",
-        f"─" * 72,
-        f"  {'Component':<20} {'Raw':>10} {'Normalized':>12} {'Weighted':>28}",
-        f"  {'─'*20} {'─'*10} {'─'*12} {'─'*28}",
-        f"  {'Similarity':<20} {raw_cosine:>10.3f} {sim_norm:>12.3f} {settings.WEIGHT_SIMILARITY}×{sim_norm:.3f} = {w_sim:.3f}",
-        f"  {'Face Quality':<20} {quality_display:>10} {quality_norm:>12.3f} {settings.WEIGHT_QUALITY}×{quality_norm:.3f} = {w_qual:.3f}",
-        f"  {'Track Duration':<20} {track_seconds:>9.1f}s {track_norm:>12.3f} {settings.WEIGHT_TRACK}×{track_norm:.3f} = {w_track:.3f}",
-        f"  {'Memory Boost':<20} {memory_boost:>10.1f} {memory_norm:>12.3f} {settings.WEIGHT_MEMORY}×{memory_norm:.3f} = {w_mem:.3f}",
-        f"  {'Margin':<20} {margin_display:>10} {margin_norm_display:>12} {settings.WEIGHT_MARGIN}×{margin_norm:.3f} = {w_mar:.3f}",
-        f"  {'─'*20} {'─'*10} {'─'*12} {'─'*28}",
+        sep,
+        f"  {'Component':<{C1}} {'Raw':>{C2}} {'Normalized':>{C3}} {'Weighted':>{C4}}",
+        f"  {'─'*C1} {'─'*C2} {'─'*C3} {'─'*C4}",
+        f"  {'Similarity':<{C1}} {raw_cosine:>{C2}.3f} {sim_norm:>{C3}.3f} {settings.WEIGHT_SIMILARITY}×{sim_norm:.3f} = {w_sim:.3f}",
+        f"  {'Face Quality':<{C1}} {quality_raw:>{C2}} {quality_norm:>{C3}.3f} {settings.WEIGHT_QUALITY}×{quality_norm:.3f} = {w_qual:.3f}",
+        f"  {'Track Duration':<{C1}} {track_seconds:>{C2-1}.1f}s {track_norm:>{C3}.3f} {settings.WEIGHT_TRACK}×{track_norm:.3f} = {w_track:.3f}",
+        f"  {'Memory Boost':<{C1}} {memory_boost:>{C2}.1f} {memory_norm:>{C3}.3f} {settings.WEIGHT_MEMORY}×{memory_norm:.3f} = {w_mem:.3f}",
+        f"  {'Margin':<{C1}} {margin_raw:>{C2}} {margin_norm_str:>{C3}} {settings.WEIGHT_MARGIN}×{margin_norm:.3f} = {w_mar:.3f}",
+        f"  {'─'*C1} {'─'*C2} {'─'*C3} {'─'*C4}",
         f"  BASE = {w_sim:.3f} + {w_qual:.3f} + {w_track:.3f} + {w_mem:.3f} + {w_mar:.3f} = {base:.3f}",
         f"  MASK = {mask_label} {mask_effect}",
         f"  ADJUSTED = {base:.3f} × {1.0 - settings.MASK_PENALTY_MAX * mask_norm:.4f} = {adjusted:.3f}",
         f"  {'─'*70}",
         f"  CONFIDENCE = 1 + 99 × {adjusted:.3f} = {confidence}",
         f"  STATUS = {status}  (matched={str(matched).lower()}, threshold={settings.MATCH_THRESHOLD})",
-        f"─" * 72,
+        sep,
         "",
     ]
 

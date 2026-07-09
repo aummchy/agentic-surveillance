@@ -16,83 +16,67 @@ Complete reference for the face quality → matching → memory → recognition 
 | Brightness | Mean HSV Value channel | `np.mean(hsv[:, :, 2])` |
 | Area | Height × Width of face crop | `h * w` |
 
-### Design principle
+### Normalization
 
-Validity gates and scoring normalization are **separate concerns**:
-- **Validity gates** control whether `set_best_face()` stores the crop on the track (boolean pass/fail).
-- **Scoring normalization** controls the continuous `overall_score` that feeds into recognition confidence.
+Shifted so a face at the minimum validity threshold scores near zero, and the full range is usable:
 
-They do not need identical thresholds. The validity gate is slightly lenient; the scoring normalization penalizes small/weak faces continuously.
-
-### Validity gates
-
-`is_valid = True` only when **all three** pass:
-
-| Check | Threshold | Purpose |
-|-------|-----------|---------|
-| `blur_valid` | `blur_raw >= 40` | Reject too-blurry crops |
-| `bright_valid` | `35 <= brightness_raw <= 255` | Reject unusably dark crops |
-| `area_valid` | `face_area >= 1200` px² (~35×35) | Reject tiny crops |
-
-Faces that fail these gates are not stored via `set_best_face()`. The track's `best_face_score` stays 0.0, and recognition receives `None` → defaults to `0.50`.
-
-### Scoring normalization
-
-```python
-blur_norm   = clip((blur_raw - 40)   / (350 - 40),     0, 1)
-bright_norm = 1 - min(abs(brightness_raw - 145) / 110, 1)
-area_norm   = clip((face_area - 1500) / (10000 - 1500), 0, 1)
-
-overall_score = blur_norm × 0.50 + bright_norm × 0.25 + area_norm × 0.25
+```
+blur_norm    = min(max(blur_raw - QUALITY_BLUR_MIN, 0) / (QUALITY_BLUR_MAX - QUALITY_BLUR_MIN), 1.0)
+bright_norm  = brightness_raw / 255.0
+area_norm    = min(max(face_area - QUALITY_FACE_AREA_MIN, 0) / (QUALITY_AREA_MAX - QUALITY_FACE_AREA_MIN), 1.0)
 ```
 
-| Metric | Range | Norm at min | Norm at max | Weight |
-|--------|:-----:|:-----------:|:-----------:|:------:|
-| Blur | 40 → 350 | `(40-40)/310 = 0` | `1.0` | 50% |
-| Brightness | 35 ↔ 255 (center=145, radius=110) | `1 - 110/110 = 0` | `1.0` | 25% |
-| Area | 1500 → 10000 | `(1500-1500)/8500 = 0` | `1.0` | 25% |
+| Metric | Norm at min threshold | Norm at max |
+|--------|:--------------------:|:-----------:|
+| Blur (15 → 1000) | `(15-15)/985 = 0` | `1.0` |
+| Brightness (0 → 255) | `0/255 = 0` | `1.0` |
+| Area (800 → 10000) | `(800-800)/9200 = 0` | `1.0` |
+
+### Validity check vs. overall_score
+
+- **`is_valid`** = whether the face is usable (passes minimum thresholds: blur ≥ 15, brightness 30–240, area ≥ 800).
+- **`overall_score`** = how good the face is relative to the full range. A barely-valid face scores ~0.03 ("low"). An excellent face scores 0.8+ ("high").
 
 ### Examples
 
 | Condition | Blur | Bright | Area | `overall_score` | Label |
 |-----------|:----:|:------:|:----:|:---------------:|:-----:|
-| Weak | 50 | 60 | 1500 | `0.03×0.50 + 0.23×0.25 + 0×0.25 = 0.07` | low |
-| Typical indoor | 200 | 120 | 3000 | `0.52×0.50 + 0.77×0.25 + 0.18×0.25 = 0.48` | usable |
-| Good | 350 | 145 | 5400 | `1.0×0.50 + 1.0×0.25 + 0.46×0.25 = 0.86` | good |
-| Excellent | 500 | 145 | 10000 | `1.0×0.50 + 1.0×0.25 + 1.0×0.25 = 1.00` | good |
+| Barely valid | 15 | 30 | 800 | `0×0.60 + 0.118×0.25 + 0×0.15 = 0.03` | low |
+| Typical | 200 | 120 | 3000 | `0.188×0.60 + 0.471×0.25 + 0.239×0.15 = 0.27` | low |
+| Good | 500 | 150 | 5400 | `0.492×0.60 + 0.588×0.25 + 0.500×0.15 = 0.52` | medium |
+| Excellent | 1000 | 200 | 10000 | `1.0×0.60 + 0.784×0.25 + 1.0×0.15 = 0.95` | high |
+
+### Validity gate
+
+`is_valid = True` only when **all three** pass:
+
+| Check | Threshold |
+|-------|-----------|
+| `blur_valid` | `blur_raw >= 15` |
+| `bright_valid` | `30 <= brightness_raw <= 240` |
+| `area_valid` | `face_area >= 800` px² (~28×28) |
 
 ### Quality level labels (used in recognition reason string)
 
 | `overall_score` | Label |
 |:---------------:|-------|
-| `>= 0.55` | "good face quality" |
-| `>= 0.25` and `< 0.55` | "usable face quality" |
-| `< 0.25` | **"low face quality"** |
+| `>= 0.8` | "high face quality" |
+| `>= 0.5` and `< 0.8` | "medium face quality" |
+| `< 0.5` | **"low face quality"** |
 
 ### Live thresholds (from `config/config.jsonc`)
 
-#### Validity gates
-
 | Setting | Value | Purpose |
-|---------|:-----:|---------|
-| `QUALITY_VALID_BLUR_MIN` | 40 | Min Laplacian variance for valid face |
-| `QUALITY_VALID_BRIGHTNESS_MIN` | 35 | Min HSV-V brightness |
-| `QUALITY_VALID_BRIGHTNESS_MAX` | 255 | Max HSV-V brightness |
-| `QUALITY_VALID_FACE_AREA_MIN` | 1200 | Min face area (px²) |
-
-#### Scoring normalization
-
-| Setting | Value | Purpose |
-|---------|:-----:|---------|
-| `QUALITY_BLUR_MIN` | 40 | Blur normalization floor |
-| `QUALITY_BLUR_MAX` | 350 | Blur normalization cap |
-| `QUALITY_BRIGHTNESS_CENTER` | 145 | Brightness ideal center point |
-| `QUALITY_BRIGHTNESS_RADIUS` | 110 | Brightness falloff radius |
-| `QUALITY_FACE_AREA_MIN` | 1500 | Area normalization floor |
-| `QUALITY_AREA_MAX` | 10000 | Area normalization cap |
-| `QUALITY_WEIGHT_BLUR` | 0.50 | Weight of blur in score |
+|---------|-------|---------|
+| `QUALITY_BLUR_MIN` | 15 | Min Laplacian variance for valid face |
+| `QUALITY_BRIGHTNESS_MIN` | 30 | Min HSV-V brightness |
+| `QUALITY_BRIGHTNESS_MAX` | 240 | Max HSV-V brightness |
+| `QUALITY_FACE_AREA_MIN` | 800 | Min face area (px²) |
+| `QUALITY_BLUR_MAX` | 1000 | Normalization cap for blur |
+| `QUALITY_AREA_MAX` | 10000 | Normalization cap for area |
+| `QUALITY_WEIGHT_BLUR` | 0.60 | Weight of blur in score |
 | `QUALITY_WEIGHT_BRIGHT` | 0.25 | Weight of brightness |
-| `QUALITY_WEIGHT_AREA` | 0.25 | Weight of area |
+| `QUALITY_WEIGHT_AREA` | 0.15 | Weight of area |
 
 ---
 
@@ -205,96 +189,116 @@ is_typical_time = any(abs(current_hour - h) <= 2 for h in common_hours)
 
 ## 4. Recognition Agent — Confidence & Status
 
-**Files:** `agents/scoring.py` (formulas), `agents/recognition.py` (orchestration), `config/settings.py` (tunables)
+**File:** `agents/recognition.py` · `agents/scoring.py`
 
-### Architecture
+### Decision flow
 
 ```
-  similarity threshold → matched (yes/no)     ← identity gate
-  unified formula → confidence (1–100)         ← scoring
-  confidence tiers + match gate → status      ← decision
+Face detected → vector search → match_result (similarity, top2, margin)
+                                       │
+                                       ▼
+                              Memory Agent → memory_boost (-10 to +20)
+                                       │
+                                       ▼
+                          compute_confidence(raw_cosine, quality, ...)
+                                       │
+                                       ▼
+                          confidence_status(confidence, matched)
+                                       │
+                                       ▼
+                              status = "known" | "uncertain" | "unknown"
 ```
 
-### Unified confidence formula
+### Confidence formula (weighted normalization)
+
+```
+base = 0.65×sim_norm + 0.15×quality_norm + 0.10×track_norm + 0.05×memory_norm + 0.05×margin_norm
+adjusted = base × (1 - 0.15×mask_norm)
+confidence = int(round(1 + 99 × clip(adjusted, 0, 1)))
+```
+
+**File:** `agents/scoring.py:compute_confidence()`
+
+### Normalization functions
+
+| Component | Function | Input | Output | Notes |
+|-----------|----------|-------|--------|-------|
+| `sim_norm` | `normalize_cosine(raw)` | raw cosine `[-1, 1]` | `[0, 1]` | `(raw - 0.25) / (0.80 - 0.25)`, clipped |
+| `quality_norm` | `normalize_quality(q)` | `float [0, 1]` or `None` | `[0, 1]` | `None`/`0` → fallback `0.50` |
+| `track_norm` | `normalize_track_duration(secs)` | seconds | `[0, 1]` | `min(secs / 1.5, 1.0)` — saturates at 1.5s |
+| `memory_norm` | `normalize_memory(boost)` | boost `[-10, +20]` | `[0, 1]` | `clip(boost, 0, 20) / 20` |
+| `margin_norm` | `normalize_margin(margin)` | margin `[0, 1]` | `[0, 1]` | `clip(margin / 0.30, 1.0)`, `None` → `0.50` |
+| `mask_norm` | `normalize_mask(masked)` | bool | `0.0` or `1.0` | `1.0` if masked |
+
+### Weight breakdown
+
+| Component | Weight | Normalization | Effective range |
+|-----------|:------:|:-------------:|:---------------:|
+| Similarity | 0.65 | `[0.25..0.80]` → `[0..1]` | 0–0.65 |
+| Face Quality | 0.15 | `[0..1]` direct | 0–0.15 |
+| Track Duration | 0.10 | `secs / 1.5` saturated | 0–0.10 |
+| Memory Boost | 0.05 | `[0..20]` → `[0..1]` | 0–0.05 |
+| Margin | 0.05 | `[0..0.30]` → `[0..1]` | 0–0.05 |
+| **Base total** | **1.00** | | **0–1.00** |
+| Mask penalty | ×(1 - 0.15×mask) | | ×1.0 or ×0.85 |
+
+### Thresholds
+
+| Threshold | Value | Effect |
+|-----------|-------|--------|
+| `MATCH_THRESHOLD` | 0.45 | `raw_cosine >= 0.45` → `matched=True` |
+| `CONFIDENCE_KNOWN_MIN` | 70 | `matched + conf >= 70` → `"known"` |
+| `CONFIDENCE_UNCERTAIN_MIN` | 55 | `conf >= 55` → `"uncertain"` else `"unknown"` |
+
+### Status determination
 
 ```python
-# From agents/scoring.py (all tunables from config/settings.py)
-
-sim_norm     = clip((raw_cosine - 0.25) / 0.55, 0, 1)
-quality_norm = 0.5 if missing else clip(face_quality, 0, 1)
-track_norm   = clip(track_seconds / 1.5, 0, 1)
-memory_norm  = clip(memory_boost, 0, 20) / 20
-mask_norm    = 1.0 if masked else 0.0
-
-base     = 0.70*sim + 0.15*quality + 0.10*track + 0.05*memory
-adjusted = base * (1.0 - 0.15 * mask_norm)
-confidence = round(1 + 99 * clip(adjusted, 0, 1))
+def confidence_status(confidence, matched):
+    if matched:
+        if confidence >= 70:  return "known"
+        if confidence >= 55:  return "uncertain"
+        return "unknown"
+    if confidence >= 55:  return "uncertain"
+    return "unknown"
 ```
 
-### Status logic
-
-```
-matched = similarity >= MATCH_THRESHOLD (0.45)
-
-if matched (sim >= 0.45):
-    confidence >= 70 → "known"
-    confidence >= 55 → "uncertain"
-    else            → "unknown"
-
-if not matched (sim < 0.45):
-    confidence >= 55 → "uncertain"
-    else            → "unknown"
-```
-
-### Component weights
-
-| Component | Weight | Range (normalized) | Max contribution |
-|-----------|:------:|:------------------:|:----------------:|
-| Cosine similarity | 70% | [0, 1] | 70% of base |
-| Face quality | 15% | [0, 1] (0.5 default if missing) | 15% of base |
-| Track duration | 10% | [0, 1] (saturates at 1.5s) | 10% of base |
-| Memory boost | 5% | [0, 1] (memory_boost 0→0, 20→1) | 5% of base |
-| Mask penalty | — | 0 or 1 (boolean) | up to −15% of base |
-
-### Confidence scale
-
-| Tier | Range | Meaning |
-|------|:-----:|---------|
-| Very confident | 85–100 | Auto‑mark attendance |
-| Likely correct | 70–84 | Auto‑mark if stable across frames |
-| Borderline | 55–69 | Show as uncertain, do not auto‑mark |
-| Low confidence | 1–54 | No mark, no action |
-
-### Worked example (your log)
+### Worked example
 
 ```
 Input:
-  raw_cosine    = 0.7314
-  face_quality  = 0.0 (missing → defaults to 0.5)
-  track_duration = 0.7s
-  memory_boost  = 5.0
+  raw_cosine    = 0.704
+  face_quality  = 0.512
+  track_seconds = 10.5s
+  memory_boost  = 18.0
+  margin        = 0.202
   is_masked     = False
 
 Normalization:
-  sim_norm     = (0.7314 - 0.25) / 0.55 = 0.875
-  quality_norm = 0.5          (missing quality)
-  track_norm   = 0.7 / 1.5   = 0.467
-  memory_norm  = 5.0 / 20.0  = 0.25
+  sim_norm     = (0.704 - 0.25) / 0.55 = 0.825
+  quality_norm = 0.512
+  track_norm   = min(10.5 / 1.5, 1) = 1.000
+  memory_norm  = 18.0 / 20 = 0.900
+  margin_norm  = 0.202 / 0.30 = 0.675
   mask_norm    = 0.0
 
-Base:
-  base = 0.70(0.875) + 0.15(0.5) + 0.10(0.467) + 0.05(0.25)
-       = 0.6125 + 0.075 + 0.0467 + 0.0125
-       = 0.7467
+Weighted sum:
+  base = 0.65×0.825 + 0.15×0.512 + 0.10×1.000 + 0.05×0.900 + 0.05×0.675
+       = 0.536 + 0.077 + 0.100 + 0.045 + 0.034
+       = 0.792
 
-Adjusted: 0.7467 * 1.0 = 0.7467
-Confidence = round(1 + 99 × 0.7467) = 75
-
-Result:
-  status     = "known"     (matched + confidence >= 70)
-  confidence = 75
-  reason     = "Decision: known. raw cosine=0.731, above match threshold 0.45. face quality unavailable."
+  adjusted = 0.792 × (1 - 0.15×0) = 0.792
+  confidence = 1 + 99 × 0.792 = 79
+  status = "known"  (matched=True, 0.704 >= 0.45, confidence=79 >= 70)
 ```
+
+### Match threshold gate
+
+```
+raw_cosine >= 0.45  →  matched = True
+raw_cosine <  0.45  →  matched = False
+```
+
+Even if `matched=False`, confidence can still reach `"uncertain"` (>= 55) from quality + track + memory signals.
 
 ---
 
@@ -414,3 +418,34 @@ Progressive recognition (every 10 frames)
     ● CRITICAL alert? → dispatch immediately
     ● Otherwise → deferred to finalization
 ```
+
+
+          Camera frame
+               │
+               ▼
+     CLAHE contrast enhancement
+               │
+               ▼
+     SCRFD face detection → det_score=0.87, bbox, landmarks
+               │
+               ▼
+     Face alignment (affine transform via landmarks)
+               │
+               ▼
+     ArcFace ResNet-100 → 512-dim embedding
+               │
+               ▼
+     L2-normalize → ‖embedding‖ = 1
+               │
+               ▼
+     Atlas $vectorSearch (HNSW index, cosine)
+               │
+               ▼
+     (1 + dot_product) / 2  → Atlas score = 0.8615
+               │
+               ▼
+     atlas_score_to_cosine → raw_cosine = (0.8615×2)-1 = 0.723
+               │
+               ▼
+     compare_similarity(0.723 >= 0.45) → MatchResult(matched=True, similarity=0.723)
+Want me to document this full flow in FORMULAS.md as a new section?
