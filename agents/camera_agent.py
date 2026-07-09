@@ -313,7 +313,7 @@ class CameraAgent:
             if match_result is None:
                 from agents.matching_agent import run_matching_from_embedding
                 match_result = run_matching_from_embedding(embedding_list)
-                track.cached_embedding = embedding_list
+                self.track_state.set_cached_embedding(track.track_id, embedding_list)
 
             # Phase 2.2: Use Memory Agent for context (skip for high-confidence matches)
             memory_context = {}
@@ -345,7 +345,7 @@ class CameraAgent:
             })
 
             # Store recognition result in track for later use
-            track.pending_recognition = recognition_result
+            self.track_state.set_pending_recognition_data(track.track_id, recognition_result)
 
             # Phase 2.3: Use Policy Agent with all context
             from agents.decision_agent import decide

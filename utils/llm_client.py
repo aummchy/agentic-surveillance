@@ -373,11 +373,15 @@ def shutdown():
     if _async_client and not _async_client.is_closed:
         try:
             import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(_async_client.aclose())
-            else:
-                loop.run_until_complete(_async_client.aclose())
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass
+            # No running loop — close synchronously to avoid leaked connections
+            import asyncio as _aio
+            try:
+                _aio.run(_async_client.aclose())
+            except RuntimeError:
+                pass
+        else:
+            # Running loop exists — schedule async close
+            loop.create_task(_async_client.aclose())
     _async_client = None

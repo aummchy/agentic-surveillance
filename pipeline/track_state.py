@@ -176,3 +176,15 @@ class TrackState:
             track = self._tracks.get(composite_id)
             if track:
                 track.pending_memory_context = memory_context
+
+    def set_cached_embedding(self, composite_id: str, embedding: list):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.cached_embedding = embedding
+
+    def set_pending_recognition_data(self, composite_id: str, recognition_result: dict):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.pending_recognition = recognition_result
