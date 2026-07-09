@@ -188,3 +188,10 @@ class TrackState:
             track = self._tracks.get(composite_id)
             if track:
                 track.pending_recognition = recognition_result
+
+    def set_recognition_snapshot(self, composite_id: str, quality: float, status: str):
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track:
+                track.last_recognition_quality = quality
+                track.last_recognition_status = status

@@ -23,6 +23,8 @@ class Track:
     alerted: bool = False
     image_url: Optional[str] = None  # Cloudinary URL (set after upload)
     last_recognition_frame: int = 0
+    last_recognition_quality: float = 0.0     # face quality at last recognition
+    last_recognition_status: str = ""         # "known" / "unknown" / "uncertain"
     pending_recognition: Optional[dict] = None  # Phase 2.1: Recognition Agent output
     pending_match_result: Optional[MatchResult] = None  # Full match result from progressive recognition
     pending_memory_context: Optional[dict] = None  # Cached memory context from progressive recognition

@@ -161,11 +161,25 @@ class CameraAgent:
                     # Skip recognition if already verified/known or high-confidence match
                     already_resolved = track.decision in ("verified", "known")
                     high_confidence = track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY
+
+                    # For unresolved tracks: only re-run if face quality improved
+                    should_skip = False
                     if already_resolved or high_confidence:
-                        logger.debug("skip_recognition_resolved",
+                        should_skip = True
+                    elif track.last_recognition_status in ("unknown", "uncertain"):
+                        quality_improved = track.best_face_score > (
+                            track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT
+                        )
+                        if not quality_improved:
+                            should_skip = True
+
+                    if should_skip:
+                        logger.debug("skip_recognition_throttled",
                                    track_id=track.track_id,
                                    decision=track.decision,
-                                   similarity=track.pending_match_result.similarity_score if track.pending_match_result else None)
+                                   quality=round(track.best_face_score, 3),
+                                   last_quality=round(track.last_recognition_quality, 3),
+                                   last_status=track.last_recognition_status)
                     else:
                         with self._track_sets_lock:
                             already_recognizing = track.track_id in self._recognizing_tracks
@@ -383,6 +397,13 @@ class CameraAgent:
                                  track_id=track.track_id,
                                  alert_level=decision.alert_level,
                                  status=decision.status)
+
+            # Record quality snapshot for throttle decisions
+            self.track_state.set_recognition_snapshot(
+                track.track_id,
+                track.best_face_score,
+                decision.status
+            )
 
             # Store full match result for finalization to reuse
             self.track_state.set_pending_match_result(track.track_id, match_result)
