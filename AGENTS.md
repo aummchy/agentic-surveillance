@@ -37,8 +37,16 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 | Install Python deps | `pip install -r requirements.txt` |
 | Install frontend deps | `cd dashboard/frontend && npm install` |
 | Export YOLO to OpenVINO IR | `yolo export model=models/yolov8s.pt format=openvino half=True` |
+| Run tests | `python -m pytest tests/ -v` |
+| Run specific test | `python -m pytest tests/test_recognition.py -v` |
 
-No test suite, linter, or CI pipeline exists in this repo.
+## Configuration system
+
+**Priority chain:** `.env` (secrets) > `config/config.jsonc` (tunables) > hardcoded defaults
+
+- `config/config.jsonc` — Centralized tunable parameters (JSON with comments). Edit this file for detection, quality, and recognition settings.
+- `.env` — Secrets only (API keys, URIs, passwords). Never put tunables here.
+- `config/settings.py` — Loads both files via `_get(env_key, config_key, default, cast)`.
 
 ## Architecture
 
@@ -49,6 +57,8 @@ main.py (entry point, wires everything)
 ├── agents/decision_agent.py  — delegates to PolicyAgent
 ├── agents/memory.py          — visit history tracking
 ├── agents/alert_agent.py     — alert dispatch (console/email/sms/webhook)
+├── agents/recognition.py     — multi-signal identity classification
+├── agents/policy.py          — business rule evaluation
 ├── pipeline/tracker.py       — YOLOv8 + ByteTrack (single model instance)
 ├── pipeline/face.py          — SCRFD detection + ArcFace embedding + mask heuristic
 ├── pipeline/models.py        — Track, MatchResult, DecisionResult, etc.
@@ -57,10 +67,11 @@ main.py (entry point, wires everything)
 ├── utils/embedding_utils.py  — InsightFace singleton (load once, never per-frame)
 ├── utils/llm_client.py       — Ollama HTTP client (generate, chat, NL summaries)
 ├── utils/image_utils.py      — crop, save, upload to Cloudinary
-├── config/settings.py        — loads .env, validate_config()
+├── config/settings.py        — loads .env + config.jsonc, validate_config()
+├── config/config.jsonc       — tunable parameters (edit this, not settings.py)
+├── tests/                    — pytest test suite
 └── dashboard/
     ├── backend/main.py       — FastAPI app (REST + WebSocket)
-    ├── backend/routes/chat.py — POST /api/chat, GET /api/chat/health
     └── frontend/             — React + Vite
 ```
 
@@ -70,32 +81,49 @@ main.py (entry point, wires everything)
 - **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (2 threads) run concurrently.
 - **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
 - **Threshold conversion.** Atlas `vectorSearchScore = (1+cosine)/2`. Always convert back: `raw_cosine = (atlas_score * 2) - 1` before comparing against `MATCH_THRESHOLD`. Use `compare_similarity()` in `db_utils.py`.
-- **Match threshold.** Keep `MATCH_THRESHOLD` ≤ 0.45. Default is 0.25. Higher rejects genuine same-person matches under indoor lighting.
-- **One decision per track.** Recognition + decision runs once when track ends (or progressively every 20 frames). Not per-frame.
+- **Match threshold.** Keep `MATCH_THRESHOLD` ≤ 0.45. Default is 0.45. Higher rejects genuine same-person matches under indoor lighting.
+- **One decision per track.** Recognition + decision runs once when track ends (or progressively every 10 frames). Not per-frame.
 - **Composite track IDs.** Format: `{camera_id}_{session_epoch}_{byte_track_id}` — unique across camera restarts.
 
-## Known issues (0 remaining)
+## Quality scoring
 
-All 32 issues from the problem report have been fixed.
+Two-tier system in `pipeline/face.py`:
 
-## OpenVINO GPU acceleration
+1. **Validity gates** — Reject unusable faces (too blurry, too dark, too small):
+   - Blur: Laplacian variance ≥ `QUALITY_VALID_BLUR_MIN` (40)
+   - Brightness: V-channel mean in [35, 255]
+   - Face area: ≥ `QUALITY_VALID_FACE_AREA_MIN` (1200 px²)
 
-After installing `openvino` and exporting YOLO to OpenVINO IR (`yolo export model=models/yolov8s.pt format=openvino half=True`):
+2. **Quality score** — Weighted composite [0, 1] for embedding comparison:
+   - Blur (50%): `min(Laplacian_var / 350, 1.0)`
+   - Brightness (25%): center-radius model (peak at 145, radius 110)
+   - Area (25%): `min(area / 10000, 1.0)`
 
-1. Set `YOLO_MODEL=models/yolov8s_openvino_model/` in `.env`
-2. Set `YOLO_DEVICE=intel:GPU` in `.env` (the `intel:` prefix is required — bare `GPU` fails)
-3. InsightFace stays on `CPUExecutionProvider` (OpenVINO EP has known DLL compatibility issues on Windows)
-
-Benchmark on Arc 130T iGPU: YOLOv8s 128ms CPU → 15.6ms GPU (8.2× speedup).
+Quality gates prevent low-quality embeddings from overwriting high-quality ones in MongoDB.
 
 ## Gotchas
 
 - `axios` pinned to `1.7.9` in `dashboard/frontend/` — versions ≥1.7.10 break Vite's esbuild
-- Console shows INFO+ only; full debug logs go to `logs/surveillance.log` (5MB × 5 backups)
+- Console shows INFO+ only; full debug logs go to `logs/surveillance.jsonl` and `logs/surveillance.debug.log`
 - `FutureWarning` from insightface is harmless (deprecated `estimate` in 0.26)
 - Camera streams via WebSocket, not a local OpenCV window — open browser to see feed
 - Mask detection uses geometric landmark heuristic (lower_face/upper_face ratio < 0.3), not a classifier
 - Blacklisted persons always trigger critical alert even if also authorized (tag priority: blacklist > authorized > known_visitor)
 - LLM (Ollama) must be running for chat and NL summaries — system falls back to template strings if unavailable
-- Swap LLM model via single env var: `OLLAMA_MODEL=qwen3.5:4b` in `.env` (Qwen 3.5 4B has better reasoning: MMLU-Pro 79.1% vs ~43%)
+- Swap LLM model via single env var: `OLLAMA_MODEL=qwen3.5:4b` in `.env` (Qwen 3.5 4B has better reasoning)
 - Both Gemma 3 4B and Qwen 3.5 4B fit in 4GB VRAM at Q4_K_M quantization (~2.7GB weights)
+- On Windows, if MSMF drops frames (error -1072875772), set `CAMERA_BACKEND=dshow` in `.env`
+
+## Logging system
+
+3-tier logging architecture in `config/settings.py`:
+
+- **Terminal** — Compact one-liner with ANSI colors (`CompactTerminalRenderer`)
+- **JSON file** (`logs/surveillance.jsonl`) — Machine-readable JSON lines
+- **Debug file** (`logs/surveillance.debug.log`) — Full verbose output
+
+Events in `TERMINAL_ALLOWLIST` appear in terminal. Others go to files only.
+
+Suppressed loggers: `pymongo`, `insightface` (WARNING), `ultralytics` (ERROR), `cloudinary` (WARNING).
+
+See `TERMINAL_OUTPUT.md` for full event format reference.

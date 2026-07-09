@@ -114,7 +114,7 @@ def generate(
             logger.warning("llm_timeout", attempt=attempt + 1, model=model)
         except httpx.ConnectError:
             logger.warning("llm_connect_failed", attempt=attempt + 1,
-                           url=settings.OLLAMA_URL)
+                           model=model, url=settings.OLLAMA_URL)
             break  # No point retrying if Ollama isn't running
         except Exception as e:
             logger.error("llm_generate_error", error=str(e), model=model)

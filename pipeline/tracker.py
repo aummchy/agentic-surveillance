@@ -1,9 +1,20 @@
+import logging
+import io
+import contextlib
 import structlog
 import numpy as np
-from ultralytics import YOLO
 from config import settings
 
 logger = structlog.get_logger(__name__)
+
+# Import YOLO — ultralytics' set_logging() runs here and adds its own handler
+from ultralytics import YOLO
+
+# Silence ultralytics AFTER import (overrides set_logging's handler)
+_ul = logging.getLogger("ultralytics")
+_ul.setLevel(logging.CRITICAL)
+_ul.propagate = False
+_ul.handlers.clear()
 
 _model = None
 

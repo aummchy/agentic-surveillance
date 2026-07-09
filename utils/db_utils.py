@@ -76,10 +76,10 @@ def get_memory_collection() -> Collection:
     return _memory_collection
 
 
-def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> list:
+def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> dict:
     collection = get_faces_collection()
 
-    logger.info("vector_search_started", embedding_len=len(embedding), filter_role=filter_role)
+    logger.debug("vector_search_started", embedding_len=len(embedding), filter_role=filter_role)
 
     try:
         vector_stage = {
@@ -120,16 +120,27 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> l
                     "alert_level": r.get("alert_level", "low")
                 })
 
-        logger.info("atlas_search_result", match_count=len(matches),
+        top2 = None
+        margin = None
+        if len(matches) >= 2:
+            top2 = matches[1]["similarity_score"]
+            margin = matches[0]["similarity_score"] - top2
+
+        logger.debug("atlas_search_result", match_count=len(matches),
                      scores=[round(m["similarity_score"], 4) for m in matches])
-        return matches
+        return {"matches": matches, "top2": top2, "margin": margin}
 
     except Exception as e:
         logger.warning("atlas_vector_search_failed", error=str(e))
         results = _python_cosine_scan(embedding, filter_role, limit)
+        top2 = None
+        margin = None
+        if len(results) >= 2:
+            top2 = results[1]["similarity_score"]
+            margin = results[0]["similarity_score"] - top2
         logger.info("python_scan_fallback_result", match_count=len(results),
                      scores=[round(m["similarity_score"], 4) for m in results])
-        return results
+        return {"matches": results, "top2": top2, "margin": margin}
 
 
 def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5) -> list:
@@ -170,8 +181,8 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
         if not stored_emb or len(stored_emb) == 0:
             skipped_empty += 1
             continue
-        stored_emb = np.array(stored_emb, dtype=np.float32)
-        if stored_emb.ndim != 1 or len(stored_emb) != len(query_emb):
+        stored_emb = np.asarray(stored_emb, dtype=np.float32)
+        if stored_emb.ndim != 1 or stored_emb.size == 0 or stored_emb.size != len(query_emb):
             skipped_empty += 1
             continue
         stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
@@ -210,13 +221,13 @@ def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
     if not unknowns:
         return []
 
-    query_emb = np.array(embedding, dtype=np.float32)
+    query_emb = np.asarray(embedding, dtype=np.float32)
     query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-6)
 
     similar = []
     for u in unknowns:
-        stored_emb = np.array(u.get("latest_embedding", []), dtype=np.float32)
-        if len(stored_emb) == 0:
+        stored_emb = np.asarray(u.get("latest_embedding", []), dtype=np.float32)
+        if stored_emb.ndim != 1 or stored_emb.size == 0 or stored_emb.size != query_emb.size:
             continue
         stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
         similarity = float(np.dot(query_emb, stored_emb))
@@ -245,16 +256,16 @@ def find_similar_faces(embedding: list, threshold: float = None) -> list:
     if not all_faces:
         return []
 
-    query_emb = np.array(embedding, dtype=np.float32)
+    query_emb = np.asarray(embedding, dtype=np.float32)
     query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-6)
 
     similar = []
     for face in all_faces:
         stored_emb = face.get("latest_embedding", [])
-        if not stored_emb or len(stored_emb) == 0:
+        if not stored_emb:
             continue
-        stored_emb = np.array(stored_emb, dtype=np.float32)
-        if stored_emb.ndim != 1 or len(stored_emb) != len(query_emb):
+        stored_emb = np.asarray(stored_emb, dtype=np.float32)
+        if stored_emb.ndim != 1 or stored_emb.size == 0 or stored_emb.size != query_emb.size:
             continue
         stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
         similarity = float(np.dot(query_emb, stored_emb))
@@ -294,7 +305,8 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
     if not skip_search:
         # Try vector search first (fast, index-backed), fall back to scan
         try:
-            matches = vector_search(embedding, limit=3)
+            result = vector_search(embedding, limit=3)
+            matches = result["matches"]
         except Exception:
             matches = []
 

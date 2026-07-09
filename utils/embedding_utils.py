@@ -1,7 +1,14 @@
+import io
+import contextlib
 import threading
+import warnings
 import structlog
 import numpy as np
 import cv2
+
+# Suppress InsightFace FutureWarning about deprecated 'estimate' method
+warnings.filterwarnings("ignore", message=".*estimate.*deprecated.*", category=FutureWarning)
+
 from insightface.app import FaceAnalysis
 from config import settings
 from pipeline.models import EmbeddingResult
@@ -24,13 +31,16 @@ class InsightFaceSingleton:
         if not InsightFaceSingleton._initialized:
             with InsightFaceSingleton._lock:
                 if not InsightFaceSingleton._initialized:
-                    self.app = FaceAnalysis(
-                        name=settings.INSIGHTFACE_MODEL,
-                        providers=[settings.INSIGHTFACE_PROVIDER]
-                    )
-                    self.app.prepare(ctx_id=0, det_size=(settings.INSIGHTFACE_DET_SIZE,
-                                                          settings.INSIGHTFACE_DET_SIZE))
+                    # Suppress InsightFace print noise during model loading
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.app = FaceAnalysis(
+                            name=settings.INSIGHTFACE_MODEL,
+                            providers=[settings.INSIGHTFACE_PROVIDER]
+                        )
+                        self.app.prepare(ctx_id=0, det_size=(settings.INSIGHTFACE_DET_SIZE,
+                                                              settings.INSIGHTFACE_DET_SIZE))
                     InsightFaceSingleton._initialized = True
+                    logger.info("insightface_loaded", model=settings.INSIGHTFACE_MODEL)
 
     @staticmethod
     def _apply_clahe(image: np.ndarray) -> np.ndarray:

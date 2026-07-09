@@ -184,3 +184,71 @@ class TestThresholdConsistency:
         assert rec_threshold == policy_threshold, (
             f"Threshold mismatch: recognition={rec_threshold}, policy={policy_threshold}"
         )
+
+
+# ── MatchResult propagation tests ─────────────────────────────────
+
+class TestMatchResultPropagation:
+    """Verify that top2, margin, and candidate_count propagate from
+    vector_search() through matching_agent to MatchResult."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_vector_search(self):
+        from unittest.mock import patch
+        from agents import matching_agent
+        patcher = patch.object(matching_agent, "vector_search")
+        self.mock_vs = patcher.start()
+        yield
+        patcher.stop()
+
+    def test_two_matches_propagates_top2_and_margin(self):
+        self.mock_vs.return_value = {
+            "matches": [
+                {"person_id": "p1", "name": "Alice", "role": "visitor",
+                 "similarity_score": 0.66, "tags": [], "image_url": None,
+                 "verified": True, "alert_level": "low"},
+                {"person_id": "p2", "name": "Bob", "role": "visitor",
+                 "similarity_score": 0.51, "tags": [], "image_url": None,
+                 "verified": False, "alert_level": "low"},
+            ],
+            "top2": 0.51,
+            "margin": 0.15,
+        }
+        from agents.matching_agent import run_matching_from_embedding
+        result = run_matching_from_embedding([0.1] * 512)
+        assert result.matched is True
+        assert result.second_best_similarity == 0.51
+        assert result.margin == 0.15
+        assert result.candidate_count == 2
+
+    def test_single_match_leaves_top2_as_none(self):
+        self.mock_vs.return_value = {
+            "matches": [
+                {"person_id": "p1", "name": "Solo", "role": "visitor",
+                 "similarity_score": 0.70, "tags": [], "image_url": None,
+                 "verified": False, "alert_level": "low"},
+            ],
+            "top2": None,
+            "margin": None,
+        }
+        from agents.matching_agent import run_matching_from_embedding
+        result = run_matching_from_embedding([0.1] * 512)
+        assert result.matched is True
+        assert result.second_best_similarity is None
+        assert result.margin is None
+        assert result.candidate_count == 1
+
+    def test_no_matches_leaves_defaults(self):
+        self.mock_vs.return_value = {"matches": [], "top2": None, "margin": None}
+        from agents.matching_agent import run_matching_from_embedding
+        result = run_matching_from_embedding([0.1] * 512)
+        assert result.matched is False
+        assert result.second_best_similarity is None
+        assert result.margin is None
+        assert result.candidate_count == 0
+
+    def test_none_embedding_returns_unmatched(self):
+        from agents.matching_agent import run_matching_from_embedding
+        result = run_matching_from_embedding(None)
+        assert result.matched is False
+        assert result.candidate_count == 0

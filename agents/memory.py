@@ -230,7 +230,8 @@ class MemoryAgent(BaseAgent):
         }
 
     def record_visit(self, person_id: str, camera_id: str, status: str,
-                     similarity: float, is_masked: bool = False) -> dict:
+                     similarity: float, is_masked: bool = False,
+                     visit_action: str = "recorded") -> dict:
         """Record a visit in memory. Call after recognition is complete.
 
         Args:
@@ -239,6 +240,7 @@ class MemoryAgent(BaseAgent):
             status: Recognition status
             similarity: Similarity score
             is_masked: Whether person is masked
+            visit_action: Action taken (recorded/suppressed/skipped)
 
         Returns:
             Updated memory document.
@@ -248,7 +250,8 @@ class MemoryAgent(BaseAgent):
             logger.info("visit_recorded",
                        person_id=person_id,
                        visit_count=memory.get("visit_count", 0),
-                       camera=camera_id)
+                       camera=camera_id,
+                       visit_action=visit_action)
             return memory
         except Exception as e:
             logger.error("visit_recording_failed", person_id=person_id, error=str(e))

@@ -75,6 +75,9 @@ class MatchResult:
     matched: bool = False
     verified: bool = False
     alert_level: str = "low"
+    second_best_similarity: Optional[float] = None
+    margin: Optional[float] = None
+    candidate_count: int = 0
 
 
 @dataclass

@@ -95,6 +95,9 @@ class PolicyAgent(BaseAgent):
                     status=result.status,
                     alert_level=result.alert_level,
                     should_alert=result.should_alert,
+                    visit_count=memory.get("visit_count", 0),
+                    person_id=result.person_id,
+                    name=result.name,
                     reason=result.reason)
 
         return {

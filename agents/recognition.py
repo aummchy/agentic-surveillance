@@ -52,6 +52,9 @@ class RecognitionAgent(BaseAgent):
                 - face_quality (float): Quality score 0-1 (or None/0 for missing)
                 - track_duration (float): Seconds person was tracked
                 - memory_context (dict, optional): From Memory Agent
+                - top2 (float, optional): Second-best similarity
+                - margin (float, optional): Margin between top1 and top2
+                - name (str, optional): Person name for display
 
         Returns:
             Dict with status, confidence, reason, and other fields.
@@ -61,6 +64,9 @@ class RecognitionAgent(BaseAgent):
         face_quality = input_data.get("face_quality", 0.0)
         track_duration = input_data.get("track_duration", 0.0)
         memory_context = input_data.get("memory_context", {})
+        top2 = input_data.get("top2")
+        margin = input_data.get("margin")
+        name = input_data.get("name")
 
         result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context)
 
@@ -68,8 +74,14 @@ class RecognitionAgent(BaseAgent):
                     status=result.status,
                     confidence=result.confidence,
                     similarity=result.similarity,
+                    top2=top2,
+                    margin=margin,
+                    face_quality=face_quality,
+                    track_duration=track_duration,
                     masked=result.is_masked,
                     memory_boost=memory_context.get("confidence_boost", 0),
+                    visit_count=memory_context.get("visit_count", 0),
+                    name=name,
                     reason=result.reason)
 
         return result.to_dict()

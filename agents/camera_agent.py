@@ -103,7 +103,8 @@ class CameraAgent:
             logger.error("camera_open_failed")
             return
 
-        logger.info("camera_started", source=source, backend=getattr(settings, "CAMERA_BACKEND", "auto"), resolution=resolution)
+        logger.info("camera_started", source=source, backend=getattr(settings, "CAMERA_BACKEND", "auto"), resolution=resolution,
+                    yolo_model=settings.YOLO_MODEL, face_model=settings.INSIGHTFACE_MODEL)
 
         try:
             self._loop()
@@ -338,6 +339,9 @@ class CameraAgent:
                 "face_quality": quality.overall_score if hasattr(quality, 'overall_score') and quality.overall_score > 0 else None,
                 "track_duration": track_duration,
                 "memory_context": memory_context,
+                "top2": match_result.second_best_similarity if match_result else None,
+                "margin": match_result.margin if match_result else None,
+                "name": match_result.name if match_result and match_result.matched else None,
             })
 
             # Store recognition result in track for later use

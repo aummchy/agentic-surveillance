@@ -193,7 +193,8 @@ def process_finalized_track(track: Track):
                 camera_id=settings.CAMERA_ID,
                 status=decision.status,
                 similarity=match_result.similarity_score,
-                is_masked=track.is_masked
+                is_masked=track.is_masked,
+                visit_action=memory_context.get("action", "recorded") if memory_context else "recorded"
             )
 
         # Move face crop to person-name folder if matched
@@ -210,7 +211,7 @@ def process_finalized_track(track: Track):
                 shutil.move(src, dst)
                 setattr(track, 'best_face_crop_path', dst)
                 best_crop_path = dst
-                logger.info("face_crop_moved", src=src, dst=dst, person=person_name)
+                logger.debug("face_crop_moved", src=src, dst=dst, person=person_name)
             except Exception as e:
                 logger.error("face_crop_move_failed", src=src, dst=dst, error=str(e))
 
@@ -235,7 +236,7 @@ def process_finalized_track(track: Track):
             }
             if loop and loop.is_running():
                 asyncio.run_coroutine_threadsafe(broadcast_alert(alert_payload), loop)
-            logger.info("alert_broadcast_sent", track_id=track.track_id)
+            logger.debug("alert_broadcast_sent", track_id=track.track_id)
 
         _log_event(track, decision.status, decision.alert_level,
                     track.alerted, match_result.similarity_score if match_result.matched else 0.0,
@@ -260,7 +261,29 @@ def process_finalized_track(track: Track):
         if loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(broadcast_event(event_payload), loop)
 
-        logger.info("track_finalized", track_id=track.track_id, status=decision.status, alert_level=decision.alert_level)
+        display_name = match_result.name if match_result.matched else None
+        if not display_name and match_result.matched:
+            display_name = (match_result.person_id or "unknown")[:8]
+        logger.info("track_finalized",
+                    track_id=track.track_id,
+                    status=decision.status,
+                    alert_level=decision.alert_level,
+                    confidence=recognition_result.get("confidence", 0) if recognition_result else 0,
+                    person_id=match_result.person_id if match_result.matched else None,
+                    name=display_name,
+                    similarity=round(match_result.similarity_score, 4) if match_result.matched else None,
+                    top2=round(match_result.second_best_similarity, 4) if match_result.matched and match_result.second_best_similarity is not None else None,
+                    margin=round(match_result.margin, 4) if match_result.matched and match_result.margin is not None else None,
+                    candidate_count=match_result.candidate_count if match_result.matched else 0,
+                    visit_action=memory_context.get("action") if memory_context else None,
+                    total_frames_seen=track.total_frames_seen,
+                    frames_with_detectable_face=track.frames_with_detectable_face,
+                    face_detected_once=track.face_detected_once,
+                    is_masked=track.is_masked,
+                    visibility=track.visibility,
+                    best_face_score=track.best_face_score,
+                    visit_count=memory_context.get("visit_count", 0) if memory_context else 0,
+                    alerted=track.alerted)
 
     except Exception as e:
         logger.error("track_processing_failed", track_id=track.track_id, error=str(e), exc_info=True)
@@ -310,7 +333,7 @@ def main():
     if llm_available():
         logger.info("llm_connected", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL)
     else:
-        logger.warning("llm_unavailable", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL,
+        logger.info("llm_unavailable", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL,
                        note="Alerts and reports will use template strings. Start Ollama to enable LLM features.")
 
     try:

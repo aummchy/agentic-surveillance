@@ -92,7 +92,9 @@ Keep `MATCH_THRESHOLD` ≤ 0.45 (default 0.25). Higher values reject genuine sam
 - **Mask detection** uses a geometric heuristic: `lower_face_height / upper_face_height < 0.3` (5-point landmarks). Not a classifier — works best on front-facing faces.
 - **`FutureWarning` from insightface** (`estimate` deprecated in 0.26) is harmless.
 - **OpenVINO GPU acceleration:** After YOLO export (`yolo export model=yolov8s.pt format=openvino half=True`), set `YOLO_MODEL=models/yolov8s_openvino_model/` and `YOLO_DEVICE=intel:GPU` in `.env`. The `intel:` prefix is required — bare `GPU` fails in Ultralytics. Expect ~8× speedup on Arc iGPU (128ms → 16ms). InsightFace stays on CPU (OpenVINO EP has DLL issues on Windows).
-- Logs split: console shows `INFO+`, full debug (face quality scores, detection scores, recognition details) goes to `logs/surveillance.log` (5 MB × 5 rotating backups).
+- Logs split: console shows `INFO+` with ANSI colors, full debug (face quality scores, detection scores, recognition details) goes to `logs/surveillance.jsonl` (5 MB × 5 rotating backups) and `logs/surveillance.debug.log` (10 MB × 3).
+- **InsightFace/YOLO print noise suppressed:** stdout captured via `contextlib.redirect_stdout`, ultralytics logger set to CRITICAL after import.
+- **Blank lines suppressed:** `_BlankFilter` drops events not in `TERMINAL_ALLOWLIST`.
 - **Mobile camera:** Install IP Webcam app on your phone, start server, and set `CAMERA_SOURCE=http://<phone-ip>:8080/video` in `.env`.
 - **LLM (Ollama) must be running** for chat and NL summaries. System falls back to template strings if unavailable. Swap model via `OLLAMA_MODEL` env var.
 - **LLM runs off critical path.** `dispatch()` calls LLM only after alert decision is made. Report generation runs on demand. Camera loop never blocks on LLM.
