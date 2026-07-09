@@ -127,3 +127,13 @@ Events in `TERMINAL_ALLOWLIST` appear in terminal. Others go to files only.
 Suppressed loggers: `pymongo`, `insightface` (WARNING), `ultralytics` (ERROR), `cloudinary` (WARNING).
 
 See `TERMINAL_OUTPUT.md` for full event format reference.
+
+## Recent fixes
+
+- **2026-07-09**: Fixed auto-registered unknowns being promoted to `known_visitor` — Policy Rule 5 mid-range match now returns `unknown` instead of `known_visitor`; memory `is_known` gate no longer includes `known_visitor` status. Fixes permanent feedback loop where repeated sightings cemented incorrect classification.
+- **2026-07-09**: Fixed `OFFICE_DAYS` env var type mismatch — `_get()` now casts list elements to the default's element type, so `OFFICE_DAYS=0,1,2,3,4` produces `[0,1,2,3,4]` (ints) not strings.
+- **2026-07-09**: Fixed PyMongo `return_document=True` → `ReturnDocument.AFTER` in `get_or_create_memory()` and `update_visit_memory()`.
+- **2026-07-09**: Added WebSocket origin validation to `/ws/live` endpoint to prevent cross-origin hijacking.
+- **2026-07-09**: Added lock-protected setters for `cached_embedding` and `pending_recognition` in `TrackState`.
+- **2026-07-09**: Fixed LLM client shutdown — replaced deprecated `asyncio.get_event_loop()` with `get_running_loop()` + `asyncio.run()` fallback.
+- **2026-07-09**: Tightened CORS to explicit methods/headers.
