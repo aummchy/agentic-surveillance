@@ -122,8 +122,23 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
     }
   }
 
-  const isUnverified = (status) => {
-    return ['unknown', 'masked_unknown', 'blacklist', 'intentionally_hidden'].includes(status)
+  const getEventItemClass = (status) => {
+    switch (status) {
+      case 'blacklist':
+        return 'event-item-alert event-item-critical'
+      case 'unknown':
+      case 'masked_unknown':
+      case 'intentionally_hidden':
+        return 'event-item-alert'
+      case 'uncertain':
+        return 'event-item-uncertain'
+      case 'verified':
+      case 'authorized':
+      case 'known_visitor':
+        return 'event-item-verified'
+      default:
+        return ''
+    }
   }
 
   return (
@@ -175,7 +190,7 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
       ) : (
         <div className="events-list">
           {events.map((event) => (
-            <div key={event._id} className={`event-item ${isUnverified(event.status) ? 'event-item-alert' : ''}`}>
+            <div key={event._id} className={`event-item ${getEventItemClass(event.status)}`}>
               {getImageUrl(event.image_url || event.person_image) ? (
                 <img
                   src={getImageUrl(event.image_url || event.person_image)}

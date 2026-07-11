@@ -15,6 +15,7 @@ class Track:
     best_face_score: float = 0.0
     best_full_frame: Optional[np.ndarray] = None
     best_frame_jpeg: Optional[bytes] = None  # Compressed JPEG (~50KB vs ~921KB raw)
+    fallback_frame_jpeg: Optional[bytes] = None  # First-frame fallback (always captured, quality-independent)
     is_masked: bool = False
     embedding: Optional[list] = None
     embedding_det_score: float = 0.0  # Detection score for quality-gated updates

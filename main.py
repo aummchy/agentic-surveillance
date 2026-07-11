@@ -17,7 +17,7 @@ from agents.alert_agent import dispatch
 from agents.memory import MemoryAgent
 from agents.scoring import log_formula_header
 from utils.db_utils import store_face, log_event, check_atlas_search_index, backfill_missing_embeddings, close_client
-from utils.image_utils import save_image, upload_to_cloudinary, upload_jpeg_to_cloudinary
+from utils.image_utils import save_image, upload_to_cloudinary, upload_jpeg_to_cloudinary, resolve_track_image_url
 from pipeline.models import Track
 from dashboard.backend.routes.live import broadcast_frame, broadcast_alert, broadcast_event
 from agents.alert_agent import shutdown as alert_shutdown
@@ -109,21 +109,7 @@ def worker_process_tracks():
 
 def process_finalized_track(track: Track):
     try:
-        image_url = track.image_url  # Reuse if already uploaded during progressive recognition
-        if not image_url and track.best_full_frame is not None:
-            # Use pre-encoded JPEG bytes if available (avoids re-encoding from numpy)
-            if track.best_frame_jpeg:
-                image_url = upload_jpeg_to_cloudinary(track.best_frame_jpeg)
-                if not image_url:
-                    # Fallback: save the JPEG bytes directly
-                    save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
-                    image_url = f"captures/{track.track_id}.jpg"
-            else:
-                save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
-                image_url = upload_to_cloudinary(track.best_full_frame)
-                if not image_url:
-                    image_url = f"captures/{track.track_id}.jpg"
-            logger.info("track_image_saved", track_id=track.track_id, url=image_url)
+        image_url = resolve_track_image_url(track)
         # Release raw frame to free memory (JPEG bytes retained)
         track.best_full_frame = None
 
@@ -238,24 +224,6 @@ def process_finalized_track(track: Track):
                 is_masked=track.is_masked,
                 visit_action=memory_context.get("action", "recorded") if memory_context else "recorded"
             )
-
-        # Move face crop to person-name folder if matched
-        best_crop_path = getattr(track, 'best_face_crop_path', None)
-        person_name = match_result.name if match_result.matched else None
-        if best_crop_path and person_name and os.path.exists(best_crop_path):
-            import shutil
-            src = best_crop_path
-            filename = os.path.basename(src)
-            dst_dir = f"captures/face_crops/{person_name}"
-            dst = os.path.join(dst_dir, filename)
-            try:
-                os.makedirs(dst_dir, exist_ok=True)
-                shutil.move(src, dst)
-                setattr(track, 'best_face_crop_path', dst)
-                best_crop_path = dst
-                logger.debug("face_crop_moved", src=src, dst=dst, person=person_name)
-            except Exception as e:
-                logger.error("face_crop_move_failed", src=src, dst=dst, error=str(e))
 
         # Dispatch external alerts (email/sms/console) — respects global dedup
         alert_dispatched = False

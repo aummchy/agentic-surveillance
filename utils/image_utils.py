@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
 import structlog
+import uuid
+import os
+from datetime import datetime
 from pathlib import Path
 from config import settings
 
@@ -93,6 +96,81 @@ def save_image(image: np.ndarray, path: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def save_image_atomic(data, final_path: str, is_jpeg_bytes: bool = False) -> bool:
+    """Write to captures/_tmp/ then os.replace() (atomic on both POSIX and Windows).
+
+    Args:
+        data: numpy array (image) or bytes (pre-encoded JPEG)
+        final_path: destination path (parent dir created automatically)
+        is_jpeg_bytes: True if data is raw JPEG bytes, False if numpy array
+    """
+    try:
+        final_full = Path(final_path)
+        final_full.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_dir = Path("captures/_tmp")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"{uuid.uuid4()}.jpg"
+
+        if is_jpeg_bytes:
+            with open(tmp_path, "wb") as f:
+                f.write(data)
+        else:
+            cv2.imwrite(str(tmp_path), data)
+
+        os.replace(str(tmp_path), str(final_full))
+        return True
+    except Exception:
+        return False
+
+
+def get_unknown_image_path() -> str:
+    month = datetime.now().strftime("%Y-%m")
+    return f"captures/unknown/{month}/{uuid.uuid4()}.jpg"
+
+
+def get_person_image_path(person_id: str) -> str:
+    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    suffix = uuid.uuid4().hex[:6]
+    return f"captures/people/{person_id}/{ts}_{suffix}.jpg"
+
+
+def resolve_track_image_url(track) -> str | None:
+    """Single source of truth for 'what photo represents this track'.
+
+    Priority: existing image_url > best_frame_jpeg/fallback_frame_jpeg > best_full_frame > None.
+    Cloudinary is source of truth; local file is fallback on upload failure.
+    """
+    if track.image_url:
+        return track.image_url
+
+    jpeg_data = track.best_frame_jpeg or track.fallback_frame_jpeg
+    if jpeg_data:
+        url = upload_jpeg_to_cloudinary(jpeg_data)
+        if url:
+            track.image_url = url
+            return url
+        # Cloudinary failed — persist locally as last resort
+        path = f"captures/{track.track_id}.jpg"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(jpeg_data)
+        track.image_url = path
+        return path
+
+    if track.best_full_frame is not None:
+        url = upload_to_cloudinary(track.best_full_frame)
+        if url:
+            track.image_url = url
+            return url
+        # Cloudinary failed — save locally
+        save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
+        track.image_url = f"captures/{track.track_id}.jpg"
+        return track.image_url
+
+    return None
 
 
 def _put_label_with_bg(img, text, pos, font_scale, color, thickness=1, bg_color=(0, 0, 0)):

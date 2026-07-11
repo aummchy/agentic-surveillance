@@ -76,6 +76,9 @@
   "JPEG_QUALITY_STORE": 85,
   "JPEG_QUALITY_BROADCAST": 80,
 
+  // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
+  "DEBUG_FACE_CROPS": false,
+
   // ── Vector Search ────────────────────────────────────────────
   // CANDIDATES: HNSW candidate pool size (higher = better recall, slower).
   // LIMIT: Number of top results returned.

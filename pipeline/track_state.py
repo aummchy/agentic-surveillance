@@ -140,6 +140,26 @@ class TrackState:
                 track.best_face_ratio = face_ratio
                 track.best_frame_jpeg = jpeg_bytes
 
+    def ensure_fallback_frame(self, composite_id: str, frame: np.ndarray):
+        """Guarantee every track gets at least one photo, independent of face quality.
+
+        Called unconditionally on the first recognition pass. Uses double-checked
+        locking: cheap read under lock → expensive JPEG encode outside lock →
+        re-check and write under lock.
+        """
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if not track or track.fallback_frame_jpeg is not None:
+                return
+
+        _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
+        jpeg_bytes = jpeg_buf.tobytes()
+
+        with self._lock:
+            track = self._tracks.get(composite_id)
+            if track and track.fallback_frame_jpeg is None:
+                track.fallback_frame_jpeg = jpeg_bytes
+
     def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0):
         with self._lock:
             track = self._tracks.get(composite_id)

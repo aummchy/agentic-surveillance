@@ -10,7 +10,7 @@ from pipeline.track_state import TrackState
 from pipeline.quality_agent import compute_quality
 from pipeline.face import compute_face_ratio
 from pipeline.models import Track
-from utils.image_utils import crop_person, resize_image, draw_annotations, save_image, upload_to_cloudinary
+from utils.image_utils import crop_person, resize_image, draw_annotations, save_image, upload_to_cloudinary, resolve_track_image_url
 from utils.embedding_utils import get_insightface
 from agents.recognition import RecognitionAgent
 from agents.policy import RESOLVED_STATUSES
@@ -237,6 +237,9 @@ class CameraAgent:
                 logger.debug("empty_person_crop", track_id=track.track_id)
                 return
 
+            # Guarantee every track gets at least one photo, independent of face quality
+            self.track_state.ensure_fallback_frame(track.track_id, frame)
+
             app = get_insightface()
 
             # Two-stage detection: person crop first (more focused), then full frame
@@ -308,11 +311,12 @@ class CameraAgent:
                     frame,
                     face_ratio
                 )
-                crop_path = f"captures/face_crops/{track.track_id}/{self._frame_count}.jpg"
-                save_image(face_crop, crop_path)
-                self.track_state.set_face_crop_path(track.track_id, crop_path)
-                logger.info("face_crop_saved", track_id=track.track_id, path=crop_path,
-                            url=f"http://localhost:8000/{crop_path.replace(chr(92), '/')}")
+                if getattr(settings, 'DEBUG_FACE_CROPS', False):
+                    crop_path = f"captures/debug/face_crops/{track.track_id}/{self._frame_count}.jpg"
+                    save_image(face_crop, crop_path)
+                    self.track_state.set_face_crop_path(track.track_id, crop_path)
+                    logger.info("face_crop_saved", track_id=track.track_id, path=crop_path,
+                                url=f"http://localhost:8000/{crop_path.replace(chr(92), '/')}")
 
             embedding_list = best["embedding"].tolist()
             self.track_state.set_embedding(
@@ -391,13 +395,7 @@ class CameraAgent:
                     already_finalized = track.track_id in self._finalized_track_ids
                 if not already_finalized:
                     from agents.alert_agent import dispatch
-                    image_url = track.image_url
-                    if not image_url and track.best_full_frame is not None:
-                        save_image(track.best_full_frame, f"captures/{track.track_id}.jpg")
-                        image_url = upload_to_cloudinary(track.best_full_frame)
-                        if not image_url:
-                            image_url = f"captures/{track.track_id}.jpg"
-                        track.image_url = image_url
+                    image_url = resolve_track_image_url(track)
                     dispatch(track, decision, image_url)
                     self.track_state.set_decision(track.track_id, decision.status, True)
                     track.confidence = new_confidence
