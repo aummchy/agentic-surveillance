@@ -17,6 +17,7 @@ function App() {
   const [activeAlert, setActiveAlert] = useState(null)
   const [liveFrame, setLiveFrame] = useState(null)
   const [wsConnected, setWsConnected] = useState(false)
+  const [activeView, setActiveView] = useState('dashboard')
   const wsRef = useRef(null)
   const statsIntervalRef = useRef(null)
   const reconnectRef = useRef(null)
@@ -154,6 +155,21 @@ function App() {
         </div>
       </div>
 
+      <div className="nav-tabs">
+        <button
+          className={`nav-tab ${activeView === 'dashboard' ? 'active' : ''}`}
+          onClick={() => setActiveView('dashboard')}
+        >
+          Dashboard
+        </button>
+        <button
+          className={`nav-tab ${activeView === 'manage' ? 'active' : ''}`}
+          onClick={() => setActiveView('manage')}
+        >
+          Manage
+        </button>
+      </div>
+
       {activeAlert && (
         <div className="notification-popup" key={activeAlert.timestamp}>
           <div className="notification-header">
@@ -185,40 +201,52 @@ function App() {
       )}
 
       <main className="main-content">
-        <section className="panel live-feed">
-          <ErrorBoundary label="Live Feed">
-            <LiveFeed frame={liveFrame} connected={wsConnected} activeAlert={activeAlert} />
-          </ErrorBoundary>
-        </section>
+        {activeView === 'dashboard' && (
+          <>
+            <section className="panel live-feed">
+              <ErrorBoundary label="Live Feed">
+                <LiveFeed frame={liveFrame} connected={wsConnected} activeAlert={activeAlert} />
+              </ErrorBoundary>
+            </section>
 
-        <div className="three-col-row">
-          <section className="panel">
-            <ErrorBoundary label="Unknown Persons">
-              <UnknownPersons
-                onVerify={handleVerify}
-                refreshKey={refreshKey}
-              />
-            </ErrorBoundary>
-          </section>
+            <section className="panel activity-log">
+              <ErrorBoundary label="Activity Log">
+                <EventLog refreshKey={refreshKey} onRegisterPrepend={registerLiveEventPrepend} />
+              </ErrorBoundary>
+            </section>
 
-          <section className="panel">
-            <ErrorBoundary label="Verified Persons">
-              <VerifiedPersons refreshKey={refreshKey} />
-            </ErrorBoundary>
-          </section>
+            <section className="panel chat-section">
+              <ErrorBoundary label="Chat Panel">
+                <ChatPanel />
+              </ErrorBoundary>
+            </section>
+          </>
+        )}
 
-          <section className="panel">
-            <ErrorBoundary label="Event Log">
-              <EventLog refreshKey={refreshKey} onRegisterPrepend={registerLiveEventPrepend} />
-            </ErrorBoundary>
-          </section>
-        </div>
+        {activeView === 'manage' && (
+          <div className="three-col-row">
+            <section className="panel">
+              <ErrorBoundary label="Unknown Persons">
+                <UnknownPersons
+                  onVerify={handleVerify}
+                  refreshKey={refreshKey}
+                />
+              </ErrorBoundary>
+            </section>
 
-        <section className="panel chat-section">
-          <ErrorBoundary label="Chat Panel">
-            <ChatPanel />
-          </ErrorBoundary>
-        </section>
+            <section className="panel">
+              <ErrorBoundary label="Verified Persons">
+                <VerifiedPersons refreshKey={refreshKey} />
+              </ErrorBoundary>
+            </section>
+
+            <section className="panel">
+              <ErrorBoundary label="Event Log">
+                <EventLog refreshKey={refreshKey} onRegisterPrepend={registerLiveEventPrepend} />
+              </ErrorBoundary>
+            </section>
+          </div>
+        )}
       </main>
 
       {notifications.length > 0 && (

@@ -133,7 +133,7 @@
   // ── Calculation Log ─────────────────────────────────────────
   // ENABLE_CALC_LOG: Write confidence formula breakdown to logs/calculation.log
   // CALC_LOG_MAX_SIZE_MB: Truncate file when it exceeds this size (MB)
-  "ENABLE_CALC_LOG": false,
+  "ENABLE_CALC_LOG": true,
   "CALC_LOG_MAX_SIZE_MB": 10,
 
   // ── LLM (Ollama) ────────────────────────────────────────────
