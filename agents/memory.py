@@ -85,7 +85,7 @@ class MemoryAgent(BaseAgent):
             logger.error("memory_lookup_failed", person_id=person_id, error=str(e))
             return self._empty_result(f"Memory lookup failed: {e}")
 
-        now = datetime.utcnow()
+        now = datetime.now()
         visit_count = memory.get("visit_count", 0)
         last_seen = memory.get("last_seen")
         first_seen = memory.get("first_seen")
@@ -95,12 +95,10 @@ class MemoryAgent(BaseAgent):
         last_status = memory.get("last_status")
 
         # Calculate days since last visit
-        days_since_last = 0
+        days_since_last = None
         if last_seen:
             if isinstance(last_seen, datetime):
                 days_since_last = (now - last_seen).days
-            else:
-                days_since_last = 0
 
         # Check if this is a typical visit time
         current_hour = now.hour
@@ -160,9 +158,9 @@ class MemoryAgent(BaseAgent):
             boost += min(10, visit_count * 2)  # +2 per visit, max +10
 
         # Boost for recent visits (within 7 days)
-        if days_since_last <= 7:
+        if days_since_last is not None and days_since_last <= 7:
             boost += 5
-        elif days_since_last <= 30:
+        elif days_since_last is not None and days_since_last <= 30:
             boost += 2
 
         # Boost for consistent similarity
@@ -196,7 +194,9 @@ class MemoryAgent(BaseAgent):
         else:
             parts.append(f"Previously seen {visit_count} times")
 
-        if days_since_last == 0:
+        if days_since_last is None:
+            parts.append("recency unknown")
+        elif days_since_last == 0:
             parts.append("visited today")
         elif days_since_last == 1:
             parts.append("visited yesterday")

@@ -1,4 +1,5 @@
 import logging
+import threading
 import structlog
 import numpy as np
 from config import settings
@@ -15,13 +16,16 @@ _ul.propagate = False
 _ul.handlers.clear()
 
 _model = None
+_model_lock = threading.Lock()
 
 
 def get_model() -> YOLO:
     global _model
     if _model is None:
-        _model = YOLO(settings.YOLO_MODEL)
-        logger.info("yolo_model_loaded", model=settings.YOLO_MODEL)
+        with _model_lock:
+            if _model is None:
+                _model = YOLO(settings.YOLO_MODEL)
+                logger.info("yolo_model_loaded", model=settings.YOLO_MODEL)
     return _model
 
 

@@ -121,6 +121,8 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
         elif track.decision == "known_visitor":
             color = (0, 255, 255)
             border_thickness = 2
+        elif track.decision is None:
+            color = (255, 255, 0)
         if track.is_masked or track.decision in ("masked_unknown", "intentionally_hidden", "blacklist"):
             color = (0, 0, 255)
 
@@ -150,7 +152,7 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
             else:
                 label += f" [{track.decision}]"
         else:
-            label += " [UNVERIFIED]"
+            label += " [SCANNING]"
         if track.is_masked:
             label += " MASK"
 

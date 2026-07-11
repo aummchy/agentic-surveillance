@@ -42,10 +42,11 @@ def should_send_alert(track_id: str, alert_level: str, status: str = None) -> bo
     now = time.time()
     with _alert_lock:
         _prune_stale_alerts()
-        # Per-alert-level dedup for unverified/unknown alerts — a routine
-        # unknown must not suppress a critical (blacklist/after-hours) alert.
+        # Per-track, per-level dedup. Include track_id for unverified
+        # statuses too, so two different unknown people don't suppress
+        # each other's alerts within the cooldown window.
         if status in _UNVERIFIED_STATUSES:
-            key = f"unverified:{alert_level}"
+            key = f"{track_id}:unverified:{alert_level}"
         else:
             key = f"{track_id}:{alert_level}"
         last = _alert_timestamps.get(key, 0)

@@ -57,8 +57,11 @@ class TrackState:
             to_remove = []
             for cid, track in self._tracks.items():
                 if track.is_expired(settings.TRACK_TIMEOUT_SECS) or track.is_max_lifetime_exceeded():
+                    if track.expired_reported:
+                        continue
                     self._classify_visibility_inplace(track)
                     expired.append(track)
+                    track.expired_reported = True
                     # Defer actual removal while a recognition thread is still
                     # writing to the track (set_best_face, set_embedding, etc.).
                     if self._in_flight.get(cid, 0) == 0:
@@ -195,3 +198,4 @@ class TrackState:
             if track:
                 track.last_recognition_quality = quality
                 track.last_recognition_status = status
+                track.last_recognition_time = time.time()

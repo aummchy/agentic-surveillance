@@ -6,12 +6,14 @@ All tunables come from config.settings — no hardcoded values here.
 
 import os
 import datetime
+import threading
 from config import settings
 
 _CALC_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "logs", "calculation.log"
 )
 _calc_log_initialized = False
+_calc_log_lock = threading.Lock()
 
 
 def _ensure_log_dir():
@@ -28,6 +30,8 @@ def log_formula_header():
     """Write the formula header to calculation.log once at startup."""
     global _calc_log_initialized
     if _calc_log_initialized:
+        return
+    if not getattr(settings, "ENABLE_CALC_LOG", False):
         return
     _ensure_log_dir()
     _calc_log_initialized = True
@@ -73,6 +77,8 @@ def _log_calculation(track_id: str, raw_cosine: float, face_quality,
                      base: float, adjusted: float, confidence: int,
                      matched: bool, status: str):
     """Write a full calculation breakdown to calculation.log."""
+    if not getattr(settings, "ENABLE_CALC_LOG", False):
+        return
     _ensure_log_dir()
     ts = _ts()
     w_sim = settings.WEIGHT_SIMILARITY * sim_norm
@@ -118,8 +124,17 @@ def _log_calculation(track_id: str, raw_cosine: float, face_quality,
         "",
     ]
 
-    with open(_CALC_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    with _calc_log_lock:
+        # Basic rotation: truncate if file exceeds max size
+        max_bytes = getattr(settings, "CALC_LOG_MAX_SIZE_MB", 10) * 1024 * 1024
+        try:
+            if os.path.exists(_CALC_LOG_PATH) and os.path.getsize(_CALC_LOG_PATH) > max_bytes:
+                with open(_CALC_LOG_PATH, "w", encoding="utf-8") as f:
+                    f.write("")
+        except OSError:
+            pass
+        with open(_CALC_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines))
 
 
 def clip(x: float, lo: float, hi: float) -> float:

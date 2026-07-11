@@ -36,8 +36,15 @@
   "EMBEDDING_DET_SCORE_MIN": 0.40,
 
   // ── Progressive Recognition ──────────────────────────────────
-  // Run face recognition every N frames (10 at 5fps = once per 2 seconds).
-  "RECOGNITION_INTERVAL_FRAMES": 10,
+  // Run face recognition every N frames (20 at 30fps = once per 0.67 seconds).
+  "RECOGNITION_INTERVAL_FRAMES": 20,
+  "INSIGHTFACE_DET_SIZE": 1280,
+
+  // ── Re-scan for Unknown Tracks ──────────────────────────────
+  // For tracks with similarity > 0 but status unknown:
+  // re-scan every RESCAN_INTERVAL_SECS, up to MAX_RESCAN_ATTEMPTS times.
+  "RESCAN_INTERVAL_SECS": 3,
+  "MAX_RESCAN_ATTEMPTS": 3,
 
   // ── Quality — Validity gates ──────────────────────────────────
   // BLUR_MIN: Reject faces too blurry to be usable (< 40).
@@ -65,8 +72,9 @@
   // ── JPEG Compression ────────────────────────────────────────
   // STORE: Quality for stored face captures (higher = better facial detail).
   // BROADCAST: Quality for live WebSocket stream (lower = less bandwidth).
+  // At 640x480, 80 is recommended — 65 makes compression blocks visibly noisy.
   "JPEG_QUALITY_STORE": 85,
-  "JPEG_QUALITY_BROADCAST": 65,
+  "JPEG_QUALITY_BROADCAST": 80,
 
   // ── Vector Search ────────────────────────────────────────────
   // CANDIDATES: HNSW candidate pool size (higher = better recall, slower).
@@ -110,6 +118,7 @@
 
   // ── Office Hours (Policy Agent) ──────────────────────────────
   // Persons detected outside these hours on weekdays trigger alerts.
+  // Hours are in LOCAL TIME (server timezone).
   "OFFICE_HOURS_START": 9,
   "OFFICE_HOURS_END": 17,
   "OFFICE_DAYS": [0, 1, 2, 3, 4],
@@ -120,6 +129,12 @@
 
   // ── Loitering ────────────────────────────────────────────────
   "LOITER_SECS": 30,
+
+  // ── Calculation Log ─────────────────────────────────────────
+  // ENABLE_CALC_LOG: Write confidence formula breakdown to logs/calculation.log
+  // CALC_LOG_MAX_SIZE_MB: Truncate file when it exceeds this size (MB)
+  "ENABLE_CALC_LOG": false,
+  "CALC_LOG_MAX_SIZE_MB": 10,
 
   // ── LLM (Ollama) ────────────────────────────────────────────
   "OLLAMA_URL": "http://localhost:11434",

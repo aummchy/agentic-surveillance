@@ -34,6 +34,47 @@ _encode_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_n
 _shutdown_event = threading.Event()
 
 
+def _check_llm_background():
+    """Check LLM availability in background (non-blocking)."""
+    if llm_available():
+        logger.info("llm_connected", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL)
+    else:
+        logger.info("llm_unavailable", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL,
+                       note="Alerts and reports will use template strings. Start Ollama to enable LLM features.")
+
+
+def _run_startup_checks():
+    """Run MongoDB checks in background (non-blocking for camera startup)."""
+    try:
+        check_atlas_search_index()
+    except Exception as e:
+        logger.warning("atlas_check_failed", error=str(e))
+    try:
+        backfill_missing_embeddings()
+    except Exception as e:
+        logger.warning("backfill_failed", error=str(e))
+
+
+def _prewarm_yolo():
+    """Pre-load YOLO model in background to avoid 1-3s cold load on first frame."""
+    try:
+        from pipeline.tracker import get_model
+        get_model()
+        logger.info("yolo_prewarm_complete")
+    except Exception as e:
+        logger.warning("yolo_prewarm_failed", error=str(e))
+
+
+def _prewarm_insightface():
+    """Pre-load InsightFace model in background to avoid 2-5s cold load on first recognition."""
+    try:
+        from utils.embedding_utils import get_insightface
+        get_insightface()
+        logger.info("insightface_prewarm_complete")
+    except Exception as e:
+        logger.warning("insightface_prewarm_failed", error=str(e))
+
+
 def handle_track_finalized(track: Track):
     if track_queue:
         track_queue.put(track)
@@ -319,6 +360,7 @@ def _log_event(track: Track, status: str, alert_level: str,
 def main():
     global track_queue, loop
 
+    # ── 1. Load + validate settings (~100ms) ─────────────────────
     try:
         settings.validate_config()
     except ValueError as e:
@@ -332,19 +374,10 @@ def main():
                 camera_source=getattr(settings, "CAMERA_SOURCE", "") or settings.CAMERA_INDEX,
                 alert_channels=settings.ALERT_CHANNELS)
 
-    # Check LLM availability
-    if llm_available():
-        logger.info("llm_connected", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL)
-    else:
-        logger.info("llm_unavailable", model=settings.OLLAMA_MODEL, url=settings.OLLAMA_URL,
-                       note="Alerts and reports will use template strings. Start Ollama to enable LLM features.")
+    # ── 2. LLM check in background (non-blocking) ────────────────
+    threading.Thread(target=_check_llm_background, daemon=True).start()
 
-    try:
-        check_atlas_search_index()
-        backfill_missing_embeddings()
-    except Exception as e:
-        logger.warning("startup_check_failed", error=str(e))
-
+    # ── 3. Start worker threads (~1ms) ───────────────────────────
     track_queue = queue.Queue()
     worker_threads = []
     for i in range(2):
@@ -352,6 +385,7 @@ def main():
         t.start()
         worker_threads.append(t)
 
+    # ── 4. Start FastAPI server early (non-blocking) ─────────────
     import uvicorn
     from dashboard.backend.main import app
 
@@ -367,15 +401,24 @@ def main():
     server_thread.start()
     logger.info("dashboard_api_started", url="http://localhost:8000")
 
+    # ── 5. MongoDB checks in background (non-blocking) ───────────
+    threading.Thread(target=_run_startup_checks, daemon=True).start()
+
+    # ── 6. Pre-warm models in background (before camera.start()) ─
+    threading.Thread(target=_prewarm_yolo, daemon=True).start()
+    threading.Thread(target=_prewarm_insightface, daemon=True).start()
+
+    # ── 7. Construct CameraAgent ─────────────────────────────────
     camera = CameraAgent(
         on_track_finalized=handle_track_finalized,
         on_frame_annotated=handle_frame_annotated
     )
 
+    # ── 8. Start camera (BLOCKS here until Ctrl+C) ──────────────
     logger.info("press_q_to_stop")
     camera.start()
 
-    # Graceful shutdown
+    # ── 9. Graceful shutdown (only reached after camera stops) ───
     _shutdown_event.set()
     server.should_exit = True
     try:

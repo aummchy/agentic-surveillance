@@ -89,11 +89,11 @@ function App() {
         console.warn(`WebSocket closed (code=${e.code}, reason=${e.reason || 'none'})`)
         setWsConnected(false)
         if (ws._pingInterval) clearInterval(ws._pingInterval)
-        reconnectRef.current = setTimeout(connectWebSocket, 3000)
+        reconnectRef.current = setTimeout(connectWebSocket, 500)
       }
     } catch (e) {
       console.error('WebSocket init failed:', e)
-      reconnectRef.current = setTimeout(connectWebSocket, 3000)
+      reconnectRef.current = setTimeout(connectWebSocket, 500)
     }
   }, [fetchStats])
 

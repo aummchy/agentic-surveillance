@@ -34,6 +34,9 @@ from config import settings
 
 logger = structlog.get_logger(__name__)
 
+# Statuses that indicate a track is fully resolved — skip further recognition.
+RESOLVED_STATUSES = {"verified", "known_visitor", "authorized"}
+
 
 class PolicyAgent(BaseAgent):
     """Centralizes all business rules for surveillance decisions.
@@ -75,7 +78,7 @@ class PolicyAgent(BaseAgent):
         camera_id = input_data.get("camera_id", settings.CAMERA_ID)
 
         # Get current time context
-        now = datetime.utcnow()
+        now = datetime.now()
         current_hour = now.hour
         is_office_hours = settings.OFFICE_HOURS_START <= current_hour <= settings.OFFICE_HOURS_END
         is_weekday = now.weekday() in settings.OFFICE_DAYS

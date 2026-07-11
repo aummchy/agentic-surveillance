@@ -26,6 +26,11 @@ class Track:
     last_recognition_frame: int = 0
     last_recognition_quality: float = 0.0     # face quality at last recognition
     last_recognition_status: str = ""         # "known" / "unknown" / "uncertain"
+    last_recognition_time: float = 0.0        # timestamp of last recognition (for time-based rescan)
+    rescan_attempts: int = 0                  # how many re-scan attempts used
+    expired_reported: bool = False
+    # True once this expired track has been reported by get_expired_tracks().
+    # Prevents duplicate finalization while recognition is still in flight.
     pending_recognition: Optional[dict] = None  # Phase 2.1: Recognition Agent output
     pending_match_result: Optional[MatchResult] = None  # Full match result from progressive recognition
     pending_memory_context: Optional[dict] = None  # Cached memory context from progressive recognition

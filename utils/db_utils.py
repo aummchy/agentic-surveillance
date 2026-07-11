@@ -621,7 +621,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
     database level — visit counts, histories, and camera lists are never lost.
     """
     collection = get_memory_collection()
-    now = datetime.utcnow()
+    now = datetime.now()
     hour = now.hour
     status_entry = {"status": status, "timestamp": now}
 

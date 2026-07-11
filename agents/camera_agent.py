@@ -13,6 +13,7 @@ from pipeline.models import Track
 from utils.image_utils import crop_person, resize_image, draw_annotations, save_image, upload_to_cloudinary
 from utils.embedding_utils import get_insightface
 from agents.recognition import RecognitionAgent
+from agents.policy import RESOLVED_STATUSES
 from agents.memory import MemoryAgent
 
 logger = structlog.get_logger(__name__)
@@ -88,20 +89,14 @@ class CameraAgent:
 
         source = CameraAgent._camera_source()
 
-        # Validate camera source
-        test_cap = CameraAgent._open_capture()
-        if not test_cap.isOpened():
-            logger.error("camera_source_invalid", source=source)
-            test_cap.release()
-            return
-        test_cap.release()
-
+        # Open camera once (no test-then-reopen)
         self._cap = CameraAgent._open_capture()
-        resolution = self._apply_frame_props()
-
         if not self._cap.isOpened():
-            logger.error("camera_open_failed")
+            logger.error("camera_open_failed", source=source)
+            self._cap.release()
             return
+
+        resolution = self._apply_frame_props()
 
         logger.info("camera_started", source=source, backend=getattr(settings, "CAMERA_BACKEND", "auto"), resolution=resolution,
                     yolo_model=settings.YOLO_MODEL, face_model=settings.INSIGHTFACE_MODEL)
@@ -124,9 +119,14 @@ class CameraAgent:
     def _loop(self):
         consecutive_failures = 0
         max_failures = 10  # ~1 second at 100ms sleep
+        source = CameraAgent._camera_source()
+        is_file_source = isinstance(source, str) and "://" not in source
         while self._running:
             ret, frame = self._cap.read()
             if not ret:
+                if is_file_source:
+                    logger.info("video_complete", source=source, frames=self._frame_count)
+                    break
                 consecutive_failures += 1
                 if consecutive_failures >= max_failures:
                     logger.error("camera_disconnected", failures=consecutive_failures)
@@ -159,19 +159,30 @@ class CameraAgent:
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
                     # Skip recognition if already verified/known or high-confidence match
-                    already_resolved = track.decision in ("verified", "known")
+                    already_resolved = track.decision in RESOLVED_STATUSES
                     high_confidence = track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY
 
-                    # For unresolved tracks: only re-run if face quality improved
+                    # For unresolved tracks: re-run with time-based rescan for unknowns with similarity
                     should_skip = False
                     if already_resolved or high_confidence:
                         should_skip = True
                     elif track.last_recognition_status in ("unknown", "uncertain"):
-                        quality_improved = track.best_face_score > (
-                            track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT
+                        has_similarity = (
+                            track.pending_match_result
+                            and track.pending_match_result.similarity_score > 0
                         )
-                        if not quality_improved:
-                            should_skip = True
+                        if has_similarity and track.rescan_attempts < settings.MAX_RESCAN_ATTEMPTS:
+                            time_since_last = time.time() - track.last_recognition_time
+                            if time_since_last >= settings.RESCAN_INTERVAL_SECS:
+                                track.rescan_attempts += 1
+                            else:
+                                should_skip = True
+                        else:
+                            quality_improved = track.best_face_score > (
+                                track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT
+                            )
+                            if not quality_improved:
+                                should_skip = True
 
                     if should_skip:
                         logger.debug("skip_recognition_throttled",

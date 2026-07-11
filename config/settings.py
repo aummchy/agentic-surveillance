@@ -484,6 +484,8 @@ EMBEDDING_DET_SCORE_MIN = _get("EMBEDDING_DET_SCORE_MIN", "EMBEDDING_DET_SCORE_M
 # ── Progressive Recognition ────────────────────────────────────
 RECOGNITION_INTERVAL_FRAMES = _get("RECOGNITION_INTERVAL_FRAMES", "RECOGNITION_INTERVAL_FRAMES", 10, int)
 MIN_QUALITY_IMPROVEMENT = _get("MIN_QUALITY_IMPROVEMENT", "MIN_QUALITY_IMPROVEMENT", 0.10, float)
+RESCAN_INTERVAL_SECS = _get("RESCAN_INTERVAL_SECS", "RESCAN_INTERVAL_SECS", 3, int)
+MAX_RESCAN_ATTEMPTS = _get("MAX_RESCAN_ATTEMPTS", "MAX_RESCAN_ATTEMPTS", 3, int)
 
 # ── Quality — Validity gates ──────────────────────────────────
 QUALITY_VALID_BLUR_MIN = _get("QUALITY_VALID_BLUR_MIN", "QUALITY_VALID_BLUR_MIN", 40.0, float)
@@ -545,6 +547,10 @@ DEFAULT_FACE_QUALITY = _get("DEFAULT_FACE_QUALITY", "DEFAULT_FACE_QUALITY", 0.50
 # ── Confidence Status Tiers ───────────────────────────────────
 CONFIDENCE_KNOWN_MIN = _get("CONFIDENCE_KNOWN_MIN", "CONFIDENCE_KNOWN_MIN", 70, int)
 CONFIDENCE_UNCERTAIN_MIN = _get("CONFIDENCE_UNCERTAIN_MIN", "CONFIDENCE_UNCERTAIN_MIN", 55, int)
+
+# ── Calculation Log ───────────────────────────────────────────
+ENABLE_CALC_LOG = _get("ENABLE_CALC_LOG", "ENABLE_CALC_LOG", False, bool)
+CALC_LOG_MAX_SIZE_MB = _get("CALC_LOG_MAX_SIZE_MB", "CALC_LOG_MAX_SIZE_MB", 10, int)
 
 # ── CLAHE ──────────────────────────────────────────────────────
 CLAHE_CLIP_LIMIT = _get("CLAHE_CLIP_LIMIT", "CLAHE_CLIP_LIMIT", 2.0, float)
