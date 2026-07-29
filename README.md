@@ -38,7 +38,6 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 | Document | Description |
 |----------|-------------|
 | [AGENTS.md](AGENTS.md) | AI agent instructions, architecture, coding rules, do/don'ts |
-| [LOCATIONS.md](LOCATIONS.md) | Quick navigation — file-to-feature map (20 lines) |
 | [TOOLS.md](TOOLS.md) | Developer tools — repomix, ctags, ast-grep, commands |
 | [SYSTEM_INDEX.md](SYSTEM_INDEX.md) | Complete system index — repo layout, execution flow, config map |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Tech stack, components, MongoDB schema |
@@ -53,7 +52,6 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 ```
 main.py                    # Entry point
 AGENTS.md                  # AI agent context (architecture, rules, do/don'ts)
-LOCATIONS.md               # Quick navigation (file-to-feature map)
 TOOLS.md                   # Developer tools (repomix, ctags, ast-grep)
 SYSTEM_INDEX.md            # Complete system index
 agents/                    # Business logic (camera, matching, recognition, policy, alerts)
