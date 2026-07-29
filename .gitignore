@@ -36,9 +36,15 @@ logs/*
 # Node
 node_modules/
 
+# ctags
+tags
+
 # OS
 .DS_Store
 Thumbs.db
 
-# MimoCode debug scripts
-query_*_session.py
+# Build output
+dashboard/frontend/dist/
+
+# Debug scripts
+scripts/query_*.py

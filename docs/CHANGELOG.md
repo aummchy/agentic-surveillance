@@ -1,12 +1,23 @@
 # TODO — Visitor Surveillance System
 
-## Status: 1 remaining (env credentials). All recognition/throttle/confidence/visibility fixes complete (2026-07-09).
+## Status: 1 remaining (env credentials). All recognition/throttle/confidence/visibility fixes complete (2026-07-09). Quality-gated skip + ByteTrack tuning complete (2026-07-30).
 
 ---
 
 ## Remaining
 
 - [ ] **#50: Rotate `.env` credentials** — MongoDB URI, Cloudinary key/secret exposed in working directory
+
+---
+
+## Recent Fixes (2026-07-30)
+
+- [x] Quality-gated recognition skip — `camera_agent.py:306-331` `else: return` prevents embedding storage from low-quality faces
+- [x] ByteTrack tuning — `config/bytetrack_surveillance.yaml` with custom params for fixed-camera surveillance
+- [x] AGENTS.md expanded — entry points, folder responsibilities, coding rules, do/don'ts
+- [x] LOCATIONS.md created — quick navigation file-to-feature map
+- [x] TOOLS.md created — developer tools reference (repomix, ctags, ast-grep)
+- [x] SYSTEM_INDEX.md updated — new files, recent fixes, corrected thresholds
 
 ---
 

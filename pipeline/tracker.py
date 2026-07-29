@@ -2,6 +2,7 @@ import logging
 import threading
 import structlog
 import numpy as np
+from pathlib import Path
 from config import settings
 
 logger = structlog.get_logger(__name__)
@@ -17,6 +18,10 @@ _ul.handlers.clear()
 
 _model = None
 _model_lock = threading.Lock()
+
+# ByteTrack config tuned for indoor fixed-camera surveillance
+# Raised thresholds to reduce ID switches from occlusions and noise.
+_TRACKER_CONFIG = str(Path(__file__).resolve().parent.parent / "config" / "bytetrack_surveillance.yaml")
 
 
 def get_model() -> YOLO:
@@ -34,7 +39,7 @@ def track_persons(frame: np.ndarray, persist: bool = True) -> list:
     results = model.track(
         frame,
         persist=persist,
-        tracker="bytetrack.yaml",
+        tracker=_TRACKER_CONFIG,
         classes=[0],
         conf=settings.PERSON_CONF_THRESHOLD,
         iou=0.5,

@@ -5,7 +5,7 @@
 | Component | What we use | How |
 |-----------|------------|-----|
 | **Detection** | YOLOv8 (`yolov8s.pt` or OpenVINO IR) via Ultralytics | Singleton model in `pipeline/tracker.py:track_persons()`. OpenVINO IR export for GPU: `yolo export model=yolov8s.pt format=openvino half=True`, then set `YOLO_MODEL=yolov8s_openvino_model/`, `YOLO_DEVICE=intel:GPU`. ~8× speedup (128ms→16ms) on Arc iGPU. |
-| **Tracking** | ByteTrack (Ultralytics built-in `bytetrack.yaml`) | Cross-frame person ID 0,1,2... per session. Converted to composite IDs `{cam_id}_{epoch}_{track_id}` in `pipeline/track_state.py`. |
+| **Tracking** | ByteTrack (custom `config/bytetrack_surveillance.yaml`) | Cross-frame person ID 0,1,2... per session. Converted to composite IDs `{cam_id}_{epoch}_{track_id}` in `pipeline/track_state.py`. Tuned for fixed-camera surveillance: `track_high_thresh=0.45`, `track_buffer=60`, `new_track_thresh=0.50`. |
 | **Face detection** | InsightFace SCRFD (`buffalo_l` in `.env`) | Loaded once as singleton in `utils/embedding_utils.py:InsightFaceSingleton`. Two-stage: crop person first, full frame fallback when crop has no faces ≥ `EMBEDDING_DET_SCORE_MIN`. CLAHE applied before detection. No redundant `DET_SCORE_MIN` tier. |
 | **Face embedding** | InsightFace ArcFace (512-d normed) | Generated from best face detected. Quality-gated: only overwrites `track.embedding` if `det_score` exceeds existing by ≥ 0.05. Used for vector search. Embedding cache skips Atlas search if cosine distance < 0.005 from last searched embedding. |
 | **Mask detection** | Geometric heuristic (landmark nose/mouth ratio) | `_detect_mask_geometric()` — no classifier. Ratio < 0.3 = masked. |
@@ -32,6 +32,7 @@ main.py
 │   ├── TrackState.update() (thread-safe, composite IDs)
 │   ├── Every 10 frames: ThreadPool → progressive_recognition()
 │   │   ├── InsightFace detection + embedding (quality-gated overwrite)
+│   │   ├── Quality gate: skip embedding if face invalid (blur/brightness/area)
 │   │   ├── Embedding cache check (cosine dist < 0.005 → skip Atlas)
 │   │   ├── MongoDB vector search (MatchingAgent) [if cache miss]
 │   │   ├── MemoryAgent lookup
@@ -64,6 +65,7 @@ main.py
 - **Embedding cache** — if new embedding's cosine distance from last searched < 0.005, skip Atlas round-trip and reuse prior `MatchResult`
 - **OpenVINO GPU** — YOLO OpenVINO IR models use `device=intel:GPU` format. Ultralytics' backend parses `intel:` prefix to extract the OpenVINO device while setting PyTorch device to `cpu`. InsightFace stays on CPU (OpenVINO EP not used due to DLL compatibility issues).
 - **Quality-gated embedding** — per-track: only overwrites if `det_score` exceeds existing by ≥ 0.05. Per-DB: only overwrites `latest_embedding` if new `quality_score` > stored quality (no backward-compat unconditional overwrite)
+- **Quality-gated recognition skip** — `camera_agent.py:306-331`: if face quality fails validity gates (blur < 40, brightness outside 35-255, area < 1200px²), `else: return` prevents embedding generation, MongoDB search, and identity assignment. Prevents blurry faces from being incorrectly matched to known persons.
 - **Best face hysteresis** — quality score buffer reduced to +0.03 (was +0.10) for gradual improvement
 - **Atlas vector search fallback** — if Atlas `$vectorSearch` fails/timeouts, falls to `_python_cosine_scan()` scanning up to 500 docs
 - **LLM optional** — system runs without Ollama; NL summaries fall back to template strings

@@ -1,0 +1,16 @@
+# ByteTrack config tuned for indoor fixed-camera surveillance
+# Based on production deployments (SPL-ByteTrack, Ultralytics Academy, MOT benchmarks)
+#
+# Key changes from ultralytics defaults:
+#   - Raised track_high_thresh: 0.25 → 0.45 (match PERSON_CONF_THRESHOLD)
+#   - Raised new_track_thresh: 0.25 → 0.50 (prevent spurious new tracks)
+#   - Raised track_buffer: 30 → 60 (2s at 30fps — handles brief occlusions)
+#   - Lowered track_low_thresh: 0.10 → 0.05 (more aggressive rescue)
+
+tracker_type: bytetrack
+track_high_thresh: 0.45   # Match PERSON_CONF_THRESHOLD — both stages actually work
+track_low_thresh: 0.05    # Aggressive rescue for occluded low-conf detections
+new_track_thresh: 0.50    # Only spawn new tracks from confident detections
+track_buffer: 60          # 2 seconds at 30fps — handles person-to-person occlusion
+match_thresh: 0.80        # IoU matching threshold (unchanged)
+fuse_score: True          # Fuse confidence with IoU for more stable matches

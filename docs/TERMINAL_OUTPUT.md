@@ -43,6 +43,7 @@ Camera detects person
 | `MEMORY` | `{ts} MEMORY  {person_id} visits={count} known={bool} boost={float}` | `2026-07-09T07:02:24 MEMORY  cam_01_1782040060_1 visits=218 known=True boost=18.0` |
 | `RECOG` | `{ts} RECOG   {name} {status} sim={sim} top2={top2} gap={gap} q={quality} dur={secs}s conf={conf}` | `2026-07-09T07:02:24 RECOG   aum        KNOWN        sim=0.608 top2=0.500 gap=0.109 q=0.70 dur=8s conf=71` |
 | `POLICY` | `{ts} POLICY  {status} alert={level} {ok/ALERT} vis={count}` | `2026-07-09T07:02:24 POLICY  VERIFIED     alert=none  ok vis=218` |
+| `skip_recognition_low_quality` | debug only: `track_id={id} blur={float} brightness={float} area={int}` | Logged when face quality fails validity gates (blur < 40, brightness outside 35-255, area < 1200px²). Prevents embedding storage from low-quality faces. |
 
 ### Face Events
 

@@ -27,6 +27,15 @@
   "TRACK_TIMEOUT_SECS": 3.0,
   "MAX_TRACK_SECS": 300,
 
+  // ── ByteTrack (config/bytetrack_surveillance.yaml) ──────────
+  // These are documented here for reference. Actual values live in the YAML.
+  // To change them, edit config/bytetrack_surveillance.yaml directly.
+  // track_high_thresh:  0.45  — first-stage match (should match PERSON_CONF_THRESHOLD)
+  // track_low_thresh:   0.05  — second-stage rescue for occluded detections
+  // new_track_thresh:   0.50  — min confidence to spawn a new track
+  // track_buffer:       60    — frames to keep lost tracks alive (2s at 30fps)
+  // match_thresh:       0.80  — IoU threshold for matching
+
   // ── Face Detection Scores ────────────────────────────────────
   // DET_SCORE_MIN: Standard threshold for face detection confidence.
   // DET_SCORE_RELAXED: Fallback threshold (very permissive, use cautiously).

@@ -318,6 +318,18 @@ class CameraAgent:
                     logger.info("face_crop_saved", track_id=track.track_id, path=crop_path,
                                 url=f"http://localhost:8000/{crop_path.replace(chr(92), '/')}")
 
+            else:
+                # Do not generate or search embeddings from low-quality faces.
+                # Wait for a later recognition attempt with a better-quality frame.
+                logger.debug(
+                    "skip_recognition_low_quality",
+                    track_id=track.track_id,
+                    blur=quality.blur_score,
+                    brightness=round(quality.brightness, 1),
+                    area=quality.face_area,
+                )
+                return
+
             embedding_list = best["embedding"].tolist()
             self.track_state.set_embedding(
                 track.track_id,

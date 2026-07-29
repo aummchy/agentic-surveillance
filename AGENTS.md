@@ -61,6 +61,7 @@ main.py (entry point, wires everything)
 ├── agents/scoring.py         — confidence scoring (weighted normalization + logging)
 ├── agents/policy.py          — business rule evaluation
 ├── pipeline/tracker.py       — YOLOv8 + ByteTrack (single model instance)
+├── config/bytetrack_surveillance.yaml — ByteTrack params tuned for fixed-camera surveillance
 ├── pipeline/face.py          — SCRFD detection + ArcFace embedding + mask heuristic
 ├── pipeline/models.py        — Track, MatchResult, DecisionResult, etc.
 ├── pipeline/track_state.py   — per-track accumulation with threading.Lock
@@ -127,7 +128,7 @@ Events in `TERMINAL_ALLOWLIST` appear in terminal. Others go to files only.
 
 Suppressed loggers: `pymongo`, `insightface` (WARNING), `ultralytics` (ERROR), `cloudinary` (WARNING).
 
-See `TERMINAL_OUTPUT.md` for full event format reference.
+See `docs/TERMINAL_OUTPUT.md` for full event format reference.
 
 ## Recent fixes
 
@@ -143,3 +144,61 @@ See `TERMINAL_OUTPUT.md` for full event format reference.
 - **2026-07-09**: Fixed LLM client shutdown — replaced deprecated `asyncio.get_event_loop()` with `get_running_loop()` + `asyncio.run()` fallback.
 - **2026-07-09**: Tightened CORS to explicit methods/headers.
 - **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→65.
+- **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
+- **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
+
+## Common entry points
+
+| File | What it starts | How to run |
+|------|----------------|------------|
+| `main.py` | Full pipeline + API server | `python main.py` |
+| `agents/camera_agent.py` | Capture loop, recognition, track finalization | Loaded by main.py |
+| `dashboard/backend/main.py` | FastAPI REST + WebSocket | Starts automatically on port 8000 |
+| `pipeline/tracker.py` | YOLO + ByteTrack model loading | Loaded by camera_agent |
+| `config/settings.py` | All configuration loading | Imported by every module |
+
+## Folder responsibilities
+
+| Folder | Purpose | Key files |
+|--------|---------|-----------|
+| agents/ | AI orchestration (7 agents) | camera_agent, matching, recognition, scoring, policy, memory, alerts, report |
+| pipeline/ | Computer vision pipeline | tracker, face, models, track_state |
+| utils/ | Shared utilities | db_utils, embedding_utils, llm_client, image_utils |
+| config/ | Configuration | settings.py, config.jsonc, bytetrack_surveillance.yaml |
+| dashboard/ | Web dashboard | backend/main.py, frontend/src/ |
+| tests/ | 43 pytest tests | test_recognition, test_embedding_history, test_thread_safety |
+| scripts/ | Session query tools | query_*.py (11 files) |
+| docs/ | Documentation | ARCHITECTURE, FORMULAS, CHANGELOG, ISSUES, TERMINAL_OUTPUT |
+
+## Coding rules
+
+- **Load models once.** YOLO in `tracker.py`, InsightFace as singleton in `embedding_utils.py`. Never reload in per-frame loops.
+- **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (2 threads) run concurrently.
+- **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
+- **Quality gates before embedding storage.** Invalid faces (blur < 40, brightness outside 35-255, area < 1200px²) never get embeddings stored or searched.
+- **Confidence never downgrades.** Only upgrades across recognition passes. Critical alerts always update.
+- **Edit config/config.jsonc** for tunables (detection, quality, recognition). Never edit config/settings.py defaults.
+- **Run tests before committing.** `python -m pytest tests/ -v`
+
+## Do / Don'ts
+
+Do:
+- Edit `config/config.jsonc` for detection, quality, recognition settings
+- Edit `.env` for secrets (MONGODB_URI, API keys, passwords)
+- Run `python -m pytest tests/ -v` before committing
+- Use `compare_similarity()` in `db_utils.py` for threshold checks
+- Convert Atlas scores: `raw_cosine = (atlas_score * 2) - 1`
+- Use `track.best_face_crop` for numpy array (not `best_face_crop_path`)
+
+Don't:
+- Edit `config/settings.py` hardcoded defaults
+- Reload InsightFace in per-frame loops
+- Block camera loop with I/O (MongoDB, Cloudinary, alerts)
+- Set `MATCH_THRESHOLD` above 0.45
+- Store embeddings from low-quality faces (quality gates block this)
+
+## Current priorities
+
+1. ~~Fix blurry face identity corruption~~ (DONE — quality gate skip in `camera_agent.py:321`)
+2. ~~ByteTrack tuning~~ (DONE — `config/bytetrack_surveillance.yaml`)
+3. Next: RAG over event history, person behavior profiles, temporal analytics
