@@ -35,7 +35,7 @@ main.py
   |     +-- YOLOv8 detect_persons()     <- singleton model
   |     +-- ByteTrack track_persons()   <- persist=True
   |     +-- TrackState.update()         <- thread-safe dict
-  |     +-- Progressive Recognition     <- every 30 frames
+  |     +-- Progressive Recognition     <- every 20 frames
   |     |     +-- InsightFace detect_and_embed()
   |     |     +-- matching_agent run_matching_from_embedding()
   |     |     +-- decision_agent decide()
@@ -542,10 +542,10 @@ class Track:
 ### pipeline/quality_agent.py
 
 - `compute_quality(face_crop)` returns `QualityResult`
-- Blur = Laplacian variance (reject < 60)
-- Brightness = mean HSV-V (reject < 50 or > 230)
-- Area = pixel count (reject < 2500)
-- Weighted score: blur 60%, brightness 25%, area 15%
+- Blur = Laplacian variance (reject < 40)
+- Brightness = mean HSV-V (reject < 35 or > 255)
+- Area = pixel count (reject < 1200)
+- Weighted score: blur 50%, brightness 25%, area 25%
 
 ### pipeline/face.py
 
@@ -609,12 +609,12 @@ class Track:
 
 ## Data Flow
 
-### Progressive Recognition (every 30 frames during active track)
+### Progressive Recognition (every 20 frames during active track)
 
 ```
 Frame -> YOLO detect -> ByteTrack track -> TrackState.update()
   |
-  +-> (every 30 frames) crop_person -> InsightFace detect_and_embed
+  +-> (every 20 frames) crop_person -> InsightFace detect_and_embed
   |     -> update_face_visibility -> compute_face_ratio
   |     -> set_embedding -> run_matching_from_embedding
   |     -> vector_search -> decide -> dispatch (if needed)
@@ -686,11 +686,12 @@ No graceful degradation if camera disconnects, MongoDB is unreachable, or Cloudi
 
 ### 4. Dashboard
 
-Not built yet. Planned components:
+Built and deployed. Components:
 
-- FastAPI backend with REST + WebSocket endpoints
-- React/Vite frontend with live view, visitor log, alerts panel
+- FastAPI backend with REST + WebSocket endpoints (port 8000)
+- React/Vite frontend with live view, visitor log, face management, chat (port 5173)
 - Operator review/enroll interface for unknowns
+- Conversational chat endpoint using local LLM (Ollama)
 
 ### 5. Frame Rate Adaptation
 
@@ -702,12 +703,7 @@ Fixed 640x480 resolution. No mechanism to:
 
 ### 6. LangGraph Integration
 
-Currently plain Python callbacks. LangGraph state machine would give:
-
-- Human-in-the-loop hooks
-- Automatic retries on failure
-- Visual graph for dashboard
-- Checkpointing for crash recovery
+Not implemented. `langgraph` and `langchain` were added to `requirements.txt` but never imported or used. Currently plain Python callbacks. Decision pending: either integrate LangGraph state machine or remove unused dependencies.
 
 ### 7. Alert Idempotency Across Tracks
 
