@@ -245,6 +245,9 @@ class MemoryAgent(BaseAgent):
         Returns:
             Updated memory document.
         """
+        if not person_id:
+            logger.debug("visit_skipped_no_person_id")
+            return {}
         try:
             memory = update_visit_memory(person_id, camera_id, status, similarity, is_masked)
             logger.info("visit_recorded",

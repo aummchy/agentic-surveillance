@@ -29,12 +29,13 @@ Quick-lookup navigation map for AI agents. One sentence per file. See `AGENTS.md
 │   ├── tracker.py                   # YOLOv8 singleton + ByteTrack track_persons() generator
 │   ├── track_state.py               # Thread-safe per-track state, composite ID generation, expiry
 │   ├── quality_agent.py             # Face quality scoring: validity gates + weighted composite [0,1]
+│   ├── recognition_pipeline.py      # Orchestrates all pipeline stages (quality → embedding → match → memory → recognize → decide)
 │   ├── face.py                      # compute_face_ratio() — face area / person bbox
 │   └── models.py                    # Data classes: Track, MatchResult, DecisionResult, QualityResult
 ├── utils/
 │   ├── db_utils.py                  # MongoDB CRUD, Atlas vector search, Python cosine fallback
 │   ├── embedding_utils.py           # InsightFace singleton (SCRFD+ArcFace), compare_similarity()
-│   ├── image_utils.py               # Crop, resize, save, Cloudinary upload, blur/brightness scoring
+│   ├── image_utils.py               # Crop, resize, save, Cloudinary upload, draw annotations
 │   └── llm_client.py                # Ollama HTTP client: generate, chat, health check, retry
 ├── dashboard/
 │   ├── backend/
@@ -45,7 +46,7 @@ Quick-lookup navigation map for AI agents. One sentence per file. See `AGENTS.md
 │       ├── App.jsx                  # Root: WebSocket, stats polling, view routing, alert state
 │       ├── components/              # LiveFeed, UnknownPersons, VerifiedPersons, EventLog, ChatPanel, VerifyModal, ErrorBoundary
 │       └── utils/api.js             # Axios instance with base URL + error interceptor
-├── tests/                           # 3 test files: recognition, embedding_history, thread_safety
+├── tests/                           # 6 test files: recognition, recognition_pipeline, recognition_pipeline_stages, embedding_history, thread_safety, track_finalizer
 ├── docs/                            # ARCHITECTURE, FORMULAS, ISSUES, CHANGELOG, PAPER, TERMINAL_OUTPUT
 ├── models/                          # YOLOv8s weights + OpenVINO IR (gitignored)
 ├── scripts/                         # Debug/utility scripts (gitignored)

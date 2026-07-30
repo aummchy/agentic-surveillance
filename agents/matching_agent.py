@@ -47,4 +47,5 @@ def run_matching_from_embedding(embedding: list, track_id: str = "unknown") -> M
         second_best_similarity=top2,
         margin=margin,
         candidate_count=len(matches),
+        all_candidates=result.get("all_candidates", []),
     )

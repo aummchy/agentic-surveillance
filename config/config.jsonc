@@ -86,7 +86,7 @@
   "JPEG_QUALITY_BROADCAST": 65,
 
   // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
-  "DEBUG_FACE_CROPS": false,
+  "DEBUG_FACE_CROPS": true,
 
   // ── Vector Search ────────────────────────────────────────────
   // CANDIDATES: HNSW candidate pool size (higher = better recall, slower).
@@ -148,10 +148,19 @@
   "ENABLE_CALC_LOG": true,
   "CALC_LOG_MAX_SIZE_MB": 10,
 
+  // ── Broadcast ────────────────────────────────────────────────
+  // FRAME_SKIP: Broadcast every Nth frame to the dashboard WebSocket.
+  // Higher = less bandwidth, lower FPS on dashboard.
+  "FRAME_SKIP": 2,
+
   // ── Debug Flags ──────────────────────────────────────────────
   // DEBUG_RECOGNITION: Enable diagnostic logging for recognition pipeline investigation.
   // Logs appear in logs/surveillance.debug.log only (not terminal).
   "DEBUG_RECOGNITION": true,
+  // DEBUG_DUPLICATE_BOXES: Log per-frame detection/track state to identify multi-box issues.
+  // Logs ByteTrack IDs, TrackState lifecycle, and high-IoU track pairs.
+  // Enable via env var: DEBUG_DUPLICATE_BOXES=true python main.py
+  "DEBUG_DUPLICATE_BOXES": true,
 
   // ── LLM (Ollama) ────────────────────────────────────────────
   "OLLAMA_URL": "http://localhost:11434",

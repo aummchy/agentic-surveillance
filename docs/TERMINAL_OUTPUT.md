@@ -15,7 +15,7 @@ Camera detects person
     │
     ├─► MATCH    — Vector search finds best match
     ├─► MEMORY   — Lookup visit history
-    ├─► RECOG    — Recognition decision (every 10 frames)
+    ├─► RECOG    — Recognition decision (every 20 frames)
     ├─► POLICY   — Policy decision (alert/no-alert)
     ├─► FACE     — Face crop saved
     │
@@ -127,7 +127,7 @@ Only events in `TERMINAL_ALLOWLIST` (config/settings.py) appear in terminal outp
 ### Suppressed Loggers
 
 These loggers are silenced to reduce noise:
-- `pymongo`, `motor` — WARNING level
+- `pymongo` — WARNING level
 - `insightface` — WARNING level
 - `ultralytics` — ERROR level
 - `cloudinary` — WARNING level

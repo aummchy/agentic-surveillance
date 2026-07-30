@@ -17,6 +17,20 @@ class TrackState:
         self._session_epoch = int(time.time())
         self._in_flight: Dict[str, int] = {}  # track_id → active recognition count
 
+    @staticmethod
+    def _compute_iou(box1: tuple, box2: tuple) -> float:
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        if inter == 0:
+            return 0.0
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union = area1 + area2 - inter
+        return inter / union if union > 0 else 0.0
+
     def make_composite_id(self, camera_id: str, byte_track_id: int) -> str:
         return f"{camera_id}_{self._session_epoch}_{byte_track_id}"
 
@@ -41,10 +55,28 @@ class TrackState:
                 )
                 self._tracks[composite_id] = track
                 if settings.DEBUG_RECOGNITION:
-                    logger.debug("track_created",
-                                 track_id=composite_id,
-                                 active_count=len(self._tracks),
-                                 bt_track_id=track_id)
+                    # Find the nearest existing track by IoU for fragmentation detection
+                    nearest_id = None
+                    nearest_iou = 0.0
+                    gap_ms = None
+                    now = time.time()
+                    for cid, existing in self._tracks.items():
+                        if cid == composite_id:
+                            continue
+                        iou_val = self._compute_iou(box, existing.person_box)
+                        if iou_val > nearest_iou:
+                            nearest_iou = iou_val
+                            nearest_id = existing.track_id
+                            gap_ms = round((now - existing.last_seen) * 1000, 1)
+                    log_fields = dict(
+                        track_id=composite_id,
+                        active_count=len(self._tracks),
+                        bt_track_id=track_id)
+                    if nearest_id and nearest_iou > 0.01:
+                        log_fields["nearest_track_id"] = nearest_id
+                        log_fields["nearest_iou"] = round(nearest_iou, 3)
+                        log_fields["time_gap_ms"] = gap_ms
+                    logger.debug("track_created", **log_fields)
                 return track
 
     def get(self, composite_id: str) -> Optional[Track]:
@@ -54,6 +86,22 @@ class TrackState:
     def get_all(self) -> list:
         with self._lock:
             return list(self._tracks.values())
+
+    def debug_snapshot(self) -> list[dict]:
+        with self._lock:
+            return [
+                {"id": t.track_id,
+                 "last_seen": t.last_seen,
+                 "age_secs": round(time.time() - t.last_seen, 2),
+                 "expired_reported": t.expired_reported,
+                 "visibility": t.visibility,
+                 "person_box": t.person_box,
+                 "total_frames": t.total_frames_seen,
+                 "face_detected": t.face_detected_once,
+                 "decision": t.decision,
+                 "is_masked": t.is_masked}
+                for t in self._tracks.values()
+            ]
 
     def remove(self, composite_id: str) -> Optional[Track]:
         with self._lock:
@@ -193,7 +241,7 @@ class TrackState:
             if track and track.fallback_frame_jpeg is None:
                 track.fallback_frame_jpeg = jpeg_bytes
 
-    def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0) -> bool:
+    def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0) -> tuple[bool, str]:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -201,8 +249,9 @@ class TrackState:
                     track.embedding = embedding
                     track.is_masked = is_masked
                     track.embedding_det_score = det_score
-                    return True
-        return False
+                    return (True, "ok")
+                return (False, "rejected_quality")
+            return (False, "track_removed")
 
     def set_decision(self, composite_id: str, decision: str, alerted: bool = False):
         with self._lock:

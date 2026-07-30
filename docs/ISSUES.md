@@ -262,14 +262,14 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 ### M16 — Static /captures mount without auth + no Cloudinary signed URLs
 
 - **File:** `dashboard/backend/main.py:35`, `utils/image_utils.py`
-- **Problem:** The `/captures` directory is mounted as a static file server with no authentication. Combined with public Cloudinary URLs, any network client can download surveillance images. BUILD_REPORT notes "Cloudinary signed URLs" as unimplemented security measure.
+- **Problem:** The `/captures` directory is mounted as a static file server with no authentication. Combined with public Cloudinary URLs, any network client can download surveillance images. "Cloudinary signed URLs" is an unimplemented security measure.
 - **Impact:** Surveillance images accessible without authentication. Privacy risk.
 - **Fix:** Add auth middleware for `/captures` mount. Use Cloudinary signed URLs with expiry, or serve via authenticated proxy.
 
 ### M17 — No authentication on any dashboard endpoint
 
 - **File:** All dashboard routes
-- **Problem:** The entire dashboard API (faces CRUD, events, chat, WebSocket live feed) is completely unauthenticated. CORS restricts browser origins but does not prevent direct API calls. BUILD_REPORT notes "WebSocket authentication for live feed" as unimplemented.
+- **Problem:** The entire dashboard API (faces CRUD, events, chat, WebSocket live feed) is completely unauthenticated. CORS restricts browser origins but does not prevent direct API calls. "WebSocket authentication for live feed" is unimplemented.
 - **Impact:** Any network client can delete faces, query events, view live feed, or use chat. Unauthorized access to surveillance data.
 - **Fix:** Add auth middleware (API key, JWT, or basic auth). Add WebSocket token validation on accept.
 
@@ -297,7 +297,7 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 ### M21 — Camera failure handling (no graceful degradation) ⏭️ INTENTIONAL
 
 - **File:** `agents/camera_agent.py`, `utils/db_utils.py`, `utils/image_utils.py`
-- **Problem:** BUILD_REPORT BL-3: No graceful degradation if camera disconnects, MongoDB is unreachable, or Cloudinary fails.
+- **Problem:** No graceful degradation if camera disconnects, MongoDB is unreachable, or Cloudinary fails.
 - **Impact:** Camera disconnect = permanent pipeline failure. MongoDB outage = lost events. Cloudinary failure = lost images.
 - **Decision:** Intentional design trade-off. See `INTENTIONAL.md` for rationale. Camera reconnect exists (fixed delay). MongoDB/Cloudinary retry assumed unnecessary under cloud SLA.
 
@@ -549,39 +549,12 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - **Problem:** `@patch("utils.db_utils.settings")` replaces the entire settings module with a `MagicMock`. Any settings attribute access gets a mock that could cause unexpected behavior.
 - **Fix:** Patch specific attributes only.
 
-### MT15 — BUILD_REPORT outdated: Dashboard status
-
-- **File:** `BUILD_REPORT.md:812`
-- **Problem:** Acceptance criterion #7 says "Dashboard (live feed, visitor log, enroll) — NOT STARTED" but the dashboard is fully built (FastAPI + React + WebSocket).
-- **Fix:** Update to "DONE — FastAPI + React + WebSocket live view, visitor log, face management".
-
-### MT16 — BUILD_REPORT outdated: Progressive recognition interval
-
-- **File:** `BUILD_REPORT.md:38, 612-623`
-- **Problem:** BUILD_REPORT says "Progressive Recognition every 30 frames" but `config.jsonc` has `RECOGNITION_INTERVAL_FRAMES: 20`. Mismatch with actual runtime behavior.
-- **Fix:** Update BUILD_REPORT to say 20 frames.
-
-### MT17 — ~~BUILD_REPORT outdated: MIN_TRACK_FRAMES~~ (RESOLVED)
-
-- **File:** `BUILD_REPORT.md:343-351`, `config.jsonc:125`, `config/settings.py:567`
-- **Problem:** Previously flagged as outdated, but verified: `config.jsonc` has `MIN_TRACK_FRAMES: 15`, `settings.py` default is `15`. BUILD_REPORT correctly documents the change from 30 to 15. No fix needed.
-
-### MT18 — BUILD_REPORT outdated: Quality gate thresholds
-
-- **File:** `BUILD_REPORT.md:544-548`
-- **Problem:** BUILD_REPORT says "blur < 60, brightness < 50 or > 230, area < 2500" but `config.jsonc` has `QUALITY_VALID_BLUR_MIN: 40`, brightness range `35-255`, area `1200`. Different values.
-- **Fix:** Update BUILD_REPORT to match current `config.jsonc` values.
-
-### MT19 — BUILD_REPORT outdated: LangGraph status
-
-- **File:** `BUILD_REPORT.md:703-709`
-- **Problem:** BUILD_REPORT lists LangGraph integration as a limitation ("Currently plain Python callbacks"). But `langgraph`/`langchain` are in requirements.txt (#MT1) yet never imported. The feature was planned but not implemented, and the deps are dead weight.
-- **Fix:** Either integrate LangGraph or remove unused deps and update BUILD_REPORT to say "Not implemented — removed unused deps".
+*(BUILD_REPORT.md entries MT15-MT19 removed — file does not exist in repo)*
 
 ### MT20 — Embedding model versioning not tracked
 
 - **File:** `utils/embedding_utils.py`, `utils/db_utils.py`
-- **Problem:** BUILD_REPORT BL-9: If InsightFace model is updated, existing embeddings may become incompatible. No version tracking or re-embedding capability. Embeddings stored with one model version will produce wrong similarity scores with a different version.
+- **Problem:** If InsightFace model is updated, existing embeddings may become incompatible. No version tracking or re-embedding capability. Embeddings stored with one model version will produce wrong similarity scores with a different version.
 - **Impact:** Model upgrades silently degrade recognition accuracy for all existing face records.
 - **Fix:** Add model version string to face documents, detect version mismatch on read, trigger re-embedding for stale records.
 
@@ -650,7 +623,7 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 1. **7.1** Remove unused deps from `requirements.txt`, add upper bounds, pin numpy <2.0
 2. **7.2** Remove or parameterize scripts in `scripts/`
 3. **7.3** Fix test flakiness (`test_thread_safety.py`, `test_recognition.py`)
-4. **7.4** Update BUILD_REPORT.md outdated sections (MT15-MT19)
+4. **7.4** *(removed — BUILD_REPORT.md does not exist in repo)*
 
 ---
 
@@ -669,4 +642,4 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - [ ] All unused code and dependencies removed
 - [ ] `requirements.txt` has upper bounds, numpy pinned <2.0
 - [ ] Tests pass without flakiness
-- [ ] BUILD_REPORT.md updated to match current codebase
+- [ ] *(removed — BUILD_REPORT.md does not exist in repo)*

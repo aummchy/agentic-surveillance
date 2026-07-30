@@ -94,6 +94,7 @@ class MatchResult:
     second_best_similarity: Optional[float] = None
     margin: Optional[float] = None
     candidate_count: int = 0
+    all_candidates: list = field(default_factory=list)  # [{name, similarity}] top-N from vector search
 
 
 @dataclass

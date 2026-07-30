@@ -61,7 +61,7 @@ config/                    # Settings loader + config.jsonc
 dashboard/
   backend/                 # FastAPI REST + WebSocket
   frontend/                # React + Vite SPA
-tests/                     # pytest test suite (43 tests)
+tests/                     # pytest test suite (76 tests)
 scripts/                   # Debug/dev utilities
 docs/                      # Extended documentation
 models/                    # ML weights (gitignored)

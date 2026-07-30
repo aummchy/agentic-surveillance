@@ -392,6 +392,7 @@ def _log_effective_settings():
         ("PERSON_CONF_THRESHOLD", "PERSON_CONF_THRESHOLD", 0.40, float),
         ("FRAME_WIDTH", "FRAME_WIDTH", 1280, int),
         ("FRAME_HEIGHT", "FRAME_HEIGHT", 720, int),
+        ("FRAME_SKIP", "FRAME_SKIP", 2, int),
         ("EMBEDDING_DET_SCORE_MIN", "EMBEDDING_DET_SCORE_MIN", 0.40, float),
         ("DET_SCORE_MIN", "DET_SCORE_MIN", 0.40, float),
         ("DET_SCORE_RELAXED", "DET_SCORE_RELAXED", 0.20, float),
@@ -584,6 +585,7 @@ CALC_LOG_MAX_SIZE_MB = _get("CALC_LOG_MAX_SIZE_MB", "CALC_LOG_MAX_SIZE_MB", 10, 
 
 # ── Debug Flags ─────────────────────────────────────────────
 DEBUG_RECOGNITION = _get("DEBUG_RECOGNITION", "DEBUG_RECOGNITION", False, bool)
+DEBUG_DUPLICATE_BOXES = _get("DEBUG_DUPLICATE_BOXES", "DEBUG_DUPLICATE_BOXES", False, bool)
 
 # ── CLAHE ──────────────────────────────────────────────────────
 CLAHE_CLIP_LIMIT = _get("CLAHE_CLIP_LIMIT", "CLAHE_CLIP_LIMIT", 2.0, float)
@@ -616,6 +618,7 @@ CAMERA_SOURCE = _get("CAMERA_SOURCE", "CAMERA_SOURCE", "")
 CAMERA_INDEX = _get("CAMERA_INDEX", "CAMERA_INDEX", 0, int)
 FRAME_WIDTH = _get("FRAME_WIDTH", "FRAME_WIDTH", 1280, int)
 FRAME_HEIGHT = _get("FRAME_HEIGHT", "FRAME_HEIGHT", 720, int)
+FRAME_SKIP = _get("FRAME_SKIP", "FRAME_SKIP", 2, int)
 CAMERA_ID = _get("CAMERA_ID", "CAMERA_ID", "cam_01")
 # CAMERA_BACKEND: Video capture backend — "dshow" (DirectShow), "msmf", or "" (auto).
 # Use "dshow" on Windows if MSMF drops frames (error -1072875772).

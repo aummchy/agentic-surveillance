@@ -1,6 +1,6 @@
-# TODO — Visitor Surveillance System
+# CHANGELOG.md — Agentic AI Surveillance System
 
-## Status: 1 remaining (env credentials). All recognition/throttle/confidence/visibility fixes complete (2026-07-09). Quality-gated skip + ByteTrack tuning complete (2026-07-30).
+## Status: 1 remaining (env credentials). All recognition/throttle/confidence/visibility fixes complete (2026-07-09). Quality-gated skip + ByteTrack tuning + performance optimizations complete (2026-07-30).
 
 ---
 
@@ -10,12 +10,17 @@
 
 ---
 
+## Performance (2026-07-30)
+
+- [x] Unconditional `cv2.resize()` to 1280×720 before YOLO — consistent inference speed regardless of camera source resolution
+- [x] `FRAME_SKIP=2` check before executor.submit() — halves JPEG encode + broadcast work
+- [x] WebSocket broadcast resized to 640×360 preview — ~5× smaller payload per frame
+
 ## Recent Fixes (2026-07-30)
 
-- [x] Quality-gated recognition skip — `camera_agent.py:306-331` `else: return` prevents embedding storage from low-quality faces
+- [x] Quality-gated recognition skip — `camera_agent.py:291-296` `else: return` prevents embedding storage from low-quality faces
 - [x] ByteTrack tuning — `config/bytetrack_surveillance.yaml` with custom params for fixed-camera surveillance
 - [x] AGENTS.md expanded — entry points, folder responsibilities, coding rules, do/don'ts
-- [x] LOCATIONS.md created — quick navigation file-to-feature map
 - [x] TOOLS.md created — developer tools reference (repomix, ctags, ast-grep)
 - [x] SYSTEM_INDEX.md updated — new files, recent fixes, corrected thresholds
 

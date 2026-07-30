@@ -84,7 +84,7 @@ main.py (entry point, wires everything)
 - **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
 - **Threshold conversion.** Atlas `vectorSearchScore = (1+cosine)/2`. Always convert back: `raw_cosine = (atlas_score * 2) - 1` before comparing against `MATCH_THRESHOLD`. Use `compare_similarity()` in `db_utils.py`.
 - **Match threshold.** Keep `MATCH_THRESHOLD` ≤ 0.45. Default is 0.45. Higher rejects genuine same-person matches under indoor lighting.
-- **One decision per track.** Recognition + decision runs once when track ends (or progressively every 10 frames). Not per-frame.
+- **One decision per track.** Recognition + decision runs once when track ends (or progressively every 20 frames). Not per-frame.
 - **Composite track IDs.** Format: `{camera_id}_{session_epoch}_{byte_track_id}` — unique across camera restarts.
 
 ## Quality scoring
@@ -145,7 +145,7 @@ See `docs/TERMINAL_OUTPUT.md` for full event format reference.
 - **2026-07-09**: Tightened CORS to explicit methods/headers.
 - **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→65.
 - **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
-- **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
+- **2026-07-30**: Performance — unconditional `cv2.resize()` to 1280×720 before YOLO inference (`camera_agent.py:146`); `FRAME_SKIP` skips every other frame before JPEG encode (`track_processor.py:46`); WebSocket broadcast resized to 640×360 preview (`track_processor.py:52`).
 
 ## Common entry points
 
@@ -166,7 +166,7 @@ See `docs/TERMINAL_OUTPUT.md` for full event format reference.
 | utils/ | Shared utilities | db_utils, embedding_utils, llm_client, image_utils |
 | config/ | Configuration | settings.py, config.jsonc, bytetrack_surveillance.yaml |
 | dashboard/ | Web dashboard | backend/main.py, frontend/src/ |
-| tests/ | 43 pytest tests | test_recognition, test_embedding_history, test_thread_safety |
+| tests/ | 76 pytest tests | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer |
 | scripts/ | Session query tools | query_*.py (11 files) |
 | docs/ | Documentation | ARCHITECTURE, FORMULAS, CHANGELOG, ISSUES, TERMINAL_OUTPUT |
 
@@ -182,7 +182,7 @@ See `docs/TERMINAL_OUTPUT.md` for full event format reference.
 
 ## Do / Don'ts
 
-Do:
+Do: 
 - Edit `config/config.jsonc` for detection, quality, recognition settings
 - Edit `.env` for secrets (MONGODB_URI, API keys, passwords)
 - Run `python -m pytest tests/ -v` before committing

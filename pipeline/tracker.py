@@ -61,11 +61,22 @@ def track_persons(frame: np.ndarray, persist: bool = True) -> list:
     tracks = []
     for r in results:
         if r.boxes is None or r.boxes.id is None:
+            if getattr(settings, "DEBUG_DUPLICATE_BOXES", False):
+                logger.debug("yolo_no_detections")
             continue
 
         ids = r.boxes.id.cpu().numpy()
         boxes = r.boxes.xyxy.cpu().numpy()
         confs = r.boxes.conf.cpu().numpy()
+
+        if getattr(settings, "DEBUG_DUPLICATE_BOXES", False):
+            detections = [
+                {"box": tuple(map(int, b)), "conf": round(float(c), 3), "track_id": int(tid)}
+                for tid, b, c in zip(ids, boxes, confs)
+            ]
+            logger.debug("yolo_raw_detections",
+                         frame_count=len(tracks),  # just for correlation, reset below
+                         detections=detections)
 
         for tid, box, conf in zip(ids, boxes, confs):
             x1, y1, x2, y2 = map(int, box)
@@ -74,5 +85,11 @@ def track_persons(frame: np.ndarray, persist: bool = True) -> list:
                 "box": (x1, y1, x2, y2),
                 "confidence": float(conf)
             })
+
+    if getattr(settings, "DEBUG_DUPLICATE_BOXES", False):
+        logger.debug("bytetrack_output",
+                     track_count=len(tracks),
+                     track_ids=[t["track_id"] for t in tracks],
+                     boxes=[t["box"] for t in tracks])
 
     return tracks

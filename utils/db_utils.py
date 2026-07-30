@@ -129,7 +129,15 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> d
 
         logger.debug("atlas_search_result", match_count=len(matches), total_count=len(all_results),
                      scores=[round(m["similarity_score"], 4) for m in matches])
-        return {"matches": matches, "top2": top2, "margin": margin}
+        return {
+            "matches": matches,
+            "top2": top2,
+            "margin": margin,
+            "all_candidates": [
+                {"name": r.get("name", "?"), "similarity": round(r["similarity_score"], 4)}
+                for r in all_results
+            ]
+        }
 
     except Exception as e:
         logger.warning("atlas_vector_search_failed", error=str(e))
@@ -142,7 +150,15 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> d
         matches = [r for r in all_results if compare_similarity(r["similarity_score"])]
         logger.info("python_scan_fallback_result", match_count=len(matches), total_count=len(all_results),
                      scores=[round(m["similarity_score"], 4) for m in matches])
-        return {"matches": matches, "top2": top2, "margin": margin}
+        return {
+            "matches": matches,
+            "top2": top2,
+            "margin": margin,
+            "all_candidates": [
+                {"name": r.get("name", "?"), "similarity": round(r["similarity_score"], 4)}
+                for r in all_results
+            ]
+        }
 
 
 def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5) -> list:

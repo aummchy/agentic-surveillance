@@ -444,16 +444,19 @@ RULE 2: "authorized" in tags
 RULE 3: verified == True
     → status="verified", alert_level="none", should_alert=False
 
-RULE 4: matched AND is_known_from_memory
+RULE 4a: "auto_registered" in tags AND similarity > 0.65
     → status="known_visitor", alert_level="low", should_alert=False
 
-RULE 5: matched (not memory-confirmed)
+RULE 4b: matched AND is_known_from_memory
+    → status="known_visitor", alert_level="low", should_alert=False
+
+RULE 5: matched (not auto-registered, not memory-confirmed)
     5a: similarity >= KNOWN_VISITOR_SIMILARITY (0.85) OR confidence >= KNOWN_VISITOR_CONFIDENCE (80)
         → status="known_visitor", alert_level="low"
     5b: similarity >= MATCH_THRESHOLD (0.45)
-        → status="known_visitor", alert_level="low"
-    5c: else
-        → status="uncertain", alert_level="low", should_register=True
+        → status="unknown", alert_level="low", should_register=False
+    5c: else (unreachable)
+        → status="unknown", alert_level="low", should_register=False
 
 RULE 6: visibility == "hidden"
     → status="intentionally_hidden", alert_level="high", should_alert=True
@@ -697,9 +700,16 @@ Returns True if status_code == 200
 
 ---
 
-## 21. Dashboard broadcast pipeline (`dashboard/backend/routes/live.py`)
+## 21. Dashboard broadcast pipeline (`dashboard/backend/routes/live.py`, `agents/track_processor.py`)
 
 ```
+Per-frame pipeline (track_processor.py):
+    — frame_counter += 1
+    — if counter % FRAME_SKIP (2) != 0: return       ← skip before encode
+    — preview = cv2.resize(frame, (640, 360))         ← downscale for WebSocket
+    — cv2.imencode(".jpg", preview, ...)              ← 640×360 JPEG
+    — submit encode task to executor
+
 WebSocket /ws/live:
 
 broadcast_frame(jpeg_bytes):
@@ -734,8 +744,8 @@ Recognition executor (2 threads):
 Track worker pool (2 threads):
     process_finalized_track()           — Cloudinary + DB + alerts + events
 
-JPEG encode executor (2 threads):
-    _encode_and_broadcast()             — JPEG encode + WebSocket broadcast
+JPEG encode + broadcast (inline in camera loop):
+    on_frame_annotated()                — JPEG encode + WebSocket broadcast (no separate executor)
 
 Alert executor (2 threads):
     _send_async()                       — LLM summary + email/sms/webhook
@@ -780,7 +790,17 @@ Thread safety:
 | QUALITY_BLUR_MIN | 40 | Minimum Laplacian variance for scoring normalization |
 | QUALITY_BRIGHTNESS_MIN | 35 | Min HSV-V brightness (validity gate) |
 | QUALITY_BRIGHTNESS_MAX | 255 | Max HSV-V brightness (validity gate) |
-| QUALITY_FACE_AREA_MIN | 1500 | Min face area for scoring normalization |
+| RECOGNITION_INTERVAL_FRAMES | 20 | Run progressive recognition every N frames |
+| MIN_QUALITY_IMPROVEMENT | 0.10 | Min quality improvement to trigger re-recognition |
+| QUALITY_VALID_BLUR_MIN | 40 | Validity gate: min Laplacian variance |
+| QUALITY_VALID_BRIGHTNESS_MIN | 35 | Validity gate: min HSV-V brightness |
+| QUALITY_VALID_BRIGHTNESS_MAX | 255 | Validity gate: max HSV-V brightness |
+| QUALITY_VALID_FACE_AREA_MIN | 1200 | Validity gate: min face area px² |
+| QUALITY_BLUR_MIN | 40 | Blur normalization floor (shifted from 40) |
+| QUALITY_BLUR_MAX | 350 | Blur normalization cap |
+| QUALITY_BRIGHTNESS_CENTER | 145 | Brightness model center (peak score) |
+| QUALITY_BRIGHTNESS_RADIUS | 110 | Brightness model radius |
+| QUALITY_FACE_AREA_MIN | 1500 | Area normalization floor (shifted from 1500) |
 | QUALITY_BLUR_MAX | 350 | Blur normalization cap |
 | QUALITY_AREA_MAX | 10000 | Area normalization cap |
 | QUALITY_WEIGHT_BLUR | 0.50 | Blur weight in overall score |
@@ -918,8 +938,7 @@ Implementation Note — Defensive Re-normalization in Python Fallback Paths
 
 Although the canonical pipeline stores and queries L2-normalized face embeddings, the Python fallback comparison paths (_python_cosine_scan, find_similar_unknowns, find_similar_faces) defensively re-normalize embeddings with np.linalg.norm(...) before cosine computation.
 
-// “Treat raw cosine 0.25 as confidence 0, raw cosine 0.80 as confidence 100, and linearly scale everything in between.”
-// confidence = clip(((raw_cosine - 0.25) / 0.55) * 100, 0, 100)
+// See Part 3 §4 below for the current weighted normalization formula (replaces old linear scaling).
 
 ---
 
@@ -1240,18 +1259,18 @@ Even if `matched=False`, confidence can still reach `"uncertain"` (>= 55) from q
 ### Rule priority (highest wins)
 
 ```
-1. BLACKLIST   → status="blacklist",     alert="critical", should_alert=True
-2. AUTHORIZED  → status="authorized",    alert="none",     should_alert=False
-3. VERIFIED    → status="verified",      alert="none",     should_alert=False
-4. KNOWN       → status="known_visitor", alert="low",      should_alert=False
-5. MATCHED     → depends on similarity/confidence:
-     - sim >= 0.85 or conf >= 80  → known_visitor
-     - sim >= 0.45                → known_visitor
-     - else                       → uncertain + register
+1. BLACKLIST   → status="blacklist",           alert="critical", should_alert=True
+2. AUTHORIZED  → status="authorized",          alert="none",     should_alert=False
+3. VERIFIED    → status="verified",            alert="none",     should_alert=False
+4a. AUTO-REG  → "auto_registered" in tags AND sim > 0.65  → status="known_visitor", alert="low"
+4b. KNOWN (memory) → matched AND is_known_from_memory     → status="known_visitor", alert="low"
+5a. MATCHED (high)  → sim >= 0.85 OR conf >= 80           → status="known_visitor", alert="low"
+5b. MATCHED (mid)   → sim >= 0.45 (not 5a)                → status="unknown",       alert="low"
+5c. MATCHED (else)  → unreachable                          → status="unknown",       alert="low"
 6. HIDDEN      → status="intentionally_hidden", alert="high"
-7. MASKED      → status="masked_unknown", alert depends on loitering
-8. AFTER-HOURS → status="unknown", alert="high"
-9. OFFICE-HOURS→ status="unknown", alert="medium"
+7. MASKED      → status="masked_unknown",       alert medium/high (loitering >30s)
+8. AFTER-HOURS → status="unknown",              alert="high"
+9. OFFICE-HOURS→ status="unknown",              alert="medium"
 ```
 
 ### Policy decision fields
@@ -1304,7 +1323,7 @@ DecisionResult(
 | `DET_SCORE_MIN` | 0.40 | Standard face detection threshold |
 | `DET_SCORE_RELAXED` | 0.20 | Permissive fallback threshold |
 | `EMBEDDING_DET_SCORE_MIN` | 0.40 | Min detection score to generate embedding |
-| `RECOGNITION_INTERVAL_FRAMES` | 10 | Run recognition every N frames |
+| `RECOGNITION_INTERVAL_FRAMES` | 20 | Run recognition every N frames |
 
 ---
 
@@ -1320,7 +1339,7 @@ YOLO person detection (track_persons)
 ByteTrack tracking (track_state)
     │
     ▼
-Progressive recognition (every 10 frames)
+Progressive recognition (every 20 frames)
     │
     ├── Face detection (SCRFD via InsightFace)
     │       │

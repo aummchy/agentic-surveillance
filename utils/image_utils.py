@@ -183,6 +183,20 @@ def _put_label_with_bg(img, text, pos, font_scale, color, thickness=1, bg_color=
     cv2.putText(img, text, (tx + 2, ty - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
 
 
+def compute_iou(box_a: tuple, box_b: tuple) -> float:
+    x1 = max(box_a[0], box_b[0])
+    y1 = max(box_a[1], box_b[1])
+    x2 = min(box_a[2], box_b[2])
+    y2 = min(box_a[3], box_b[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    if inter == 0:
+        return 0.0
+    area1 = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area2 = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area1 + area2 - inter
+    return inter / union if union > 0 else 0.0
+
+
 def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
     if not tracks:
         return frame

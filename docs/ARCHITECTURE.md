@@ -1,4 +1,4 @@
-# spec.md — agentic_ai_singlecam
+# ARCHITECTURE.md — agentic_ai_singlecam
 
 ## Tech Stack & How It Connects
 
@@ -21,7 +21,7 @@
 | **Live feed** | WebSocket (`/ws/live`) via `broadcast_frame()` | JPEG encoded at quality 65, base64, JSON. Every 2nd frame. 1MB cap. 1s send timeout per client. |
 | **Chat** | `POST /api/chat` + Ollama | Intent routing via keywords → fetches relevant data (stats/events/unknowns) → LLM prompted with data. Falls back to raw summary. |
 | **Config** | `.env` (secrets) + `config.jsonc` (tunables) | `config/settings.py` resolves: env var > jsonc > hardcoded default. JSONC supports comments via custom parser. `validate_config()` on startup. |
-| **Logging** | structlog | Console INFO+, file DEBUG to `logs/surveillance.log` (5MB × 5 rotating). Noisy pymongo silenced to WARNING. |
+| **Logging** | structlog (3-tier) | Terminal (CompactTerminalRenderer, INFO+), JSON file `logs/surveillance.jsonl` (5MB × 5 rotating, DEBUG+), debug file `logs/surveillance.debug.log` (10MB × 3 rotating, DEBUG+). Noisy pymongo/insightface silenced to WARNING. |
 
 ## Architecture Diagram
 
@@ -30,7 +30,7 @@ main.py
 ├── # Thread: CameraAgent._loop()
 │   ├── YOLOv8 detect persons per frame
 │   ├── TrackState.update() (thread-safe, composite IDs)
-│   ├── Every 10 frames: ThreadPool → progressive_recognition()
+│   ├── Every 20 frames: ThreadPool → progressive_recognition()
 │   │   ├── InsightFace detection + embedding (quality-gated overwrite)
 │   │   ├── Quality gate: skip embedding if face invalid (blur/brightness/area)
 │   │   ├── Embedding cache check (cosine dist < 0.005 → skip Atlas)
@@ -65,8 +65,8 @@ main.py
 - **Embedding cache** — if new embedding's cosine distance from last searched < 0.005, skip Atlas round-trip and reuse prior `MatchResult`
 - **OpenVINO GPU** — YOLO OpenVINO IR models use `device=intel:GPU` format. Ultralytics' backend parses `intel:` prefix to extract the OpenVINO device while setting PyTorch device to `cpu`. InsightFace stays on CPU (OpenVINO EP not used due to DLL compatibility issues).
 - **Quality-gated embedding** — per-track: only overwrites if `det_score` exceeds existing by ≥ 0.05. Per-DB: only overwrites `latest_embedding` if new `quality_score` > stored quality (no backward-compat unconditional overwrite)
-- **Quality-gated recognition skip** — `camera_agent.py:306-331`: if face quality fails validity gates (blur < 40, brightness outside 35-255, area < 1200px²), `else: return` prevents embedding generation, MongoDB search, and identity assignment. Prevents blurry faces from being incorrectly matched to known persons.
-- **Best face hysteresis** — quality score buffer reduced to +0.03 (was +0.10) for gradual improvement
+- **Quality-gated recognition skip** — `camera_agent.py:291-296`: if face quality fails validity gates (blur < 40, brightness outside 35-255, area < 1200px²), `else: return` prevents embedding generation, MongoDB search, and identity assignment. Prevents blurry faces from being incorrectly matched to known persons.
+- **Best face hysteresis** — quality score buffer of +0.03 in `track_state.py:202` requires >3% improvement to replace best face
 - **Atlas vector search fallback** — if Atlas `$vectorSearch` fails/timeouts, falls to `_python_cosine_scan()` scanning up to 500 docs
 - **LLM optional** — system runs without Ollama; NL summaries fall back to template strings
 
@@ -90,4 +90,5 @@ main.py
 | QUALITY_BLUR_MIN | 40 | Minimum Laplacian variance for scoring normalization. |
 | QUALITY_FACE_AREA_MIN | 1500 | Min face area for scoring normalization. |
 | TRACK_TIMEOUT_SECS | 3.0 | Person gone for 3s = track ends. |
+| RECOGNITION_INTERVAL_FRAMES | 20 | Run recognition every N frames |
 | ALERT_COOLDOWN_SECS | 60 | Per-level dedup window. |
