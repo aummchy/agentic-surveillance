@@ -17,10 +17,6 @@ onnxruntime>=1.16.0         # CPU inference (use onnxruntime-gpu if CUDA)
 pymongo>=4.6.0              # MongoDB Atlas + vector search
 cloudinary>=1.36.0          # Image archival
 
-# Orchestration
-langgraph>=0.1.0            # Optional: stateful agent graph
-langchain>=0.1.0
-
 # Backend / dashboard
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
