@@ -9,7 +9,7 @@ from pipeline.tracker import track_persons
 from pipeline.track_state import TrackState
 from pipeline.quality_agent import compute_quality
 from pipeline.face import compute_face_ratio
-from pipeline.models import Track
+from pipeline.models import Track, QualityResult
 from utils.image_utils import crop_person, resize_image, draw_annotations, save_image, upload_to_cloudinary, resolve_track_image_url
 from utils.embedding_utils import get_insightface
 from agents.recognition import RecognitionAgent
@@ -40,6 +40,10 @@ class CameraAgent:
         self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="recognition"
         )
+        self._recognition_submit_times: dict = {}
+        self._recognition_submit_lock = threading.Lock()
+        self._recognition_start_times: dict = {}
+        self._recognition_start_lock = threading.Lock()
 
     @staticmethod
     def _camera_source():
@@ -151,6 +155,12 @@ class CameraAgent:
 
             tracks = track_persons(frame)
 
+            if settings.DEBUG_RECOGNITION:
+                logger.debug("recognition_cycle",
+                             frame=self._frame_count,
+                             track_count=len(tracks),
+                             recognizing=len(self._recognizing_tracks))
+
             active_ids = set()
             for t in tracks:
                 composite_id = self.track_state.make_composite_id(settings.CAMERA_ID, t["track_id"])
@@ -158,6 +168,13 @@ class CameraAgent:
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
+                    if settings.DEBUG_RECOGNITION:
+                        logger.debug("recognition_tick",
+                                     track_id=track.track_id,
+                                     frame=self._frame_count,
+                                     decision=track.decision,
+                                     best_score=round(track.best_face_score, 3),
+                                     rescan_attempts=track.rescan_attempts)
                     # Skip recognition if already verified/known or high-confidence match
                     already_resolved = track.decision in RESOLVED_STATUSES
                     high_confidence = track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY
@@ -185,6 +202,16 @@ class CameraAgent:
                                 should_skip = True
 
                     if should_skip:
+                        if settings.DEBUG_RECOGNITION:
+                            skip_reason = "resolved" if already_resolved else "high_confidence" if high_confidence else "quality_throttle"
+                            logger.debug("recognition_skipped",
+                                         track_id=track.track_id,
+                                         reason=skip_reason,
+                                         decision=track.decision,
+                                         current_score=round(track.best_face_score, 3),
+                                         previous_best=round(track.last_recognition_quality, 3),
+                                         required_delta=round(track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT, 3),
+                                         delta=round(track.best_face_score - track.last_recognition_quality, 3))
                         logger.debug("skip_recognition_throttled",
                                    track_id=track.track_id,
                                    decision=track.decision,
@@ -198,6 +225,14 @@ class CameraAgent:
                             logger.debug("progressive_recognition_scheduled",
                                        track_id=track.track_id,
                                        frame=self._frame_count)
+                            if settings.DEBUG_RECOGNITION:
+                                submit_time = time.perf_counter()
+                                with self._recognition_submit_lock:
+                                    self._recognition_submit_times[track.track_id] = submit_time
+                                    pending = len(self._recognition_submit_times)
+                                logger.debug("recognition_scheduled",
+                                             track_id=track.track_id,
+                                             pending=pending)
                             self._recognition_executor.submit(
                                 self._progressive_recognition, frame.copy(), track
                             )
@@ -221,10 +256,23 @@ class CameraAgent:
                 self.on_frame_annotated(annotated)
 
     def _progressive_recognition(self, frame: np.ndarray, track: Track):
+        worker_start = time.perf_counter()
+        if settings.DEBUG_RECOGNITION:
+            with self._recognition_submit_lock:
+                submit_time = self._recognition_submit_times.pop(track.track_id, None)
+            queue_delay = (worker_start - submit_time) if submit_time is not None else None
+            with self._recognition_start_lock:
+                self._recognition_start_times[track.track_id] = worker_start
+            logger.debug("recognition_worker_start",
+                         track_id=track.track_id,
+                         queue_delay_ms=round(queue_delay * 1000, 1) if queue_delay is not None else None,
+                         thread=threading.current_thread().name)
         with self._track_sets_lock:
             self._recognizing_tracks.add(track.track_id)
         self.track_state.begin_recognition(track.track_id)
         try:
+            t_total = time.perf_counter()
+
             # Skip InsightFace if already matched with high confidence
             if track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
                 logger.debug("skip_recognition_high_confidence",
@@ -232,6 +280,7 @@ class CameraAgent:
                            similarity=track.pending_match_result.similarity_score)
                 return
 
+            t_detect = time.perf_counter()
             person_crop = crop_person(frame, track.person_box)
             if person_crop.size == 0:
                 logger.debug("empty_person_crop", track_id=track.track_id)
@@ -244,9 +293,22 @@ class CameraAgent:
 
             # Two-stage detection: person crop first (more focused), then full frame
             # when the crop has no faces with embedding-grade quality.
+            t_before_crop_detect = time.perf_counter()
             crop_faces = app.detect_faces_raw(person_crop, min_score=settings.DET_SCORE_RELAXED)
+            t_after_crop_detect = time.perf_counter()
+
             crop_has_embedding_quality = any(f["det_score"] >= settings.EMBEDDING_DET_SCORE_MIN for f in crop_faces)
-            frame_faces = app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED) if not crop_has_embedding_quality else []
+            fallback_used = not crop_has_embedding_quality
+            if fallback_used:
+                frame_faces = app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED)
+            else:
+                frame_faces = []
+            t_after_fallback_detect = time.perf_counter()
+
+            crop_detect_ms = round((t_after_crop_detect - t_before_crop_detect) * 1000, 1)
+            fallback_detect_ms = round((t_after_fallback_detect - t_after_crop_detect) * 1000, 1) if fallback_used else 0.0
+            person_crop_shape = f"{person_crop.shape[1]}x{person_crop.shape[0]}" if person_crop.size > 0 else "empty"
+            faces_on_crop = len(crop_faces)
 
             best = None
             detected_in_person_crop = False
@@ -291,6 +353,7 @@ class CameraAgent:
             else:
                 face_crop = person_crop
 
+            t_quality = time.perf_counter()
             if face_crop.size > 0:
                 quality = compute_quality(face_crop)
                 logger.debug("face_quality",
@@ -301,7 +364,7 @@ class CameraAgent:
                            brightness=quality.brightness,
                            area=quality.face_area)
             else:
-                quality = type('Q', (), {'is_valid': False, 'overall_score': 0.0})()
+                quality = QualityResult.invalid()
 
             if quality.is_valid:
                 self.track_state.set_best_face(
@@ -330,6 +393,7 @@ class CameraAgent:
                 )
                 return
 
+            t_embed = time.perf_counter()
             embedding_list = best["embedding"].tolist()
             self.track_state.set_embedding(
                 track.track_id,
@@ -351,11 +415,13 @@ class CameraAgent:
                         match_result = track.pending_match_result
                         logger.debug("embedding_cache_hit", track_id=track.track_id, distance=cos_dist)
 
+            t_db = time.perf_counter()
             if match_result is None:
                 from agents.matching_agent import run_matching_from_embedding
-                match_result = run_matching_from_embedding(embedding_list)
+                match_result = run_matching_from_embedding(embedding_list, track_id=track.track_id)
                 self.track_state.set_cached_embedding(track.track_id, embedding_list)
 
+            t_memory = time.perf_counter()
             # Phase 2.2: Use Memory Agent for context (skip for high-confidence matches)
             memory_context = {}
             if match_result.matched and match_result.person_id:
@@ -372,6 +438,7 @@ class CameraAgent:
                         "status": "known" if match_result.matched else "unknown",
                     })
 
+            t_recog = time.perf_counter()
             # Phase 2.1: Use Recognition Agent with memory context
             track_duration = time.time() - track.first_seen
             recognition_result = self.recognition_agent.run({
@@ -401,6 +468,15 @@ class CameraAgent:
             # All other alerts are deferred to finalization to avoid premature alerts
             # for verified/known users when early recognition attempts produce low similarity.
             new_confidence = int(recognition_result.get("confidence", 0))
+
+            if settings.DEBUG_RECOGNITION:
+                logger.debug("decision_check",
+                             track_id=track.track_id,
+                             new_confidence=new_confidence,
+                             existing_confidence=track.confidence,
+                             decision_status=decision.status,
+                             should_alert=decision.should_alert,
+                             alert_level=decision.alert_level)
 
             if decision.should_alert and decision.alert_level == "critical" and not track.alerted:
                 with self._track_sets_lock:
@@ -445,9 +521,49 @@ class CameraAgent:
             if memory_context:
                 self.track_state.set_pending_memory_context(track.track_id, memory_context)
 
+            if settings.DEBUG_RECOGNITION:
+                t_policy_ms = round((time.perf_counter() - t_recog) * 1000, 1)
+                t_memory_ms = round((t_recog - t_memory) * 1000, 1)
+                t_db_ms = round((t_memory - t_db) * 1000, 1)
+                t_embed_ms = round((t_db - t_embed) * 1000, 1)
+                t_quality_ms = round((t_embed - t_quality) * 1000, 1)
+                t_detect_ms = round((t_quality - t_detect) * 1000, 1)
+                t_total_ms = round((time.perf_counter() - t_total) * 1000, 1)
+                logger.debug("recognition_timing",
+                             track_id=track.track_id,
+                             crop_detect_ms=crop_detect_ms,
+                             fallback_detect_ms=fallback_detect_ms,
+                             fallback_used=fallback_used,
+                             person_crop_shape=person_crop_shape,
+                             faces_on_crop=faces_on_crop,
+                             detect_ms=t_detect_ms,
+                             quality_ms=t_quality_ms,
+                             embed_ms=t_embed_ms,
+                             db_ms=t_db_ms,
+                             memory_ms=t_memory_ms,
+                             recog_policy_ms=t_policy_ms,
+                             total_ms=t_total_ms)
+
         except Exception as e:
             logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e), exc_info=True)
         finally:
+            if settings.DEBUG_RECOGNITION:
+                worker_end = time.perf_counter()
+                with self._recognition_start_lock:
+                    start_time = self._recognition_start_times.pop(track.track_id, None)
+                duration_ms = round((worker_end - start_time) * 1000, 1) if start_time is not None else None
+                # Check if track still exists in TrackState
+                current_track = self.track_state.get(track.track_id)
+                track_stale = current_track is not track if current_track else True
+                # Verify if decision None is logging artifact or functional bug
+                actual_decision = current_track.decision if current_track else "track_removed"
+                logger.debug("recognition_worker_done",
+                             track_id=track.track_id,
+                             duration_ms=duration_ms,
+                             decision=track.decision,
+                             actual_decision=actual_decision,
+                             confidence=track.confidence,
+                             track_stale=track_stale)
             self.track_state.end_recognition(track.track_id)
             with self._track_sets_lock:
                 self._recognizing_tracks.discard(track.track_id)
@@ -500,9 +616,19 @@ class CameraAgent:
                         break
 
                 if best:
-                    track.embedding = best["embedding"].tolist()
-                    track.is_masked = best["is_masked"]
-                    logger.debug("final_embed_done", track_id=track.track_id, source=source, score=best["det_score"])
+                    accepted = self.track_state.set_embedding(
+                        track.track_id,
+                        best["embedding"].tolist(),
+                        is_masked=best["is_masked"],
+                        det_score=best["det_score"],
+                    )
+                    if accepted:
+                        logger.debug("final_embed_done", track_id=track.track_id, source=source, score=best["det_score"])
+                    else:
+                        logger.debug("embedding_rejected_by_quality_gate",
+                                     track_id=track.track_id,
+                                     current_det_score=round(track.embedding_det_score, 3),
+                                     new_det_score=round(best["det_score"], 3))
                 else:
                     logger.info("no_embedding_after_retries",
                               track_id=track.track_id,

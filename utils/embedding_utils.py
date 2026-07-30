@@ -39,7 +39,10 @@ class InsightFaceSingleton:
                         self.app.prepare(ctx_id=0, det_size=(settings.INSIGHTFACE_DET_SIZE,
                                                               settings.INSIGHTFACE_DET_SIZE))
                     InsightFaceSingleton._initialized = True
-                    logger.info("insightface_loaded", model=settings.INSIGHTFACE_MODEL)
+                    logger.info("insightface_loaded",
+                                model=settings.INSIGHTFACE_MODEL,
+                                provider=settings.INSIGHTFACE_PROVIDER,
+                                det_size=settings.INSIGHTFACE_DET_SIZE)
 
     @staticmethod
     def _apply_clahe(image: np.ndarray) -> np.ndarray:

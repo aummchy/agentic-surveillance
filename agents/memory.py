@@ -110,7 +110,7 @@ class MemoryAgent(BaseAgent):
                 hour_counts[h] = hour_counts.get(h, 0) + 1
             # Get the most common hours
             common_hours = sorted(hour_counts.keys(), key=lambda x: hour_counts[x], reverse=True)[:3]
-            is_typical_time = any(abs(current_hour - h) <= 2 for h in common_hours)
+            is_typical_time = any(min(abs(current_hour - h), 24 - abs(current_hour - h)) <= 2 for h in common_hours)
 
         # Check if this is a typical camera
         is_typical_camera = camera_id in typical_cameras
@@ -218,7 +218,7 @@ class MemoryAgent(BaseAgent):
             "visit_count": 0,
             "first_seen": None,
             "last_seen": None,
-            "days_since_last_visit": 0,
+            "days_since_last_visit": None,
             "avg_similarity": 0.0,
             "typical_hours": [],
             "typical_cameras": [],

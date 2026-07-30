@@ -60,6 +60,14 @@ class QualityResult:
     is_valid: bool
     overall_score: float
 
+    @classmethod
+    def invalid(cls) -> "QualityResult":
+        """Return a default invalid quality result.
+
+        Use when quality assessment cannot be performed (e.g., empty crop or invalid ROI).
+        """
+        return cls(blur_score=0.0, brightness=0.0, face_area=0, is_valid=False, overall_score=0.0)
+
 
 @dataclass
 class EmbeddingResult:

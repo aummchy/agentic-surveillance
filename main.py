@@ -263,7 +263,7 @@ def process_finalized_track(track: Track):
             "person_name": track.person_name or (match_result.name if match_result.matched else None),
             "similarity_score": match_result.similarity_score if match_result.matched else 0.0,
             "image_url": image_url,
-            "best_face_crop_url": f"http://localhost:8000/{best_crop_path.replace(chr(92), '/')}" if best_crop_path else None,
+            "best_face_crop_url": f"http://localhost:8000/{track.best_face_crop_path.replace(chr(92), '/')}" if track.best_face_crop_path else None,
             "reason": f"Track finalized: {decision.status}",
             "alerted": track.alerted,
             "timestamp": datetime.utcnow().isoformat(),

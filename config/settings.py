@@ -116,6 +116,8 @@ def _get(env_key: str, config_key: str, default, cast=str):
                 elem_type = type(default[0])
                 return [elem_type(v) for v in items]
             return items
+        if cast is bool:
+            return val.lower() not in ("false", "0", "no", "off", "")
         return cast(val)
     return cast(_config.get(config_key, default))
 
@@ -162,15 +164,15 @@ class CompactTerminalRenderer:
         "camera_stopped": "{_pfx} stopped",
         "camera_reconnected": "{_pfx} reconnected res={resolution}",
         "recognition_decision": (
-            "{_pfx} {name:<10} {_status} "
+            "{_pfx} {_trk} {name:<10} {_status} "
             "sim={_sim} top2={_top2} gap={_gap} q={_quality} dur={_duration}s conf={confidence}"
         ),
-        "match_found": "{_pfx} {name:<10} sim={_sim} top2={_top2} gap={_gap} verified={verified} tags={tags}",
-        "memory_lookup": "{_pfx} {person_id:<12} visits={visit_count} known={is_known} boost={confidence_boost}",
-        "policy_decision": "{_pfx} {_status} alert={alert_level} {_alert_flag} vis={visit_count}",
+        "match_found": "{_pfx} {_trk} {name:<10} sim={_sim} top2={_top2} gap={_gap} verified={verified} tags={tags}",
+        "memory_lookup": "{_pfx} {_trk} {person_id:<12} visits={visit_count} known={is_known} boost={confidence_boost}",
+        "policy_decision": "{_pfx} {_trk} {_status} alert={alert_level} {_alert_flag} vis={visit_count}",
         "visit_recorded": "{_pfx} {display_id} {visit_action} total={visit_count}",
         "track_finalized": (
-            "{_pfx} {name:<10} {_status} "
+            "{_pfx} {_trk} {name:<10} {_status} "
             "sim={_sim} top2={_top2} gap={_gap} conf={confidence} "
             "frames={total_frames_seen} face={frames_with_detectable_face} vis={visit_count}"
         ),
@@ -204,6 +206,8 @@ class CompactTerminalRenderer:
         prefix = self.PREFIX_MAP.get(event, event[:5].upper())
         pfx_color = Colors.PREFIX.get(prefix, Colors.WHITE)
         d["_pfx"] = f"{ts} {pfx_color}{prefix:<7}{Colors.RESET}"
+
+        d["_trk"] = f"trk={d['byte_track_id']}" if "byte_track_id" in d else "trk=---"
 
         # Build colored status
         status = d.get("status")
@@ -349,11 +353,21 @@ def setup_logging():
 
     logging.root.setLevel(logging.DEBUG)
 
+    def add_byte_track_id(logger, method_name, event_dict):
+        track_id = event_dict.get("track_id")
+        if isinstance(track_id, str):
+            try:
+                event_dict["byte_track_id"] = str(int(track_id.rsplit("_", 1)[-1]))
+            except (ValueError, IndexError):
+                event_dict["byte_track_id"] = "?"
+        return event_dict
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
+            add_byte_track_id,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
@@ -366,6 +380,8 @@ def setup_logging():
 
 
 setup_logging()
+
+logger = structlog.get_logger("config")
 
 
 def _log_effective_settings():
@@ -437,6 +453,16 @@ def validate_config():
         if ch.strip() not in valid_channels:
             errors.append(f"Invalid alert channel: {ch.strip()}")
 
+    # Quality weight validation — use already-loaded constants
+    for name, val in [("QUALITY_WEIGHT_BLUR", QUALITY_WEIGHT_BLUR),
+                      ("QUALITY_WEIGHT_BRIGHT", QUALITY_WEIGHT_BRIGHT),
+                      ("QUALITY_WEIGHT_AREA", QUALITY_WEIGHT_AREA)]:
+        if not (0 <= val <= 1):
+            errors.append(f"{name} must be between 0 and 1")
+    total = QUALITY_WEIGHT_BLUR + QUALITY_WEIGHT_BRIGHT + QUALITY_WEIGHT_AREA
+    if abs(total - 1.0) > 1e-6:
+        logger.warning("quality_weights_sum_invalid", total=round(total, 3))
+
     if errors:
         raise ValueError("Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
@@ -457,7 +483,11 @@ CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
 
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
 SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+try:
+    SMTP_PORT = int(os.getenv("SMTP_PORT") or "587")
+except (ValueError, TypeError):
+    logger.warning("invalid_smtp_port", value=os.getenv("SMTP_PORT"), fallback=587)
+    SMTP_PORT = 587
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
@@ -482,7 +512,7 @@ DET_SCORE_RELAXED = _get("DET_SCORE_RELAXED", "DET_SCORE_RELAXED", 0.20, float)
 EMBEDDING_DET_SCORE_MIN = _get("EMBEDDING_DET_SCORE_MIN", "EMBEDDING_DET_SCORE_MIN", 0.40, float)
 
 # ── Progressive Recognition ────────────────────────────────────
-RECOGNITION_INTERVAL_FRAMES = _get("RECOGNITION_INTERVAL_FRAMES", "RECOGNITION_INTERVAL_FRAMES", 10, int)
+RECOGNITION_INTERVAL_FRAMES = _get("RECOGNITION_INTERVAL_FRAMES", "RECOGNITION_INTERVAL_FRAMES", 20, int)
 MIN_QUALITY_IMPROVEMENT = _get("MIN_QUALITY_IMPROVEMENT", "MIN_QUALITY_IMPROVEMENT", 0.10, float)
 RESCAN_INTERVAL_SECS = _get("RESCAN_INTERVAL_SECS", "RESCAN_INTERVAL_SECS", 3, int)
 MAX_RESCAN_ATTEMPTS = _get("MAX_RESCAN_ATTEMPTS", "MAX_RESCAN_ATTEMPTS", 3, int)
@@ -551,6 +581,9 @@ CONFIDENCE_UNCERTAIN_MIN = _get("CONFIDENCE_UNCERTAIN_MIN", "CONFIDENCE_UNCERTAI
 # ── Calculation Log ───────────────────────────────────────────
 ENABLE_CALC_LOG = _get("ENABLE_CALC_LOG", "ENABLE_CALC_LOG", False, bool)
 CALC_LOG_MAX_SIZE_MB = _get("CALC_LOG_MAX_SIZE_MB", "CALC_LOG_MAX_SIZE_MB", 10, int)
+
+# ── Debug Flags ─────────────────────────────────────────────
+DEBUG_RECOGNITION = _get("DEBUG_RECOGNITION", "DEBUG_RECOGNITION", False, bool)
 
 # ── CLAHE ──────────────────────────────────────────────────────
 CLAHE_CLIP_LIMIT = _get("CLAHE_CLIP_LIMIT", "CLAHE_CLIP_LIMIT", 2.0, float)

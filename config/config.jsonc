@@ -12,7 +12,7 @@
   // Higher = stricter (fewer false positives), lower = more matches (more false positives).
   // ArcFace optimal range: 0.40–0.60. Max recommended: 0.45.
   "MATCH_THRESHOLD": 0.45,
-  "DEDUP_SIMILARITY_THRESHOLD": 0.40,
+  "DEDUP_SIMILARITY_THRESHOLD": 0.4,
 
   // ── Camera ───────────────────────────────────────────────────
   // Higher resolution = more face detail = better recognition.
@@ -23,7 +23,7 @@
   // ── YOLO Detection ──────────────────────────────────────────
   // Person detection confidence threshold.
   // Lower = track more persons (good for low light), higher = fewer false detections.
-  "PERSON_CONF_THRESHOLD": 0.40,
+  "PERSON_CONF_THRESHOLD": 0.4,
   "TRACK_TIMEOUT_SECS": 3.0,
   "MAX_TRACK_SECS": 300,
 
@@ -40,9 +40,9 @@
   // DET_SCORE_MIN: Standard threshold for face detection confidence.
   // DET_SCORE_RELAXED: Fallback threshold (very permissive, use cautiously).
   // EMBEDDING_DET_SCORE_MIN: Minimum to generate an embedding from a face.
-  "DET_SCORE_MIN": 0.40,
-  "DET_SCORE_RELAXED": 0.20,
-  "EMBEDDING_DET_SCORE_MIN": 0.40,
+  "DET_SCORE_MIN": 0.4,
+  "DET_SCORE_RELAXED": 0.2,
+  "EMBEDDING_DET_SCORE_MIN": 0.4,
 
   // ── Progressive Recognition ──────────────────────────────────
   // Run face recognition every N frames (20 at 30fps = once per 0.67 seconds).
@@ -74,7 +74,7 @@
   "QUALITY_BRIGHTNESS_RADIUS": 110,
   "QUALITY_FACE_AREA_MIN": 1500,
   "QUALITY_AREA_MAX": 10000,
-  "QUALITY_WEIGHT_BLUR": 0.50,
+  "QUALITY_WEIGHT_BLUR": 0.5,
   "QUALITY_WEIGHT_BRIGHT": 0.25,
   "QUALITY_WEIGHT_AREA": 0.25,
 
@@ -83,7 +83,7 @@
   // BROADCAST: Quality for live WebSocket stream (lower = less bandwidth).
   // At 640x480, 80 is recommended — 65 makes compression blocks visibly noisy.
   "JPEG_QUALITY_STORE": 85,
-  "JPEG_QUALITY_BROADCAST": 80,
+  "JPEG_QUALITY_BROADCAST": 65,
 
   // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
   "DEBUG_FACE_CROPS": false,
@@ -107,7 +107,7 @@
   // KNOWN_VISITOR_CONFIDENCE: Alternative confidence threshold.
   // BORDERLINE_QUALITY: Face quality threshold for borderline case.
   // MASK_CONFIDENCE_PENALTY: Multiply confidence by this for masked faces.
-  "VERY_HIGH_SIMILARITY": 0.90,
+  "VERY_HIGH_SIMILARITY": 0.9,
   "HIGH_CONFIDENCE_SIMILARITY": 0.85,
   "KNOWN_VISITOR_SIMILARITY": 0.85,
   "KNOWN_VISITOR_CONFIDENCE": 80,
@@ -121,7 +121,7 @@
 
   // ── Face Visibility ──────────────────────────────────────────
   "VISIBLE_FACE_RATIO": 0.025,
-  "PARTIAL_FACE_RATIO": 0.010,
+  "PARTIAL_FACE_RATIO": 0.01,
   "MIN_TRACK_FRAMES": 15,
 
   // ── Mask Detection ───────────────────────────────────────────
@@ -147,6 +147,11 @@
   // CALC_LOG_MAX_SIZE_MB: Truncate file when it exceeds this size (MB)
   "ENABLE_CALC_LOG": true,
   "CALC_LOG_MAX_SIZE_MB": 10,
+
+  // ── Debug Flags ──────────────────────────────────────────────
+  // DEBUG_RECOGNITION: Enable diagnostic logging for recognition pipeline investigation.
+  // Logs appear in logs/surveillance.debug.log only (not terminal).
+  "DEBUG_RECOGNITION": true,
 
   // ── LLM (Ollama) ────────────────────────────────────────────
   "OLLAMA_URL": "http://localhost:11434",

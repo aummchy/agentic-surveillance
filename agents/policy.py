@@ -95,6 +95,7 @@ class PolicyAgent(BaseAgent):
         )
 
         logger.info("policy_decision",
+                    track_id=track.track_id,
                     status=result.status,
                     alert_level=result.alert_level,
                     should_alert=result.should_alert,
@@ -185,7 +186,21 @@ class PolicyAgent(BaseAgent):
             )
 
         # ═══════════════════════════════════════════════════════
-        # RULE 4: Known visitor (matched + memory confirms)
+        # RULE 4a: Auto-registered self-match (similarity > 0.65)
+        # ═══════════════════════════════════════════════════════
+        if "auto_registered" in tags and similarity > 0.65:
+            return DecisionResult(
+                status="known_visitor",
+                alert_level="low",
+                person_id=person_id,
+                name=name,
+                reason=f"Auto-registered visitor: {name} (similarity={similarity:.2%}).",
+                should_alert=False,
+                should_register=False
+            )
+
+        # ═══════════════════════════════════════════════════════
+        # RULE 4b: Known visitor (matched + memory confirms)
         # ═══════════════════════════════════════════════════════
         if matched and is_known_from_memory:
             # Higher confidence from memory
@@ -226,14 +241,20 @@ class PolicyAgent(BaseAgent):
                     should_register=False   # already linked to existing record
                 )
             else:
+                # Unreachable: vector_search filters by MATCH_THRESHOLD,
+                # so matched=True implies similarity >= MATCH_THRESHOLD.
+                logger.error("unreachable_policy_branch",
+                             similarity=similarity,
+                             threshold=settings.MATCH_THRESHOLD,
+                             person_id=person_id)
                 return DecisionResult(
-                    status="uncertain",
+                    status="unknown",
                     alert_level="low",
                     person_id=person_id,
                     name=name,
-                    reason=f"Uncertain match: {name}. Confidence {confidence:.0f}%.",
+                    reason="Internal policy invariant violated (similarity below MATCH_THRESHOLD).",
                     should_alert=False,
-                    should_register=True
+                    should_register=False,
                 )
 
         # ═══════════════════════════════════════════════════════

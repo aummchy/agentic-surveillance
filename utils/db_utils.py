@@ -390,19 +390,8 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
     push_ops = {}
     if image_url:
         push_ops["images"] = {"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}
-    if embedding:
+    if embedding is not None:
         push_ops["embeddings"] = embedding
-
-        # Quality-gated: only overwrite latest_embedding if new quality is higher
-        if quality_score is not None:
-            existing = collection.find_one(
-                {"person_id": person_id},
-                {"latest_embedding_quality": 1}
-            )
-            current_quality = (existing or {}).get("latest_embedding_quality", 0.0)
-            if quality_score > current_quality:
-                update_ops["$set"]["latest_embedding"] = embedding
-                update_ops["$set"]["latest_embedding_quality"] = quality_score
 
     if push_ops:
         update_ops["$push"] = push_ops
@@ -428,6 +417,25 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
                 update_ops["$set"]["mean_embedding"] = _compute_mean_embedding(all_embs)
 
     result = collection.update_one({"person_id": person_id}, update_ops)
+
+    # Separate atomic update to prevent lower-quality embeddings from
+    # overwriting higher-quality ones during concurrent processing.
+    # Filter is evaluated at write time (after lock), eliminating TOCTOU.
+    if quality_score is not None and embedding is not None:
+        collection.update_one(
+            {
+                "person_id": person_id,
+                "$or": [
+                    {"latest_embedding_quality": {"$exists": False}},
+                    {"latest_embedding_quality": {"$lt": quality_score}},
+                ],
+            },
+            {"$set": {
+                "latest_embedding": embedding,
+                "latest_embedding_quality": quality_score,
+            }},
+        )
+
     return result.modified_count > 0
 
 
@@ -609,6 +617,25 @@ def get_or_create_memory(person_id: str) -> dict:
         upsert=True,
         return_document=ReturnDocument.AFTER,
     )
+    if result is None:
+        logger.warning("find_one_and_update returned None; returning fallback document",
+                       person_id=person_id)
+        return {
+            "person_id": person_id,
+            "visit_count": 0,
+            "first_seen": now,
+            "last_seen": now,
+            "last_camera": None,
+            "last_status": None,
+            "typical_hours": [],
+            "typical_cameras": [],
+            "avg_similarity": 0.0,
+            "similarity_history": [],
+            "status_history": [],
+            "created_at": now,
+            "updated_at": now,
+            "__fallback__": True,
+        }
     return result
 
 
@@ -621,7 +648,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
     database level — visit counts, histories, and camera lists are never lost.
     """
     collection = get_memory_collection()
-    now = datetime.now()
+    now = datetime.utcnow()
     hour = now.hour
     status_entry = {"status": status, "timestamp": now}
 
@@ -661,6 +688,23 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
 
     # Return a summary consistent with what callers expect (memory.py only
     # reads visit_count from the result).
+    if result is None:
+        logger.warning("find_one_and_update returned None; returning fallback document",
+                       person_id=person_id, camera_id=camera_id)
+        return {
+            "person_id": person_id,
+            "visit_count": 1,
+            "last_seen": now,
+            "last_camera": camera_id,
+            "last_status": status,
+            "avg_similarity": 0.0,
+            "similarity_history": [similarity],
+            "status_history": [status_entry],
+            "typical_hours": [hour],
+            "typical_cameras": [camera_id],
+            "updated_at": now,
+            "__fallback__": True,
+        }
     return {
         "person_id": person_id,
         "visit_count": result.get("visit_count", 1),

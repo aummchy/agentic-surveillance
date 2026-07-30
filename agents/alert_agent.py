@@ -87,19 +87,20 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
         except Exception as e:
             logger.error("alert_channel_failed", channel="console", error=str(e))
 
-    # Network-bound alerts + LLM summary run in thread pool (non-blocking)
-    # LLM call moved here so it never blocks console or the main pipeline
+    # Network-bound alerts run in thread pool (non-blocking)
     async_channels = [c for c in settings.ALERT_CHANNELS if c in ("email", "sms", "webhook")]
 
-    def _send_async():
-        if not decision.nl_summary:
-            try:
-                nl = llm_client.generate_nl_summary(payload)
-                if nl:
-                    decision.nl_summary = nl
-            except Exception as e:
-                logger.debug("nl_summary_generation_failed", error=str(e))
+    # Generate NL summary synchronously before thread dispatch to avoid
+    # mutating DecisionResult from the thread pool.
+    if not decision.nl_summary:
+        try:
+            nl = llm_client.generate_nl_summary(payload)
+            if nl:
+                decision.nl_summary = nl
+        except Exception as e:
+            logger.debug("nl_summary_generation_failed", error=str(e))
 
+    def _send_async():
         for channel in async_channels:
             try:
                 if channel == "email":
@@ -111,7 +112,7 @@ def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> b
             except Exception as e:
                 logger.error("alert_channel_failed", channel=channel, error=str(e))
 
-    if async_channels or not decision.nl_summary:
+    if async_channels:
         _alert_executor.submit(_send_async)
 
     return True

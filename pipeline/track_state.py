@@ -2,9 +2,12 @@ import threading
 import time
 import cv2
 import numpy as np
+import structlog
 from typing import Dict, Optional
 from config import settings
 from pipeline.models import Track
+
+logger = structlog.get_logger(__name__)
 
 
 class TrackState:
@@ -37,6 +40,11 @@ class TrackState:
                     max_track_secs=settings.MAX_TRACK_SECS
                 )
                 self._tracks[composite_id] = track
+                if settings.DEBUG_RECOGNITION:
+                    logger.debug("track_created",
+                                 track_id=composite_id,
+                                 active_count=len(self._tracks),
+                                 bt_track_id=track_id)
                 return track
 
     def get(self, composite_id: str) -> Optional[Track]:
@@ -67,6 +75,16 @@ class TrackState:
                     if self._in_flight.get(cid, 0) == 0:
                         to_remove.append(cid)
             for cid in to_remove:
+                if settings.DEBUG_RECOGNITION:
+                    track_obj = self._tracks.get(cid)
+                    lifetime = round(time.time() - track_obj.first_seen, 1) if track_obj else None
+                    logger.debug("track_removed",
+                                 track_id=cid,
+                                 reason="expired",
+                                 active_count=len(self._tracks) - 1,
+                                 lifetime_secs=lifetime,
+                                 total_frames=track_obj.total_frames_seen if track_obj else None,
+                                 face_detected=track_obj.face_detected_once if track_obj else None)
                 del self._tracks[cid]
         return expired
 
@@ -116,6 +134,15 @@ class TrackState:
                 track = self._tracks.get(composite_id)
                 if track and (track.is_expired(settings.TRACK_TIMEOUT_SECS)
                               or track.is_max_lifetime_exceeded()):
+                    if settings.DEBUG_RECOGNITION:
+                        lifetime = round(time.time() - track.first_seen, 1)
+                        logger.debug("track_removed",
+                                     track_id=composite_id,
+                                     reason="expired_after_recognition",
+                                     active_count=len(self._tracks) - 1,
+                                     lifetime_secs=lifetime,
+                                     total_frames=track.total_frames_seen,
+                                     face_detected=track.face_detected_once)
                     del self._tracks[composite_id]
             else:
                 self._in_flight[composite_id] = count - 1
@@ -128,7 +155,10 @@ class TrackState:
                 return
 
         # Encode JPEG outside the lock (expensive operation) — only if score improved significantly
-        _, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
+        success, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
+        if not success:
+            logger.warning("jpeg_encode_failed", composite_id=composite_id, context="set_best_face")
+            return
         jpeg_bytes = jpeg_buf.tobytes()
 
         with self._lock:
@@ -152,7 +182,10 @@ class TrackState:
             if not track or track.fallback_frame_jpeg is not None:
                 return
 
-        _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
+        success, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
+        if not success:
+            logger.warning("jpeg_encode_failed", composite_id=composite_id, context="ensure_fallback_frame")
+            return
         jpeg_bytes = jpeg_buf.tobytes()
 
         with self._lock:
@@ -160,7 +193,7 @@ class TrackState:
             if track and track.fallback_frame_jpeg is None:
                 track.fallback_frame_jpeg = jpeg_bytes
 
-    def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0):
+    def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0) -> bool:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -168,6 +201,8 @@ class TrackState:
                     track.embedding = embedding
                     track.is_masked = is_masked
                     track.embedding_det_score = det_score
+                    return True
+        return False
 
     def set_decision(self, composite_id: str, decision: str, alerted: bool = False):
         with self._lock:

@@ -31,6 +31,17 @@ def get_model() -> YOLO:
             if _model is None:
                 _model = YOLO(settings.YOLO_MODEL)
                 logger.info("yolo_model_loaded", model=settings.YOLO_MODEL)
+                if settings.DEBUG_RECOGNITION:
+                    import yaml
+                    with open(_TRACKER_CONFIG, "r") as f:
+                        bt_cfg = yaml.safe_load(f)
+                    logger.debug("bytetrack_config",
+                                 track_high_thresh=bt_cfg.get("track_high_thresh"),
+                                 track_low_thresh=bt_cfg.get("track_low_thresh"),
+                                 new_track_thresh=bt_cfg.get("new_track_thresh"),
+                                 track_buffer=bt_cfg.get("track_buffer"),
+                                 match_thresh=bt_cfg.get("match_thresh"),
+                                 fuse_score=bt_cfg.get("fuse_score"))
     return _model
 
 

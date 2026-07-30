@@ -72,6 +72,7 @@ class RecognitionAgent(BaseAgent):
         result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context, margin=margin, track_id=track_id)
 
         logger.info("recognition_decision",
+                    track_id=track_id,
                     status=result.status,
                     confidence=result.confidence,
                     similarity=result.similarity,

@@ -363,25 +363,37 @@ def is_available() -> bool:
     return _avail_cache_val
 
 
+_shutdown_lock = threading.Lock()
+
+
 def shutdown():
     """Close HTTP clients on process exit."""
     global _client, _async_client, _shut_down
-    _shut_down = True
-    if _client and not _client.is_closed:
-        _client.close()
+    with _shutdown_lock:
+        if _shut_down:
+            return
+        _shut_down = True
+    # Capture references before clearing globals
+    client = _client
+    async_client = _async_client
     _client = None
-    if _async_client and not _async_client.is_closed:
-        try:
-            import asyncio
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop — close synchronously to avoid leaked connections
-            import asyncio as _aio
-            try:
-                _aio.run(_async_client.aclose())
-            except RuntimeError:
-                pass
-        else:
-            # Running loop exists — schedule async close
-            loop.create_task(_async_client.aclose())
     _async_client = None
+    try:
+        if client and not client.is_closed:
+            client.close()
+    finally:
+        try:
+            if async_client and not async_client.is_closed:
+                try:
+                    import asyncio
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    import asyncio as _aio
+                    try:
+                        _aio.run(async_client.aclose())
+                    except RuntimeError:
+                        pass
+                else:
+                    loop.create_task(async_client.aclose())
+        except Exception as e:
+            logger.warning("async_client_close_failed", error=str(e))

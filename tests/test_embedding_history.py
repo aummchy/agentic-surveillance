@@ -49,14 +49,11 @@ class TestUpdateFaceMeanEmbedding:
 
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_col.find_one.side_effect = [
-            {"latest_embedding_quality": 0.5},
-            {"embeddings": existing_embs},
-        ]
+        mock_col.find_one.return_value = {"embeddings": existing_embs}
 
-        update_ops_captured = {}
+        update_ops_calls = []
         def capture_update(filter_doc, ops, **kwargs):
-            update_ops_captured.update(ops)
+            update_ops_calls.append(ops)
             return MagicMock(modified_count=1)
         mock_col.update_one.side_effect = capture_update
 
@@ -67,13 +64,14 @@ class TestUpdateFaceMeanEmbedding:
             quality_score=0.9,
         )
 
-        assert "$push" in update_ops_captured
-        push = update_ops_captured["$push"]
+        first_ops = update_ops_calls[0]
+        assert "$push" in first_ops
+        push = first_ops["$push"]
         assert push["embeddings"]["$each"] == [new_emb]
 
-        assert "$set" in update_ops_captured
-        assert "mean_embedding" in update_ops_captured["$set"]
-        computed_mean = update_ops_captured["$set"]["mean_embedding"]
+        assert "$set" in first_ops
+        assert "mean_embedding" in first_ops["$set"]
+        computed_mean = first_ops["$set"]["mean_embedding"]
 
         assert len(computed_mean) == len(expected_mean), (
             f"Expected {len(expected_mean)} dims, got {len(computed_mean)}"

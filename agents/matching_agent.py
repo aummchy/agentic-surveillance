@@ -6,7 +6,7 @@ from utils.db_utils import vector_search
 logger = structlog.get_logger(__name__)
 
 
-def run_matching_from_embedding(embedding: list) -> MatchResult:
+def run_matching_from_embedding(embedding: list, track_id: str = "unknown") -> MatchResult:
     if embedding is None:
         return MatchResult(matched=False)
     arr = np.asarray(embedding, dtype=np.float32)
@@ -24,6 +24,7 @@ def run_matching_from_embedding(embedding: list) -> MatchResult:
     margin = result["margin"]
 
     logger.info("match_found",
+                track_id=track_id,
                 person_id=best.get("person_id"),
                 name=best.get("name"),
                 role=best.get("role"),

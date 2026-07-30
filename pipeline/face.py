@@ -8,4 +8,4 @@ def compute_face_ratio(face_bbox: tuple, person_box: tuple) -> float:
     if person_area <= 0:
         return 0.0
 
-    return face_area / person_area
+    return min(max(face_area / person_area, 0.0), 1.0)
