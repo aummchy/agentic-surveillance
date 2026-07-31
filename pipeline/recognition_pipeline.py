@@ -78,10 +78,12 @@ class RecognitionPipeline:
     def run(self, frame: np.ndarray, track: Track) -> PipelineResult:
         t_total = time.perf_counter()
 
-        if track.pending_match_result and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
+        with track._lock:
+            pmr = track.pending_match_result
+        if pmr and pmr.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
             logger.debug("skip_recognition_high_confidence",
                          track_id=track.track_id,
-                         similarity=track.pending_match_result.similarity_score)
+                         similarity=pmr.similarity_score)
             return PipelineResult(skip_reason="high_confidence")
 
         face_det = self._detect_face(frame, track)
@@ -148,7 +150,12 @@ class RecognitionPipeline:
         )
 
     def _detect_face(self, frame: np.ndarray, track: Track):
-        person_crop = crop_person(frame, track.person_box)
+        with track._lock:
+            box = track.person_box
+        if box is None or len(box) != 4:
+            logger.debug("no_person_box", track_id=track.track_id)
+            return None
+        person_crop = crop_person(frame, box)
         if person_crop.size == 0:
             logger.debug("empty_person_crop", track_id=track.track_id)
             return None
@@ -190,14 +197,14 @@ class RecognitionPipeline:
         if best["bbox"]:
             fx1, fy1, fx2, fy2 = best["bbox"]
             if detected_in_person_crop:
-                px1, py1, _, _ = track.person_box
+                px1, py1, _, _ = box
                 frame_bbox = (fx1 + int(px1), fy1 + int(py1), fx2 + int(px1), fy2 + int(py1))
             else:
                 frame_bbox = (fx1, fy1, fx2, fy2)
 
         face_ratio = 0.0
         if frame_bbox:
-            face_ratio = compute_face_ratio(frame_bbox, track.person_box)
+            face_ratio = compute_face_ratio(frame_bbox, box)
 
         if best["det_score"] < settings.EMBEDDING_DET_SCORE_MIN:
             logger.debug("embedding_score_below_threshold",
@@ -248,19 +255,22 @@ class RecognitionPipeline:
         embedding_list = _embedding_to_list(face_det.best["embedding"])
         embed_ms = round((time.perf_counter() - t_embed) * 1000, 1)
 
-        had_cached = track.cached_embedding is not None
+        with track._lock:
+            cached_emb = track.cached_embedding
+            pmr = track.pending_match_result
+        had_cached = cached_emb is not None
         used_cached = False
         match = None
 
-        if had_cached and track.cached_embedding is not None and track.pending_match_result is not None:
-            a = np.array(track.cached_embedding, dtype=np.float32)
+        if had_cached and cached_emb is not None and pmr is not None:
+            a = np.array(cached_emb, dtype=np.float32)
             b = np.array(embedding_list, dtype=np.float32)
             norm_a = np.linalg.norm(a)
             norm_b = np.linalg.norm(b)
             if norm_a > 0 and norm_b > 0:
                 cos_dist = 1.0 - float(np.dot(a, b) / (norm_a * norm_b))
                 if cos_dist < EMBEDDING_CACHE_COSINE_THRESHOLD:
-                    match = track.pending_match_result
+                    match = pmr
                     used_cached = True
                     logger.debug("embedding_cache_hit", track_id=track.track_id, distance=cos_dist)
 

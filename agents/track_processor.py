@@ -63,35 +63,38 @@ class TrackProcessor:
 
     def process(self, track: Track):
         try:
+            snap = track.snapshot()
             image_url = resolve_track_image_url(track)
-            track.best_full_frame = None
+            with track._lock:
+                track.best_full_frame = None
 
-            if track.embedding is None:
-                logger.info("track_no_embedding", track_id=track.track_id,
-                            face_detected=track.face_detected_once,
-                            frames_seen=track.total_frames_seen,
-                            visibility=track.visibility)
+            if snap.embedding is None:
+                logger.info("track_no_embedding", track_id=snap.track_id,
+                            face_detected=snap.face_detected_once,
+                            frames_seen=snap.total_frames_seen,
+                            visibility=snap.visibility)
                 self._log_event(track, "unknown", "none", False, 0.0, image_url)
                 return
 
             logger.info("track_embedding_present",
-                        track_id=track.track_id,
-                        embedding_len=len(track.embedding),
-                        is_masked=track.is_masked,
-                        face_detected=track.face_detected_once,
-                        frames_seen=track.total_frames_seen)
+                        track_id=snap.track_id,
+                        embedding_len=len(snap.embedding),
+                        is_masked=snap.is_masked,
+                        face_detected=snap.face_detected_once,
+                        frames_seen=snap.total_frames_seen)
 
-            match_result = getattr(track, 'pending_match_result', None)
+            match_result = snap.pending_match_result
             fresh_match = match_result is None
             if fresh_match:
                 from agents.matching_agent import run_matching_from_embedding
-                match_result = run_matching_from_embedding(track.embedding)
+                match_result = run_matching_from_embedding(snap.embedding)
 
             if match_result.matched and match_result.name:
-                track.person_name = match_result.name
+                with track._lock:
+                    track.person_name = match_result.name
 
-            recognition_result = getattr(track, 'pending_recognition', None) if not fresh_match else None
-            memory_context = getattr(track, 'pending_memory_context', None) if not fresh_match else None
+            recognition_result = snap.pending_recognition if not fresh_match else None
+            memory_context = snap.pending_memory_context if not fresh_match else None
             if memory_context is None and match_result.matched:
                 memory_context = self._memory_agent.run({
                     "person_id": match_result.person_id,
@@ -103,11 +106,11 @@ class TrackProcessor:
             if recognition_result is None:
                 from agents.recognition import RecognitionAgent
                 rec_agent = RecognitionAgent()
-                track_duration = time.time() - track.first_seen
+                track_duration = time.time() - snap.first_seen
                 recognition_result = rec_agent.run({
                     "similarity": match_result.similarity_score if match_result.matched else 0.0,
-                    "is_masked": track.is_masked,
-                    "face_quality": track.best_face_score if track.best_face_score > 0 else None,
+                    "is_masked": snap.is_masked,
+                    "face_quality": snap.best_face_score if snap.best_face_score > 0 else None,
                     "track_duration": track_duration,
                     "memory_context": memory_context or {},
                 })
@@ -115,7 +118,7 @@ class TrackProcessor:
             decision = decide(track, match_result, recognition_result, memory_context)
 
             if decision.should_register:
-                person_id = track.track_id
+                person_id = snap.track_id
                 name = "Unknown" if decision.status in ("unknown", "masked_unknown") else (match_result.name or "Unknown")
                 role = "unknown" if decision.status in ("unknown", "masked_unknown") else (match_result.role or "visitor")
                 tags = ["auto_registered"] if decision.status in ("unknown", "masked_unknown") else []
@@ -123,44 +126,49 @@ class TrackProcessor:
                 merged = False
                 if decision.status in ("unknown", "masked_unknown"):
                     try:
-                        similar = find_similar_unknowns(track.embedding)
+                        similar = find_similar_unknowns(snap.embedding)
                         if similar:
                             existing_id = similar[0]["person_id"]
                             update_face(
                                 existing_id,
                                 image_url=image_url,
-                                embedding=track.embedding,
-                                quality_score=track.best_face_score,
+                                embedding=snap.embedding,
+                                quality_score=snap.best_face_score,
                             )
                             logger.info("auto_register_merged",
                                         existing_person_id=existing_id,
                                         similarity=round(similar[0]["similarity_score"], 4),
-                                        new_track_id=track.track_id)
+                                        new_track_id=snap.track_id)
                             merged = True
                     except Exception as e:
-                        logger.error("auto_register_dedup_failed", track_id=track.track_id, error=str(e))
+                        logger.error("auto_register_dedup_failed", track_id=snap.track_id, error=str(e))
 
-                if not merged:
+                if not merged and decision.status in ("unknown", "masked_unknown") and snap.best_face_score <= settings.REGISTRATION_QUALITY_MIN:
+                    logger.info("registration_skipped_low_quality",
+                                track_id=snap.track_id,
+                                quality=snap.best_face_score,
+                                quality_min=settings.REGISTRATION_QUALITY_MIN)
+                elif not merged:
                     try:
                         stored_id = store_face(
                             person_id=person_id,
                             name=name,
                             role=role,
-                            embedding=track.embedding,
+                            embedding=snap.embedding,
                             image_url=image_url,
                             tags=tags,
                             camera_id=settings.CAMERA_ID,
                             skip_search=False,
-                            quality_score=track.best_face_score if track.best_face_score > 0 else None,
+                            quality_score=snap.best_face_score if snap.best_face_score > 0 else None,
                         )
                         logger.info("store_face_success",
-                                    track_id=track.track_id,
+                                    track_id=snap.track_id,
                                     stored_person_id=stored_id,
                                     role=role,
                                     name=name,
-                                    embedding_len=len(track.embedding))
+                                    embedding_len=len(snap.embedding))
                     except Exception as e:
-                        logger.error("store_face_failed", track_id=track.track_id, error=str(e), exc_info=True)
+                        logger.error("store_face_failed", track_id=snap.track_id, error=str(e), exc_info=True)
 
             if match_result.matched:
                 self._memory_agent.record_visit(
@@ -168,14 +176,13 @@ class TrackProcessor:
                     camera_id=settings.CAMERA_ID,
                     status=decision.status,
                     similarity=match_result.similarity_score,
-                    is_masked=track.is_masked,
+                    is_masked=snap.is_masked,
                     visit_action=memory_context.get("action", "recorded") if memory_context else "recorded",
                 )
 
             alert_dispatched = False
-            if decision.should_alert and not track.alerted:
+            if decision.should_alert and track.mark_alerted_once():
                 alert_dispatched = dispatch(track, decision, image_url)
-                track.alerted = True
 
             if decision.should_alert and alert_dispatched:
                 alert_payload = {
@@ -198,22 +205,26 @@ class TrackProcessor:
                             image_url, match_result.person_id if match_result.matched else None,
                             match_result.name if match_result.matched else None)
 
+            with track._lock:
+                alerted_final = track.alerted
+                person_name_final = track.person_name
+
             event_payload = {
-                "track_id": track.track_id,
+                "track_id": snap.track_id,
                 "camera_id": settings.CAMERA_ID,
                 "status": decision.status,
                 "alert_level": decision.alert_level,
                 "person_id": match_result.person_id if match_result.matched else None,
                 "name": match_result.name if match_result.matched else None,
-                "person_name": track.person_name or (match_result.name if match_result.matched else None),
+                "person_name": person_name_final or (match_result.name if match_result.matched else None),
                 "similarity_score": match_result.similarity_score if match_result.matched else 0.0,
                 "image_url": image_url,
                 "best_face_crop_url": (
-                    f"http://localhost:8000/{track.best_face_crop_path.replace(chr(92), '/')}"
-                    if track.best_face_crop_path else None
+                    f"http://localhost:8000/{snap.best_face_crop_path.replace(chr(92), '/')}"
+                    if snap.best_face_crop_path else None
                 ),
                 "reason": f"Track finalized: {decision.status}",
-                "alerted": track.alerted,
+                "alerted": alerted_final,
                 "timestamp": datetime.utcnow().isoformat(),
             }
             if self._loop and self._loop.is_running():

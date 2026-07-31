@@ -54,19 +54,20 @@ def retry_embedding(track: Track, set_embedding):
         if accepted:
             logger.debug("final_embed_done", track_id=track.track_id, source=source, score=det_score)
         elif reason == "track_removed":
-            if track.embedding is None or det_score > track.embedding_det_score + 0.05:
-                track.embedding = embedding
-                track.is_masked = is_masked
-                track.embedding_det_score = det_score
-                logger.debug("final_embed_direct",
-                             track_id=track.track_id, source=source, score=det_score,
-                             reason="track_removed")
-            else:
-                logger.debug("final_embed_skipped",
-                             track_id=track.track_id,
-                             current_det_score=round(track.embedding_det_score, 3),
-                             new_det_score=round(det_score, 3),
-                             reason="rejected_quality")
+            with track._lock:
+                if track.embedding is None or det_score > track.embedding_det_score + 0.05:
+                    track.embedding = embedding
+                    track.is_masked = is_masked
+                    track.embedding_det_score = det_score
+                    logger.debug("final_embed_direct",
+                                 track_id=track.track_id, source=source, score=det_score,
+                                 reason="track_removed")
+                else:
+                    logger.debug("final_embed_skipped",
+                                 track_id=track.track_id,
+                                 current_det_score=round(track.embedding_det_score, 3),
+                                 new_det_score=round(det_score, 3),
+                                 reason="rejected_quality")
         else:
             logger.debug("final_embed_skipped",
                          track_id=track.track_id,

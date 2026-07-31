@@ -16,7 +16,7 @@ import structlog
 import httpx
 import time
 import threading
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from config import settings
 

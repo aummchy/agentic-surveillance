@@ -20,6 +20,7 @@
 
 - [x] Quality-gated recognition skip — `camera_agent.py:291-296` `else: return` prevents embedding storage from low-quality faces
 - [x] ByteTrack tuning — `config/bytetrack_surveillance.yaml` with custom params for fixed-camera surveillance
+- [x] YOLO NMS `iou=0.5` → `0.45` in `pipeline/tracker.py` — suppresses duplicate person boxes from same person (IoU~0.48) while leaving legitimate nearby people (IoU≤0.38) unaffected
 - [x] AGENTS.md expanded — entry points, folder responsibilities, coding rules, do/don'ts
 - [x] TOOLS.md created — developer tools reference (repomix, ctags, ast-grep)
 - [x] SYSTEM_INDEX.md updated — new files, recent fixes, corrected thresholds

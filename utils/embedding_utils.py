@@ -18,6 +18,7 @@ logger = structlog.get_logger(__name__)
 class InsightFaceSingleton:
     _instance = None
     _lock = threading.Lock()
+    _inference_lock = threading.Lock()
     _initialized = False
 
     def __new__(cls):
@@ -97,7 +98,8 @@ class InsightFaceSingleton:
         Each result is a dict with keys: det_score, embedding, bbox, is_masked."""
         try:
             image = self._apply_clahe(image)
-            faces = self.app.get(image)
+            with self._inference_lock:
+                faces = self.app.get(image)
             if not faces:
                 return []
             results = []

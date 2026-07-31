@@ -35,6 +35,12 @@ class CameraAgent:
         )
         self._timing = TimingCollector()
 
+        # FPS counter state (guarded by settings.PERFORMANCE_STATS)
+        self._fps_last_time = time.perf_counter()
+        self._fps_frame_count = 0
+        self._fps_tracker_ms_total = 0.0
+        self._fps_tracker_ms_max = 0.0
+
     @staticmethod
     def _camera_source():
         """Return RTSP URL string if CAMERA_SOURCE is set, else CAMERA_INDEX int."""
@@ -48,7 +54,6 @@ class CameraAgent:
         """Open VideoCapture with configured backend (dshow/msmf/auto)."""
         source = CameraAgent._camera_source()
         backend = getattr(settings, "CAMERA_BACKEND", "")
-        import cv2
         if backend and isinstance(source, int):
             be = getattr(cv2, f"CAP_{backend.upper()}", None)
             if be is not None:
@@ -93,7 +98,7 @@ class CameraAgent:
         resolution = self._apply_frame_props()
 
         logger.info("camera_started", source=source, backend=getattr(settings, "CAMERA_BACKEND", "auto"), resolution=resolution,
-                    yolo_model=settings.YOLO_MODEL, face_model=settings.INSIGHTFACE_MODEL)
+                    yolo_model=settings.YOLO_MODEL, yolo_device=settings.YOLO_DEVICE, face_model=settings.INSIGHTFACE_MODEL)
 
         try:
             self._loop()
@@ -144,7 +149,9 @@ class CameraAgent:
             self._frame_count += 1
 
             frame = cv2.resize(frame, (settings.FRAME_WIDTH, settings.FRAME_HEIGHT))
+            _track_start = time.perf_counter()
             tracks = track_persons(frame)
+            _tracker_ms = (time.perf_counter() - _track_start) * 1000
 
             if settings.DEBUG_RECOGNITION:
                 logger.debug("recognition_cycle",
@@ -267,6 +274,31 @@ class CameraAgent:
             if self.on_frame_annotated:
                 self.on_frame_annotated(annotated)
 
+            if settings.PERFORMANCE_STATS:
+                self._fps_frame_count += 1
+                self._fps_tracker_ms_total += _tracker_ms
+                if _tracker_ms > self._fps_tracker_ms_max:
+                    self._fps_tracker_ms_max = _tracker_ms
+                _now = time.perf_counter()
+                if _now - self._fps_last_time >= 1.0:
+                    _elapsed = _now - self._fps_last_time
+                    _fps = self._fps_frame_count / _elapsed
+                    _avg = (
+                        self._fps_tracker_ms_total / self._fps_frame_count
+                        if self._fps_frame_count
+                        else 0.0
+                    )
+                    logger.info("pipeline_stats",
+                                fps=round(_fps, 1),
+                                tracker_avg=round(_avg, 1),
+                                tracker_max=round(self._fps_tracker_ms_max, 1),
+                                n_bt=len(tracks),
+                                n_drawn=len(all_tracks))
+                    self._fps_last_time = _now
+                    self._fps_frame_count = 0
+                    self._fps_tracker_ms_total = 0.0
+                    self._fps_tracker_ms_max = 0.0
+
     def _progressive_recognition(self, frame: np.ndarray, track: Track):
         worker_start = time.perf_counter()
         if settings.DEBUG_RECOGNITION:
@@ -302,7 +334,7 @@ class CameraAgent:
                 self.track_state.set_best_face(
                     track.track_id, result.face_crop,
                     result.quality.overall_score, frame, result.face_ratio)
-                if getattr(settings, 'DEBUG_FACE_CROPS', False):
+                if settings.DEBUG_FACE_CROPS:
                     crop_path = f"captures/debug/face_crops/{track.track_id}/{self._frame_count}.jpg"
                     save_image(result.face_crop, crop_path)
                     self.track_state.set_face_crop_path(track.track_id, crop_path)
@@ -338,22 +370,21 @@ class CameraAgent:
                                  should_alert=result.decision.should_alert,
                                  alert_level=result.decision.alert_level)
 
-                if result.decision.should_alert and result.decision.alert_level == "critical" and not track.alerted:
+                if result.decision.should_alert and result.decision.alert_level == "critical" and track.mark_alerted_once():
                     with self._track_sets_lock:
                         already_finalized = track.track_id in self._finalized_track_ids
                     if not already_finalized:
                         from agents.alert_agent import dispatch
                         image_url = resolve_track_image_url(track)
                         dispatch(track, result.decision, image_url)
-                        self.track_state.set_decision(track.track_id, result.decision.status, True)
-                        track.confidence = new_confidence
+                        self.track_state.set_decision(track.track_id, result.decision.status)
+                        track.update_confidence_if_higher(new_confidence)
                         logger.info("progressive_critical_alert",
                                     track_id=track.track_id,
                                     alert_level=result.decision.alert_level,
                                     status=result.decision.status)
-                elif new_confidence > track.confidence:
-                    self.track_state.set_decision(track.track_id, result.decision.status, track.alerted)
-                    track.confidence = new_confidence
+                elif track.update_confidence_if_higher(new_confidence):
+                    self.track_state.set_decision(track.track_id, result.decision.status)
                     if result.decision.should_alert:
                         logger.debug("progressive_alert_deferred_to_finalization",
                                      track_id=track.track_id,

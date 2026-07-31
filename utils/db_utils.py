@@ -326,6 +326,9 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
             result = vector_search(embedding, limit=3)
             matches = result["matches"]
         except Exception:
+            logger.warning("vector_search_failed",
+                           msg="Atlas vector search failed — dedup skipped, new doc may be created",
+                           exc_info=True)
             matches = []
 
         # Single dedup loop — check all roles in one pass

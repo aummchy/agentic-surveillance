@@ -41,9 +41,10 @@ class TrackState:
         with self._lock:
             if composite_id in self._tracks:
                 track = self._tracks[composite_id]
-                track.last_seen = time.time()
-                track.person_box = box
-                track.total_frames_seen += 1
+                with track._lock:
+                    track.last_seen = time.time()
+                    track.person_box = box
+                    track.total_frames_seen += 1
                 return track
             else:
                 track = Track(
@@ -199,8 +200,11 @@ class TrackState:
                       face_score: float, full_frame: np.ndarray, face_ratio: float):
         with self._lock:
             track = self._tracks.get(composite_id)
-            if not track or face_score <= track.best_face_score + 0.03:
+            if not track:
                 return
+            with track._lock:
+                if face_score <= track.best_face_score + 0.03:
+                    return
 
         # Encode JPEG outside the lock (expensive operation) — only if score improved significantly
         success, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
@@ -211,12 +215,14 @@ class TrackState:
 
         with self._lock:
             track = self._tracks.get(composite_id)
-            if track and face_score > track.best_face_score:
-                track.best_face_crop = face_crop
-                track.best_face_score = face_score
-                track.best_full_frame = full_frame
-                track.best_face_ratio = face_ratio
-                track.best_frame_jpeg = jpeg_bytes
+            if track:
+                with track._lock:
+                    if face_score > track.best_face_score:
+                        track.best_face_crop = face_crop.copy()
+                        track.best_face_score = face_score
+                        track.best_full_frame = full_frame
+                        track.best_face_ratio = face_ratio
+                        track.best_frame_jpeg = jpeg_bytes
 
     def ensure_fallback_frame(self, composite_id: str, frame: np.ndarray):
         """Guarantee every track gets at least one photo, independent of face quality.
@@ -245,20 +251,22 @@ class TrackState:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                if track.embedding is None or det_score > track.embedding_det_score + 0.05:
-                    track.embedding = embedding
-                    track.is_masked = is_masked
-                    track.embedding_det_score = det_score
-                    return (True, "ok")
-                return (False, "rejected_quality")
+                with track._lock:
+                    if track.embedding is None or det_score > track.embedding_det_score + 0.05:
+                        track.embedding = embedding
+                        track.is_masked = is_masked
+                        track.embedding_det_score = det_score
+                        return (True, "ok")
+                    return (False, "rejected_quality")
             return (False, "track_removed")
 
-    def set_decision(self, composite_id: str, decision: str, alerted: bool = False):
+    def set_decision(self, composite_id: str, decision: str):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                track.decision = decision
-                track.alerted = alerted
+                with track._lock:
+                    track.decision = decision
+                    # Never overwrite alerted=True — mark_alerted_once() is the sole writer
 
     def set_person_name(self, composite_id: str, name: str):
         with self._lock:

@@ -17,8 +17,8 @@
   // ── Camera ───────────────────────────────────────────────────
   // Higher resolution = more face detail = better recognition.
   // Camera will auto-negotiate down if max not supported.
-  "FRAME_WIDTH": 1280,
-  "FRAME_HEIGHT": 720,
+  "FRAME_WIDTH": 1920,
+  "FRAME_HEIGHT": 1080,
 
   // ── YOLO Detection ──────────────────────────────────────────
   // Person detection confidence threshold.
@@ -88,6 +88,10 @@
   // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
   "DEBUG_FACE_CROPS": true,
 
+  // REGISTRATION_QUALITY_MIN: Minimum face quality (0-1) to auto-register a new unknown identity.
+  // Prevents low-quality embeddings from polluting the database and causing false matches.
+  "REGISTRATION_QUALITY_MIN": 0.6,
+
   // ── Vector Search ────────────────────────────────────────────
   // CANDIDATES: HNSW candidate pool size (higher = better recall, slower).
   // LIMIT: Number of top results returned.
@@ -155,12 +159,15 @@
 
   // ── Debug Flags ──────────────────────────────────────────────
   // DEBUG_RECOGNITION: Enable diagnostic logging for recognition pipeline investigation.
-  // Logs appear in logs/surveillance.debug.log only (not terminal).
+  // Logs in logs/surveillance.debug.log only (not terminal).
   "DEBUG_RECOGNITION": true,
   // DEBUG_DUPLICATE_BOXES: Log per-frame detection/track state to identify multi-box issues.
   // Logs ByteTrack IDs, TrackState lifecycle, and high-IoU track pairs.
   // Enable via env var: DEBUG_DUPLICATE_BOXES=true python main.py
   "DEBUG_DUPLICATE_BOXES": true,
+  // PERFORMANCE_STATS: Print per-second FPS/tracker latency line to terminal.
+  // Set false after benchmarking to suppress the noise.
+  "PERFORMANCE_STATS": false,
 
   // ── LLM (Ollama) ────────────────────────────────────────────
   "OLLAMA_URL": "http://localhost:11434",

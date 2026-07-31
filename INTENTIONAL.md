@@ -80,6 +80,23 @@ Documented trade-offs that look like limitations but are deliberate choices.
 
 ---
 
+## Match Threshold
+
+**Decision:** `MATCH_THRESHOLD = 0.45` (cosine similarity).
+
+**Why:** 0.45 is the standard ArcFace threshold used in production systems (InsightFace reference, MegaFace benchmarks, academic literature). ArcFace was designed and evaluated on controlled-capture datasets (LFW, MegaFace, IJB-C) where face quality is high — frontal, well-lit, aligned. In those conditions, genuine pairs score >0.70 and impostor pairs score <0.20, leaving a wide margin.
+
+Surveillance footage is fundamentally different: unconstrained pose, variable lighting, motion blur, lower resolution. Cross-person cosine similarities of 0.50–0.65 are common under indoor lighting. A threshold of 0.45 deliberately prioritizes recall (catching genuine matches) over precision (rejecting impostors). This is acceptable because:
+- The confidence formula (weighted normalization) independently down-ranks low-similarity matches via the `rec_status` system
+- The policy layer gates actions (alerts, registration) on `rec_status`, not on the raw match
+- False-positive name assignments are cosmetic — the status badge (KNOWN / UNCERTAIN / UNKNOWN) reflects actual confidence
+
+Raising the threshold would reduce false-positive name assignments but would also increase false negatives for genuine matches under poor lighting — a worse outcome for a security system.
+
+**File:** `config/config.jsonc:14`, `config/settings.py:428-430`
+
+---
+
 ## Embeddings
 
 **Decision 1:** Recency-only embedding history (no quality weighting).

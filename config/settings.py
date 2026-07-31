@@ -134,6 +134,7 @@ TERMINAL_ALLOWLIST = frozenset({
     "policy_decision",
     "duplicate_suppressed",
     "face_crop_saved",
+    "pipeline_stats",
     "no_embedding_after_retries",
     "llm_connect_failed", "llm_unavailable",
     "shutdown",
@@ -153,14 +154,15 @@ class CompactTerminalRenderer:
         "camera_started": "CAM", "camera_stopped": "CAM", "camera_reconnected": "CAM",
         "recognition_decision": "RECOG", "match_found": "MATCH", "memory_lookup": "MEMORY",
         "policy_decision": "POLICY", "visit_recorded": "VISIT", "track_finalized": "FINAL",
-        "face_crop_saved": "FACE", "no_embedding_after_retries": "FACE",
+        "face_crop_saved": "FACE",         "no_embedding_after_retries": "FACE",
+        "pipeline_stats": "PERF",
         "progressive_critical_alert": "ALERT", "alert": "ALERT", "alert_dispatched": "ALERT",
         "llm_connect_failed": "LLM", "llm_unavailable": "LLM",
         "shutdown": "SHUTDOWN",
     }
 
     FORMATS = {
-        "camera_started": "{_pfx} source={source} backend={backend} res={resolution} yolo={yolo_model} face={face_model}",
+        "camera_started": "{_pfx} source={source} backend={backend} res={resolution} yolo={yolo_model} device={yolo_device} face={face_model}",
         "camera_stopped": "{_pfx} stopped",
         "camera_reconnected": "{_pfx} reconnected res={resolution}",
         "recognition_decision": (
@@ -183,6 +185,7 @@ class CompactTerminalRenderer:
         "alert_dispatched": "{_pfx} {_status} name={name} level={alert_level}",
         "llm_connect_failed": "{_pfx} unavailable model={model} url={url}",
         "llm_unavailable": "{_pfx} unavailable model={model} url={url}",
+        "pipeline_stats": "{_pfx} FPS: {fps} | tracker(avg): {tracker_avg} ms | tracker(max): {tracker_max} ms | bt={n_bt} drawn={n_drawn}",
         "shutdown": "{_pfx} {reason}",
     }
 
@@ -341,7 +344,7 @@ def setup_logging():
 
     # Silence noisy PyMongo/Motor driver logs
     for name in ("pymongo", "pymongo.topology", "pymongo.pool",
-                 "pymongo.command", "pymongo.server", "motor"):
+                 "pymongo.command", "pymongo.server"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
     # Silence InsightFace model loading spam (keep warnings)
@@ -498,11 +501,24 @@ TWILIO_FROM = os.getenv("TWILIO_FROM", "")
 ALERT_SMS_TO = os.getenv("ALERT_SMS_TO", "")
 
 # ── Model / Pipeline ───────────────────────────────────────────
-YOLO_MODEL = _get("YOLO_MODEL", "YOLO_MODEL", "models/yolov8s.pt")
+# YOLO_MODEL: PyTorch (.pt) or OpenVINO IR (_openvino_model/) path.
+# YOLO_DEVICE: Device string passed to Ultralytics model.track().
+#   For PyTorch models: "cpu" or CUDA device (e.g. "0").
+#   For OpenVINO IR models: must be "cpu" (Ultralytics requirement).
+#   The actual OpenVINO accelerator is controlled by OPENVINO_DEVICE below.
+# Export:  yolo export model=models/yolov8s.pt format=openvino half=True
+# Override via env:  $env:YOLO_MODEL="models/yolov8s.pt"; $env:YOLO_DEVICE="cpu"
+YOLO_MODEL = _get("YOLO_MODEL", "YOLO_MODEL", "models/yolov8s_openvino_model/")
 YOLO_DEVICE = _get("YOLO_DEVICE", "YOLO_DEVICE", "cpu")
 INSIGHTFACE_MODEL = _get("INSIGHTFACE_MODEL", "INSIGHTFACE_MODEL", "buffalo_l")
 INSIGHTFACE_DET_SIZE = _get("INSIGHTFACE_DET_SIZE", "INSIGHTFACE_DET_SIZE", 1280, int)
 INSIGHTFACE_PROVIDER = _get("INSIGHTFACE_PROVIDER", "INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
+
+# OPENVINO_DEVICE: OpenVINO accelerator when using an OpenVINO IR model.
+#   Valid values: "CPU", "GPU", "NPU", "AUTO" (let OpenVINO decide).
+#   Only applies when YOLO_MODEL points to an OpenVINO export.
+#   Override via env var or .env:  OPENVINO_DEVICE=GPU
+OPENVINO_DEVICE = _get("OPENVINO_DEVICE", "OPENVINO_DEVICE", "GPU")
 
 # ── Detection / Tracking ───────────────────────────────────────
 PERSON_CONF_THRESHOLD = _get("PERSON_CONF_THRESHOLD", "PERSON_CONF_THRESHOLD", 0.40, float)
@@ -523,6 +539,7 @@ QUALITY_VALID_BLUR_MIN = _get("QUALITY_VALID_BLUR_MIN", "QUALITY_VALID_BLUR_MIN"
 QUALITY_VALID_BRIGHTNESS_MIN = _get("QUALITY_VALID_BRIGHTNESS_MIN", "QUALITY_VALID_BRIGHTNESS_MIN", 35.0, float)
 QUALITY_VALID_BRIGHTNESS_MAX = _get("QUALITY_VALID_BRIGHTNESS_MAX", "QUALITY_VALID_BRIGHTNESS_MAX", 255.0, float)
 QUALITY_VALID_FACE_AREA_MIN = _get("QUALITY_VALID_FACE_AREA_MIN", "QUALITY_VALID_FACE_AREA_MIN", 1200.0, float)
+REGISTRATION_QUALITY_MIN = _get("REGISTRATION_QUALITY_MIN", "REGISTRATION_QUALITY_MIN", 0.6, float)
 
 # ── Quality — Scoring normalization ───────────────────────────
 QUALITY_BLUR_MIN = _get("QUALITY_BLUR_MIN", "QUALITY_BLUR_MIN", 40.0, float)
@@ -585,14 +602,14 @@ CALC_LOG_MAX_SIZE_MB = _get("CALC_LOG_MAX_SIZE_MB", "CALC_LOG_MAX_SIZE_MB", 10, 
 
 # ── Debug Flags ─────────────────────────────────────────────
 DEBUG_RECOGNITION = _get("DEBUG_RECOGNITION", "DEBUG_RECOGNITION", False, bool)
+DEBUG_FACE_CROPS = _get("DEBUG_FACE_CROPS", "DEBUG_FACE_CROPS", False, bool)
 DEBUG_DUPLICATE_BOXES = _get("DEBUG_DUPLICATE_BOXES", "DEBUG_DUPLICATE_BOXES", False, bool)
+PERFORMANCE_STATS = _get("PERFORMANCE_STATS", "PERFORMANCE_STATS", True, bool)
 
 # ── CLAHE ──────────────────────────────────────────────────────
 CLAHE_CLIP_LIMIT = _get("CLAHE_CLIP_LIMIT", "CLAHE_CLIP_LIMIT", 2.0, float)
 CLAHE_TILE_SIZE = _get("CLAHE_TILE_SIZE", "CLAHE_TILE_SIZE", 8, int)
 
-# ── Mask Detection ─────────────────────────────────────────────
-MASK_DETECTION = _get("MASK_DETECTION", "MASK_DETECTION", "heuristic")
 MASK_RATIO_THRESHOLD = _get("MASK_RATIO_THRESHOLD", "MASK_RATIO_THRESHOLD", 0.3, float)
 LOITER_SECS = _get("LOITER_SECS", "LOITER_SECS", 30, float)
 

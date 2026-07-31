@@ -1,3 +1,4 @@
+import os
 import logging
 import threading
 import structlog
@@ -47,13 +48,14 @@ def get_model() -> YOLO:
 
 def track_persons(frame: np.ndarray, persist: bool = True) -> list:
     model = get_model()
+    os.environ["OPENVINO_DEVICE"] = settings.OPENVINO_DEVICE
     results = model.track(
         frame,
         persist=persist,
         tracker=_TRACKER_CONFIG,
         classes=[0],
         conf=settings.PERSON_CONF_THRESHOLD,
-        iou=0.5,
+        iou=0.45,
         device=settings.YOLO_DEVICE,
         verbose=False
     )

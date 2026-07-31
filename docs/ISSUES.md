@@ -1,6 +1,6 @@
 # Issues & Bug Tracker
 
-**63 issues remaining (0 CRITICAL, 5 HIGH, 19 MEDIUM, 25 LOW, 20 META). 117 FIXED.**
+**62 issues remaining (0 CRITICAL, 5 HIGH, 20 MEDIUM, 20 LOW, 17 META). 122 FIXED.**
 
 See `INTENTIONAL.md` for design decisions that look like limitations but are deliberate trade-offs.
 
@@ -301,6 +301,20 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - **Impact:** Camera disconnect = permanent pipeline failure. MongoDB outage = lost events. Cloudinary failure = lost images.
 - **Decision:** Intentional design trade-off. See `INTENTIONAL.md` for rationale. Camera reconnect exists (fixed delay). MongoDB/Cloudinary retry assumed unnecessary under cloud SLA.
 
+### M22 — set_embedding() return value ignored in camera_agent.py
+
+- **File:** `agents/camera_agent.py:313`
+- **Problem:** `TrackState.set_embedding()` was changed to return `tuple[bool, str]` (was `bool`) in the refactor commit, but the call in `_progressive_recognition()` discards the return value. Quality gate rejection is silently ignored — the method may have rejected the embedding but the caller never knows.
+- **Impact:** Embeddings from lower-quality detections may silently overwrite higher-quality ones in `TrackState`. The quality-gated protection (H3/H11) is partially bypassed at this call site.
+- **Fix:** Check the return value. Log and skip further processing if embedding was rejected, consistent with how `agents/finalizer.py:53` correctly unpacks `accepted, reason`.
+
+### M23 — Debug flags enabled by default in production config
+
+- **File:** `config/config.jsonc:154,162`
+- **Problem:** `DEBUG_RECOGNITION: true` and `DEBUG_DUPLICATE_BOXES: true` are enabled by default. These produce per-frame, per-track debug log output to `logs/surveillance.debug.log`. Under normal operation with 3+ tracks, this can generate thousands of log lines per minute.
+- **Impact:** Unnecessary I/O overhead, log file bloat, and potential performance degradation on low-end hardware (especially `DEBUG_DUPLICATE_BOXES` which logs raw bounding box arrays).
+- **Fix:** Set both to `false` by default. Enable only when actively debugging recognition or multi-box issues.
+
 ---
 
 ## LOW — Type hints / imports / code quality
@@ -365,12 +379,6 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - **Problem:** `save_image` and `save_image_atomic` catch `Exception` and return `False` without logging. Caller cannot distinguish "disk full" from "permission denied" from "invalid image."
 - **Fix:** Log exception before returning `False`.
 
-### L11 — Unused imports in llm_client.py
-
-- **File:** `utils/llm_client.py:19`
-- **Problem:** `Dict` and `Any` are imported from `typing` but never used. Code uses lowercase `dict` and doesn't use `Any`.
-- **Fix:** Remove unused imports.
-
 ### L12 — is_available catches overly broad Exception
 
 - **File:** `utils/llm_client.py:360`
@@ -407,35 +415,18 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - **Problem:** `classes=[0]` (person class) and `iou=0.5` are hardcoded. Unlike `conf` which uses `settings.PERSON_CONF_THRESHOLD`, these are not configurable.
 - **Fix:** Move to settings.
 
-### L18 — Redundant import cv2
-
-- **File:** `agents/camera_agent.py:57`
-- **Problem:** `import cv2` inside `_open_capture()` is redundant — `cv2` is already imported at module top (line 1).
-- **Fix:** Remove local import.
-
 ### L19 — Manual dict mapping in decision_agent
 
 - **File:** `agents/decision_agent.py:45-53`
 - **Problem:** Manual dict mapping of `MatchResult` fields instead of `dataclasses.asdict()`. If `MatchResult` gains a field, this dict must be updated manually.
 - **Fix:** Use `dataclasses.asdict(match_result)`.
 
-### L20 — Dead motor logger suppression
+### L22 — Unused imports in main.py ✅ FIXED
 
-- **File:** `config/settings.py:340`
-- **Problem:** `logging.getLogger("motor").setLevel(logging.WARNING)` suppresses motor logger, but `motor` (async MongoDB driver) is never installed, imported, or used.
-- **Fix:** Remove.
-
-### L21 — Dead MASK_DETECTION setting
-
-- **File:** `config/settings.py:560`
-- **Problem:** `MASK_DETECTION = _get("MASK_DETECTION", "MASK_DETECTION", "heuristic")` is defined but never referenced anywhere in the codebase.
-- **Fix:** Remove or use.
-
-### L22 — Unused imports in main.py
-
-- **File:** `main.py:20`
-- **Problem:** `save_image` and `upload_to_cloudinary` are imported from `utils.image_utils` but never used in `main.py`.
-- **Fix:** Remove.
+- **File:** `main.py` (was line 20)
+- **Problem:** `save_image` and `upload_to_cloudinary` were imported from `utils.image_utils` but never used.
+- **Fix:** Removed during track finalization refactor (`process_finalized_track` extracted to `agents/track_processor.py`). `main.py` imports are now minimal and all used.
+- **Status:** Fixed 2026-07-30 (refactor commit). Verified: `main.py` no longer imports `save_image`, `upload_to_cloudinary`, `cv2`, `concurrent.futures`, or other dead modules.
 
 ### L23 — asyncio.run_coroutine_threadsafe return discarded
 
@@ -460,6 +451,27 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - **File:** `dashboard/backend/routes/events.py:45-62`
 - **Problem:** `list_unknown_events` calls the exact same `get_events_with_faces(limit=limit, offset=offset, status_filter="unknown")`. The `list_events` endpoint achieves the same with `?status=unknown`.
 - **Fix:** Remove, use `list_events` with filter parameter.
+
+### L27 — FRAME_SKIP=0 causes ZeroDivisionError
+
+- **File:** `agents/track_processor.py:46`
+- **Problem:** `self._frame_counter % settings.FRAME_SKIP` crashes with `ZeroDivisionError` if `FRAME_SKIP` is set to `0` in config. No validation or guard exists.
+- **Impact:** Pipeline crash on startup or config change if user sets FRAME_SKIP=0.
+- **Fix:** Add guard: `if settings.FRAME_SKIP < 1: FRAME_SKIP = 1` in `settings.py` or `track_processor.py`.
+
+### L28 — Hardcoded embedding cache threshold in recognition_pipeline.py
+
+- **File:** `pipeline/recognition_pipeline.py:18`
+- **Problem:** `EMBEDDING_CACHE_COSINE_THRESHOLD = 0.005` is a module-level constant, not configurable via `config.jsonc`. Callers cannot tune the embedding cache distance threshold without editing source code.
+- **Impact:** Inflexible. If embeddings are noisy, the cache hit rate may be too low (threshold too strict) or too high (threshold too loose, stale matches returned).
+- **Fix:** Move to `config.jsonc` as `EMBEDDING_CACHE_COSINE_THRESHOLD` with default `0.005`.
+
+### L29 — Duplicate detection logic across files
+
+- **File:** `agents/camera_agent.py:236-260`, `pipeline/recognition_pipeline.py:150-231`
+- **Problem:** The two-stage face detection logic (person crop → full frame fallback) is duplicated in both `_progressive_recognition()` and `RecognitionPipeline._detect_face()` with slightly different post-processing. Any fix or tuning to one must be manually applied to the other.
+- **Impact:** Maintenance burden. The two paths may diverge over time, causing inconsistent recognition behavior.
+- **Fix:** Extract shared face detection logic into `pipeline/face.py` or a dedicated `FaceDetector` class used by both callers.
 
 ---
 
@@ -558,6 +570,20 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - **Impact:** Model upgrades silently degrade recognition accuracy for all existing face records.
 - **Fix:** Add model version string to face documents, detect version mismatch on read, trigger re-embedding for stale records.
 
+### MT21 — pipeline/recognition_pipeline.py has no test coverage
+
+- **File:** `pipeline/recognition_pipeline.py` (342 lines)
+- **Problem:** The new `RecognitionPipeline` class encapsulating detection → embedding → matching → memory → recognition → policy is completely untested. It contains significant logic: two-stage face detection, embedding caching, quality gating, memory lookup, and policy dispatch.
+- **Impact:** Refactoring the pipeline may introduce regressions with no safety net. The 76 existing tests don't cover the new pipeline.
+- **Fix:** Add tests for `RecognitionPipeline.run()` covering: successful recognition, high-confidence skip, empty crop, low-quality skip, embedding cache hit/miss, memory lookups, and error paths.
+
+### MT22 — agents/track_processor.py has no test coverage
+
+- **File:** `agents/track_processor.py` (271 lines)
+- **Problem:** `TrackProcessor.process()` replaced the old `process_finalized_track()` in `main.py` but has zero test coverage. It orchestrates matching, recognition, memory, decision, alerts, face storage, dedup merging, event logging, and WebSocket broadcasts.
+- **Impact:** Any regression in the track finalization pipeline goes undetected. This is the most critical orchestration point in the system.
+- **Fix:** Add tests for `TrackProcessor.process()` covering: embedding present/absent, fresh vs cached match, registration vs skip, dedup merge, alert dispatch, error recovery, and memory recording.
+
 ---
 
 ## Remediation Plan
@@ -593,6 +619,8 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 4. **3.4** Fix inconsistent `_empty_result` in `memory.py` — **FIXED** (`days_since_last_visit: None`)
 5. **3.5** Add quality weight sum validation in `validate_config()` — **FIXED** (range check = error, sum != 1.0 = warning)
 6. **3.6** Add `SMTP_PORT` error handling in `settings.py:460` — **FIXED** (try/except with logged warning)
+7. **3.7** Fix `set_embedding()` return value ignored at `camera_agent.py:313` — check `accepted` tuple, log rejection
+8. **3.8** Set `DEBUG_RECOGNITION` and `DEBUG_DUPLICATE_BOXES` to `false` by default in `config.jsonc`
 
 ### Phase 4 — Dashboard Security
 
@@ -612,11 +640,14 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 
 ### Phase 6 — Code Quality
 
-1. **6.1** Remove unused imports (`main.py:20`, `llm_client.py:19`)
+1. **6.1** Remove unused imports (`main.py` — **FIXED** in refactor, `llm_client.py:19`)
 2. **6.2** Fix type hints across codebase (L1-L6)
 3. **6.3** Remove dead code (`models.py`, `settings.py`, `camera_agent.py`)
-4. **6.4** Add `asyncio.run_coroutine_threadsafe` error handling (`main.py`)
+4. **6.4** Add `asyncio.run_coroutine_threadsafe` error handling (`track_processor.py`)
 5. **6.5** Add retry backoff to LLM client
+6. **6.6** Fix `FRAME_SKIP=0` crash — add lower-bound guard
+7. **6.7** Move `EMBEDDING_CACHE_COSINE_THRESHOLD` to `config.jsonc`
+8. **6.8** Extract shared face detection logic from `camera_agent.py` and `recognition_pipeline.py`
 
 ### Phase 7 — Dependencies & Cleanup
 
@@ -624,6 +655,11 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 2. **7.2** Remove or parameterize scripts in `scripts/`
 3. **7.3** Fix test flakiness (`test_thread_safety.py`, `test_recognition.py`)
 4. **7.4** *(removed — BUILD_REPORT.md does not exist in repo)*
+
+### Phase 8 — Test Coverage
+
+1. **8.1** Add tests for `RecognitionPipeline.run()` (MT21)
+2. **8.2** Add tests for `TrackProcessor.process()` (MT22)
 
 ---
 
@@ -633,8 +669,11 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - [ ] `avg_similarity` recalculation works
 - [x] No TOCTOU races in `update_face`
 - [x] Thread-safe track field access (2.3, 2.4, 2.5, 2.6 fixed; 2.1, 2.2 skipped — single-threaded)
-- [x] Quality gate not bypassed in finalization
+- [x] Quality gate not bypassed in finalization (partially — M22 has a residual call site)
 - [x] Logic fixes (face ratio clamp, midnight wrap, empty result, dead code, weight validation, SMTP_PORT)
+- [x] Unused imports in `main.py` removed (L22 fixed in refactor)
+- [ ] Debug flags disabled by default (M23)
+- [ ] `set_embedding()` return checked at `camera_agent.py:313` (M22)
 - [ ] Dashboard has basic authentication (REST + WebSocket)
 - [ ] No CWD-relative paths
 - [ ] Camera reconnect on failure
@@ -642,4 +681,37 @@ See `INTENTIONAL.md` for design decisions that look like limitations but are del
 - [ ] All unused code and dependencies removed
 - [ ] `requirements.txt` has upper bounds, numpy pinned <2.0
 - [ ] Tests pass without flakiness
-- [ ] *(removed — BUILD_REPORT.md does not exist in repo)*
+- [ ] `RecognitionPipeline` has test coverage (MT21)
+- [ ] `TrackProcessor` has test coverage (MT22)
+
+---
+
+## Archive — Fixed Issues
+
+### L11 — Unused imports in llm_client.py ✅ FIXED
+
+- **File:** `utils/llm_client.py:19`
+- **Problem:** `Dict` and `Any` were imported from `typing` but never used.
+- **Fix:** Removed unused imports.
+- **Status:** Fixed 2026-07-30.
+
+### L18 — Redundant import cv2 ✅ FIXED
+
+- **File:** `agents/camera_agent.py:51`
+- **Problem:** `import cv2` inside `_open_capture()` was redundant — `cv2` already imported at module top.
+- **Fix:** Removed local import.
+- **Status:** Fixed 2026-07-30.
+
+### L20 — Dead motor logger suppression ✅ FIXED
+
+- **File:** `config/settings.py:344`
+- **Problem:** `logging.getLogger("motor").setLevel(logging.WARNING)` suppressed motor logger, but `motor` (async MongoDB driver) was never installed, imported, or used.
+- **Fix:** Removed.
+- **Status:** Fixed 2026-07-30.
+
+### L21 — Dead MASK_DETECTION setting ✅ FIXED
+
+- **File:** `config/settings.py:595`
+- **Problem:** `MASK_DETECTION = _get("MASK_DETECTION", "MASK_DETECTION", "heuristic")` was defined but never referenced anywhere.
+- **Fix:** Removed.
+- **Status:** Fixed 2026-07-30.

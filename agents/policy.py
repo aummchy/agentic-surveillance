@@ -174,7 +174,7 @@ class PolicyAgent(BaseAgent):
         # ═══════════════════════════════════════════════════════
         # RULE 3: Verified
         # ═══════════════════════════════════════════════════════
-        if verified:
+        if verified and rec_status == "known":
             return DecisionResult(
                 status="verified",
                 alert_level="none",
