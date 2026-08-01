@@ -1,7 +1,7 @@
 import structlog
 import uuid
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
@@ -665,11 +665,51 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
     Replaces the previous read-modify-write pattern to eliminate the TOCTOU
     race: two concurrent calls for the same person_id now serialize at the
     database level — visit counts, histories, and camera lists are never lost.
+
+    If MIN_VISIT_GAP_SECS > 0 and the same person was recorded within that
+    window, the visit is suppressed (no increment). This prevents ByteTrack
+    fragmentation — one person split into multiple overlapping track IDs —
+    from inflating visit counts.
     """
     collection = get_memory_collection()
     now = datetime.utcnow()
     hour = now.hour
     status_entry = {"status": status, "timestamp": now}
+
+    # ── Visit-dedup gate ────────────────────────────────────────
+    # Skip increment if same person was recorded within the gap window.
+    # Only an indexed read; the atomic update below handles all other
+    # fields.  A short TOCTOU window is acceptable: the worst case is
+    # one extra visit from a genuinely concurrent finalization, which is
+    # already handled by the duplicate-finalization guard in camera_agent.
+    gap = getattr(settings, "MIN_VISIT_GAP_SECS", 0)
+    if gap > 0:
+        existing = collection.find_one(
+            {"person_id": person_id},
+            {"last_seen": 1, "visit_count": 1, "_id": 0},
+        )
+        if existing and existing.get("visit_count", 0) > 0 and existing.get("last_seen"):
+            last_seen = existing["last_seen"]
+            if isinstance(last_seen, datetime) and (now - last_seen) < timedelta(seconds=gap):
+                logger.info("visit_suppressed_duplicate",
+                            person_id=person_id,
+                            last_seen=last_seen.isoformat(),
+                            visit_count=existing.get("visit_count", 0),
+                            gap_secs=gap)
+                return {
+                    "person_id": person_id,
+                    "visit_count": existing.get("visit_count", 0),
+                    "last_seen": last_seen,
+                    "last_camera": camera_id,
+                    "last_status": status,
+                    "avg_similarity": existing.get("avg_similarity", 0.0),
+                    "similarity_history": existing.get("similarity_history", []),
+                    "status_history": existing.get("status_history", []),
+                    "typical_hours": existing.get("typical_hours", []),
+                    "typical_cameras": existing.get("typical_cameras", []),
+                    "updated_at": now,
+                    "suppressed": True,
+                }
 
     # Upsert with atomic operators — no prior read needed.
     #   $inc  — visit_count is always safe to atomically increment.
@@ -723,6 +763,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
             "typical_cameras": [camera_id],
             "updated_at": now,
             "__fallback__": True,
+            "suppressed": False,
         }
     return {
         "person_id": person_id,
@@ -736,6 +777,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
         "typical_hours": result.get("typical_hours", []),
         "typical_cameras": result.get("typical_cameras", []),
         "updated_at": now,
+        "suppressed": False,
     }
 
 

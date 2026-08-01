@@ -128,7 +128,7 @@ Events in `TERMINAL_ALLOWLIST` appear in terminal. Others go to files only.
 
 Suppressed loggers: `pymongo`, `insightface` (WARNING), `ultralytics` (ERROR), `cloudinary` (WARNING).
 
-See `docs/TERMINAL_OUTPUT.md` for full event format reference.
+See `docs/08 - Logging/Terminal Output Reference.md` for full event format reference.
 
 ## Recent fixes
 
@@ -168,7 +168,7 @@ See `docs/TERMINAL_OUTPUT.md` for full event format reference.
 | dashboard/ | Web dashboard | backend/main.py, frontend/src/ |
 | tests/ | 76 pytest tests | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer |
 | scripts/ | Session query tools | query_*.py (11 files) |
-| docs/ | Documentation | ARCHITECTURE, FORMULAS, CHANGELOG, ISSUES, TERMINAL_OUTPUT |
+| docs/ | Documentation | ARCHITECTURE, 00-Home, 01-Getting Started, 02-Architecture, 03-Agents, 04-Pipeline, 05-Utilities, 06-Formulas, 07-Dashboard, 08-Logging, 09-Reference, 10-Problems |
 
 ## Coding rules
 

@@ -155,7 +155,15 @@ class RecognitionPipeline:
         if box is None or len(box) != 4:
             logger.debug("no_person_box", track_id=track.track_id)
             return None
-        person_crop = crop_person(frame, box)
+
+        # Expand person box 20% to ensure face is fully within crop
+        bx1, by1, bx2, by2 = map(int, box)
+        w, h = bx2 - bx1, by2 - by1
+        ex, ey = int(w * 0.2), int(h * 0.2)
+        crop_box = (max(0, bx1 - ex), max(0, by1 - ey),
+                    min(frame.shape[1], bx2 + ex), min(frame.shape[0], by2 + ey))
+
+        person_crop = crop_person(frame, crop_box)
         if person_crop.size == 0:
             logger.debug("empty_person_crop", track_id=track.track_id)
             return None
@@ -168,7 +176,7 @@ class RecognitionPipeline:
 
         crop_has_embedding_quality = any(f["det_score"] >= settings.EMBEDDING_DET_SCORE_MIN for f in crop_faces)
         fallback_used = not crop_has_embedding_quality
-        if fallback_used:
+        if fallback_used and settings.ENABLE_FULL_FRAME_FALLBACK:
             frame_faces = app.detect_faces_raw(frame, min_score=settings.DET_SCORE_RELAXED)
         else:
             frame_faces = []
@@ -197,8 +205,9 @@ class RecognitionPipeline:
         if best["bbox"]:
             fx1, fy1, fx2, fy2 = best["bbox"]
             if detected_in_person_crop:
-                px1, py1, _, _ = box
-                frame_bbox = (fx1 + int(px1), fy1 + int(py1), fx2 + int(px1), fy2 + int(py1))
+                # Offset from expanded crop coords to full-frame coords
+                frame_bbox = (fx1 + crop_box[0], fy1 + crop_box[1],
+                              fx2 + crop_box[0], fy2 + crop_box[1])
             else:
                 frame_bbox = (fx1, fy1, fx2, fy2)
 

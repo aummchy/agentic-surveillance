@@ -33,6 +33,9 @@ class Track:
     expired_reported: bool = False
     # True once this expired track has been reported by get_expired_tracks().
     # Prevents duplicate finalization while recognition is still in flight.
+    _finalized: bool = False
+    # Set once by mark_finalized_once(). Survives TrackState removal, so stale
+    # recognition workers holding a reference cannot re-finalize.
     pending_recognition: Optional[dict] = None  # Phase 2.1: Recognition Agent output
     pending_match_result: Optional[MatchResult] = None  # Full match result from progressive recognition
     pending_memory_context: Optional[dict] = None  # Cached memory context from progressive recognition
@@ -64,6 +67,13 @@ class Track:
         with self._lock:
             if not self.alerted:
                 self.alerted = True
+                return True
+            return False
+
+    def mark_finalized_once(self) -> bool:
+        with self._lock:
+            if not self._finalized:
+                self._finalized = True
                 return True
             return False
 

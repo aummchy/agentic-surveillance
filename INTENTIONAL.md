@@ -105,6 +105,16 @@ Raising the threshold would reduce false-positive name assignments but would als
 
 **File:** `utils/db_utils.py:402`
 
+---
+
+## Face Detection Size
+
+**Decision:** `INSIGHTFACE_DET_SIZE=640`. Changed from 1280.
+
+**Why:** SCRFD with det_size=1280 upscales small person crops to 1280×1280 buffer before inference — the compute cost is always ~1280² regardless of crop size. Measured mean: 3.2s per detection on CPU, 6.4s under queue contention (2 workers). Changing to 640 gives 30% faster inference (2.2s mean) and higher detection scores (0.780→0.859 on real crops). Full-frame fallback is disabled, so det_size only affects person-crop detection where faces are relatively large. OpenVINO EP confirmed broken (`openvino.dll` missing from onnxruntime plugin).
+
+**File:** `config/config.jsonc:77`
+
 **Decision 2:** No embedding model versioning.
 
 **Why:** InsightFace model updates are rare and breaking changes are announced in release notes. The `embedding_model: "arcface"` field exists as a placeholder. Version-specific re-embedding is future work.

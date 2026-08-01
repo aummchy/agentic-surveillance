@@ -40,12 +40,8 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 | [AGENTS.md](AGENTS.md) | AI agent instructions, architecture, coding rules, do/don'ts |
 | [TOOLS.md](TOOLS.md) | Developer tools — repomix, ctags, ast-grep, commands |
 | [SYSTEM_INDEX.md](SYSTEM_INDEX.md) | Complete system index — repo layout, execution flow, config map |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Tech stack, components, MongoDB schema |
-| [docs/FORMULAS.md](docs/FORMULAS.md) | End-to-end data flow, math formulas, thresholds |
-| [docs/ISSUES.md](docs/ISSUES.md) | Bug tracker, remediation plan |
-| [docs/TERMINAL_OUTPUT.md](docs/TERMINAL_OUTPUT.md) | Log format reference |
-| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Completed fixes and remaining items |
-| [docs/PAPER.md](docs/PAPER.md) | Academic paper draft |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Tech stack, components, connection patterns, MongoDB schema |
+| [docs/00 - Home.md](docs/00%20-%20Home.md) | Vault map-of-content: links to all architecture, agent, pipeline, and reference notes |
 
 ## Project Structure
 
@@ -63,7 +59,7 @@ dashboard/
   frontend/                # React + Vite SPA
 tests/                     # pytest test suite (76 tests)
 scripts/                   # Debug/dev utilities
-docs/                      # Extended documentation
+docs/                      # Documentation (ARCHITECTURE + structured vault: 00-Home → 10-Problems)
 models/                    # ML weights (gitignored)
 logs/                      # Runtime logs (gitignored)
 captures/                  # Face captures (gitignored)

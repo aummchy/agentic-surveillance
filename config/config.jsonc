@@ -14,11 +14,31 @@
   "MATCH_THRESHOLD": 0.45,
   "DEDUP_SIMILARITY_THRESHOLD": 0.4,
 
+  // ── Model / Pipeline ─────────────────────────────────────────
+  // YOLO_MODEL: PyTorch (.pt) or OpenVINO IR (_openvino_model/) path.
+  // YOLO_DEVICE: Device string passed to Ultralytics model.track().
+  //   PyTorch models: "cpu" or CUDA device (e.g. "0").
+  //   OpenVINO IR models: must be "cpu" (accelerator set by OPENVINO_DEVICE).
+  // Export:  yolo export model=models/yolov8s.pt format=openvino half=True
+  "YOLO_MODEL": "models/yolov8s_openvino_model/",
+  "YOLO_DEVICE": "cpu",
+  "OPENVINO_DEVICE": "GPU",
+  "INSIGHTFACE_MODEL": "buffalo_l",
+  "INSIGHTFACE_PROVIDER": "CPUExecutionProvider",
+
+  // ── Storage ──────────────────────────────────────────────────
+  "MONGODB_DATABASE": "surveillance",
+  "MONGODB_COLLECTION": "faces",
+  "MONGODB_EVENTS_COLLECTION": "events",
+
   // ── Camera ───────────────────────────────────────────────────
   // Higher resolution = more face detail = better recognition.
   // Camera will auto-negotiate down if max not supported.
   "FRAME_WIDTH": 1920,
   "FRAME_HEIGHT": 1080,
+  // CAMERA_BACKEND: OpenCV backend override, e.g. "dshow" (Windows)
+  // or "msmf". Empty = auto-detect.
+  "CAMERA_BACKEND": "dshow",
 
   // ── YOLO Detection ──────────────────────────────────────────
   // Person detection confidence threshold.
@@ -26,6 +46,13 @@
   "PERSON_CONF_THRESHOLD": 0.4,
   "TRACK_TIMEOUT_SECS": 3.0,
   "MAX_TRACK_SECS": 300,
+
+  // ── Face Detection Fallback ──────────────────────────────────
+  // ENABLE_FULL_FRAME_FALLBACK: When false, skip the full-frame (1920x1080) SCRFD
+  // scan that runs when crop detection fails. The crop is expanded 20% and CLAHE is
+  // skipped for tiny crops to compensate. Set true only if crop detection misses too
+  // many faces and the slow fallback is acceptable.
+  "ENABLE_FULL_FRAME_FALLBACK": false,
 
   // ── ByteTrack (config/bytetrack_surveillance.yaml) ──────────
   // These are documented here for reference. Actual values live in the YAML.
@@ -38,7 +65,7 @@
 
   // ── Face Detection Scores ────────────────────────────────────
   // DET_SCORE_MIN: Standard threshold for face detection confidence.
-  // DET_SCORE_RELAXED: Fallback threshold (very permissive, use cautiously).
+  // DET_SCORE_RELAXED: Fafllback threshold (very permissive, use cautiously).
   // EMBEDDING_DET_SCORE_MIN: Minimum to generate an embedding from a face.
   "DET_SCORE_MIN": 0.4,
   "DET_SCORE_RELAXED": 0.2,
@@ -47,7 +74,7 @@
   // ── Progressive Recognition ──────────────────────────────────
   // Run face recognition every N frames (20 at 30fps = once per 0.67 seconds).
   "RECOGNITION_INTERVAL_FRAMES": 20,
-  "INSIGHTFACE_DET_SIZE": 1280,
+  "INSIGHTFACE_DET_SIZE": 640,
 
   // ── Re-scan for Unknown Tracks ──────────────────────────────
   // For tracks with similarity > 0 but status unknown:
@@ -83,7 +110,7 @@
   // BROADCAST: Quality for live WebSocket stream (lower = less bandwidth).
   // At 640x480, 80 is recommended — 65 makes compression blocks visibly noisy.
   "JPEG_QUALITY_STORE": 85,
-  "JPEG_QUALITY_BROADCAST": 65,
+  "JPEG_QUALITY_BROADCAST": 85,
 
   // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
   "DEBUG_FACE_CROPS": true,
@@ -117,6 +144,13 @@
   "KNOWN_VISITOR_CONFIDENCE": 80,
   "BORDERLINE_FACE_QUALITY": 0.8,
   "MASK_CONFIDENCE_PENALTY": 0.85,
+
+  // ── Visit Dedup ────────────────────────────────────────────
+  // MIN_VISIT_GAP_SECS: Suppress a visit if the same person was recorded
+  // within this many seconds. Prevents ByteTrack fragmentation from inflating
+  // visit counts (one person split into multiple overlapping track IDs).
+  // Set to 0 to disable. Default 60s.
+  "MIN_VISIT_GAP_SECS": 60,
 
   // ── CLAHE (Contrast Enhancement) ────────────────────────────
   // Applied to every frame before face detection.
@@ -170,6 +204,7 @@
   "PERFORMANCE_STATS": false,
 
   // ── LLM (Ollama) ────────────────────────────────────────────
+  "LLM_ENABLED": false,
   "OLLAMA_URL": "http://localhost:11434",
   "OLLAMA_MODEL": "gemma3:4b",
   "OLLAMA_TIMEOUT": 30,
@@ -177,7 +212,7 @@
   // ── Camera ───────────────────────────────────────────────────
   // CAMERA_SOURCE: RTSP URL string (e.g. "rtsp://192.168.1.10:554/stream")
   //   for mobile phone cameras. Empty string = use CAMERA_INDEX instead.
-  "CAMERA_SOURCE": "",
+  "CAMERA_SOURCE": "videos/low_4.mp4",
   "CAMERA_INDEX": 0,
   "CAMERA_ID": "cam_01"
 }

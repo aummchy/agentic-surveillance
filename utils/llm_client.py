@@ -350,6 +350,8 @@ Executive summary:"""
 def is_available() -> bool:
     """Check if Ollama is reachable (cached for 10s)."""
     global _avail_cache_ts, _avail_cache_val
+    if not settings.LLM_ENABLED:
+        return False
     now = time.monotonic()
     if now - _avail_cache_ts < 10.0:
         return _avail_cache_val

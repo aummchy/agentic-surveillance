@@ -249,13 +249,15 @@ class MemoryAgent(BaseAgent):
             logger.debug("visit_skipped_no_person_id")
             return {}
         try:
-            memory = update_visit_memory(person_id, camera_id, status, similarity, is_masked)
-            logger.info("visit_recorded",
-                       person_id=person_id,
-                       visit_count=memory.get("visit_count", 0),
-                       camera=camera_id,
-                       visit_action=visit_action)
-            return memory
+            result = update_visit_memory(person_id, camera_id, status, similarity, is_masked)
+            suppressed = result.get("suppressed", False)
+            event = "visit_suppressed_duplicate" if suppressed else "visit_recorded"
+            logger.info(event,
+                        person_id=person_id,
+                        visit_count=result.get("visit_count", 0),
+                        camera=camera_id,
+                        visit_action="suppressed_duplicate" if suppressed else visit_action)
+            return result
         except Exception as e:
             logger.error("visit_recording_failed", person_id=person_id, error=str(e))
             return {}

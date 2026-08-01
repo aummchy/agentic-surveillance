@@ -442,6 +442,9 @@ class CameraAgent:
                         logger.debug("finalize_submit_after_shutdown", track_id=track.track_id)
 
     def _finalize_track(self, track: Track):
+        if not track.mark_finalized_once():
+            logger.debug("finalize_skipped_duplicate", track_id=track.track_id)
+            return
         try:
             from agents.finalizer import retry_embedding
             retry_embedding(track, set_embedding=self.track_state.set_embedding)

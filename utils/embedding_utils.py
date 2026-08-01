@@ -97,7 +97,9 @@ class InsightFaceSingleton:
         """Run face detection once and return all faces above min_score.
         Each result is a dict with keys: det_score, embedding, bbox, is_masked."""
         try:
-            image = self._apply_clahe(image)
+            # Skip CLAHE on tiny crops (<200px) — 8x8 tile grid destroys features
+            if min(image.shape[:2]) >= 200:
+                image = self._apply_clahe(image)
             with self._inference_lock:
                 faces = self.app.get(image)
             if not faces:

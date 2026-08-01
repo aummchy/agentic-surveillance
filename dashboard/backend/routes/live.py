@@ -31,8 +31,6 @@ async def broadcast_frame(frame_data: bytes):
         return
 
     _frame_counter += 1
-    if _frame_counter % FRAME_SKIP != 0:
-        return
 
     if len(frame_data) > MAX_FRAME_SIZE:
         logger.warning("frame_too_large", size=len(frame_data))

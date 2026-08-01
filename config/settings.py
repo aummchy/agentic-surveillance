@@ -419,8 +419,24 @@ def _log_effective_settings():
 _log_effective_settings()
 
 
+def _warn_duplicate_config_keys():
+    """Warn when a setting exists in BOTH .env and config.jsonc.
+
+    .env wins silently, so a duplicate means edits to config.jsonc are
+    ignored. Catch it at startup instead of debugging why a change
+    had no effect.
+    """
+    for key in sorted(_config.keys()):
+        if os.getenv(key) is not None:
+            logger.warning("config_duplicate_key",
+                           setting=key,
+                           source="env_overrides_config",
+                           hint=f"Remove {key} from .env or config.jsonc")
+
+
 def validate_config():
     errors = []
+    _warn_duplicate_config_keys()
 
     if not os.getenv("MONGODB_URI"):
         errors.append("MONGODB_URI is required")
@@ -477,9 +493,11 @@ def validate_config():
 
 # ── Secrets (env-only, never in config.jsonc) ──────────────────
 MONGODB_URI = os.getenv("MONGODB_URI", "")
-MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "surveillance")
-MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "faces")
-MONGODB_EVENTS_COLLECTION = os.getenv("MONGODB_EVENTS_COLLECTION", "events")
+
+# ── Storage names (non-secret, configurable via config.jsonc) ──
+MONGODB_DATABASE = _get("MONGODB_DATABASE", "MONGODB_DATABASE", "surveillance")
+MONGODB_COLLECTION = _get("MONGODB_COLLECTION", "MONGODB_COLLECTION", "faces")
+MONGODB_EVENTS_COLLECTION = _get("MONGODB_EVENTS_COLLECTION", "MONGODB_EVENTS_COLLECTION", "events")
 
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
@@ -511,7 +529,7 @@ ALERT_SMS_TO = os.getenv("ALERT_SMS_TO", "")
 YOLO_MODEL = _get("YOLO_MODEL", "YOLO_MODEL", "models/yolov8s_openvino_model/")
 YOLO_DEVICE = _get("YOLO_DEVICE", "YOLO_DEVICE", "cpu")
 INSIGHTFACE_MODEL = _get("INSIGHTFACE_MODEL", "INSIGHTFACE_MODEL", "buffalo_l")
-INSIGHTFACE_DET_SIZE = _get("INSIGHTFACE_DET_SIZE", "INSIGHTFACE_DET_SIZE", 1280, int)
+INSIGHTFACE_DET_SIZE = _get("INSIGHTFACE_DET_SIZE", "INSIGHTFACE_DET_SIZE", 640, int)
 INSIGHTFACE_PROVIDER = _get("INSIGHTFACE_PROVIDER", "INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
 
 # OPENVINO_DEVICE: OpenVINO accelerator when using an OpenVINO IR model.
@@ -533,6 +551,7 @@ RECOGNITION_INTERVAL_FRAMES = _get("RECOGNITION_INTERVAL_FRAMES", "RECOGNITION_I
 MIN_QUALITY_IMPROVEMENT = _get("MIN_QUALITY_IMPROVEMENT", "MIN_QUALITY_IMPROVEMENT", 0.10, float)
 RESCAN_INTERVAL_SECS = _get("RESCAN_INTERVAL_SECS", "RESCAN_INTERVAL_SECS", 3, int)
 MAX_RESCAN_ATTEMPTS = _get("MAX_RESCAN_ATTEMPTS", "MAX_RESCAN_ATTEMPTS", 3, int)
+MIN_VISIT_GAP_SECS = _get("MIN_VISIT_GAP_SECS", "MIN_VISIT_GAP_SECS", 60, int)
 
 # ── Quality — Validity gates ──────────────────────────────────
 QUALITY_VALID_BLUR_MIN = _get("QUALITY_VALID_BLUR_MIN", "QUALITY_VALID_BLUR_MIN", 40.0, float)
@@ -605,6 +624,7 @@ DEBUG_RECOGNITION = _get("DEBUG_RECOGNITION", "DEBUG_RECOGNITION", False, bool)
 DEBUG_FACE_CROPS = _get("DEBUG_FACE_CROPS", "DEBUG_FACE_CROPS", False, bool)
 DEBUG_DUPLICATE_BOXES = _get("DEBUG_DUPLICATE_BOXES", "DEBUG_DUPLICATE_BOXES", False, bool)
 PERFORMANCE_STATS = _get("PERFORMANCE_STATS", "PERFORMANCE_STATS", True, bool)
+ENABLE_FULL_FRAME_FALLBACK = _get("ENABLE_FULL_FRAME_FALLBACK", "ENABLE_FULL_FRAME_FALLBACK", False, bool)
 
 # ── CLAHE ──────────────────────────────────────────────────────
 CLAHE_CLIP_LIMIT = _get("CLAHE_CLIP_LIMIT", "CLAHE_CLIP_LIMIT", 2.0, float)
@@ -642,6 +662,7 @@ CAMERA_ID = _get("CAMERA_ID", "CAMERA_ID", "cam_01")
 CAMERA_BACKEND = _get("CAMERA_BACKEND", "CAMERA_BACKEND", "")
 
 # ── LLM (Ollama) ──────────────────────────────────────────────
+LLM_ENABLED = _get("LLM_ENABLED", "LLM_ENABLED", True, bool)
 OLLAMA_URL = _get("OLLAMA_URL", "OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = _get("OLLAMA_MODEL", "OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_TIMEOUT = _get("OLLAMA_TIMEOUT", "OLLAMA_TIMEOUT", 30, int)

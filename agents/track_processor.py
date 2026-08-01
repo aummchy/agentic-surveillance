@@ -48,7 +48,7 @@ class TrackProcessor:
         if self._loop and self._loop.is_running():
             def _encode_and_broadcast():
                 try:
-                    preview = cv2.resize(frame, (640, 360))
+                    preview = cv2.resize(frame, (960, 540))
                     _, buffer = cv2.imencode(
                         ".jpg", preview,
                         [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_BROADCAST]
@@ -108,6 +108,7 @@ class TrackProcessor:
                 rec_agent = RecognitionAgent()
                 track_duration = time.time() - snap.first_seen
                 recognition_result = rec_agent.run({
+                    "track_id": snap.track_id,
                     "similarity": match_result.similarity_score if match_result.matched else 0.0,
                     "is_masked": snap.is_masked,
                     "face_quality": snap.best_face_score if snap.best_face_score > 0 else None,

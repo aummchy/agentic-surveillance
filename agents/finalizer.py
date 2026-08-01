@@ -26,7 +26,7 @@ def retry_embedding(track: Track, set_embedding):
             logger.debug("best_face_crop_detect_failed", track_id=track.track_id, error=str(e))
 
     frame_faces = []
-    if not crop_faces and track.best_full_frame is not None:
+    if not crop_faces and track.best_full_frame is not None and settings.ENABLE_FULL_FRAME_FALLBACK:
         try:
             frame_faces = app.detect_faces_raw(track.best_full_frame, min_score=settings.DET_SCORE_RELAXED)
         except Exception as e:

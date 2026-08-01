@@ -51,7 +51,7 @@ class FakeMemoryCollection:
     # -- simulated MongoDB operations ------------------------------------------
 
     def find_one_and_update(self, filter_doc, update_doc, upsert=False,
-                            return_document=False):
+                             return_document=False):
         """Simulates find_one_and_update — atomic or not."""
         person_id = filter_doc.get("person_id")
 
@@ -59,6 +59,14 @@ class FakeMemoryCollection:
             return self._atomic_update(person_id, update_doc)
         else:
             return self._legacy_update(person_id, update_doc)
+
+    def find_one(self, filter_doc, projection=None):
+        """Simulates find_one — returns the stored doc or None."""
+        person_id = filter_doc.get("person_id")
+        doc = self._store.get(person_id)
+        if doc is None:
+            return None
+        return dict(doc)
 
     def _legacy_update(self, person_id, update_doc):
         """Non-atomic read-modify-write (the old buggy path)."""
@@ -211,7 +219,9 @@ class TestPhase4_3_VisitMemoryRace:
         def worker(similarity):
             barrier.wait()
             with patch("utils.db_utils.get_memory_collection",
-                       return_value=collection):
+                       return_value=collection), \
+                 patch("utils.db_utils.settings") as mock_settings:
+                mock_settings.MIN_VISIT_GAP_SECS = 0
                 update_visit_memory(person_id, "cam1", "known", similarity)
 
         threads = [
@@ -237,7 +247,9 @@ class TestPhase4_3_VisitMemoryRace:
         person_id = "bounded_history_person"
 
         with patch("utils.db_utils.get_memory_collection",
-                   return_value=collection):
+                   return_value=collection), \
+             patch("utils.db_utils.settings") as mock_settings:
+            mock_settings.MIN_VISIT_GAP_SECS = 0
             for i in range(25):
                 update_visit_memory(person_id, "cam1", "known", i * 0.01)
 
@@ -255,7 +267,9 @@ class TestPhase4_3_VisitMemoryRace:
         person_id = "dedup_cam_person"
 
         with patch("utils.db_utils.get_memory_collection",
-                   return_value=collection):
+                   return_value=collection), \
+             patch("utils.db_utils.settings") as mock_settings:
+            mock_settings.MIN_VISIT_GAP_SECS = 0
             for _ in range(10):
                 update_visit_memory(person_id, "cam1", "known", 0.5)
 

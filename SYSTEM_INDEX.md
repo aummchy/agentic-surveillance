@@ -1,6 +1,6 @@
 # SYSTEM_INDEX.md
 
-Quick-lookup navigation map for AI agents. One sentence per file. See `AGENTS.md` for architecture, `docs/ARCHITECTURE.md` for tech stack, `docs/FORMULAS.md` for formulas.
+Quick-lookup navigation map for AI agents. One sentence per file. See `AGENTS.md` for architecture, `docs/ARCHITECTURE.md` for tech stack, `docs/06 - Formulas/` for formulas.
 
 ---
 
@@ -47,7 +47,7 @@ Quick-lookup navigation map for AI agents. One sentence per file. See `AGENTS.md
 │       ├── components/              # LiveFeed, UnknownPersons, VerifiedPersons, EventLog, ChatPanel, VerifyModal, ErrorBoundary
 │       └── utils/api.js             # Axios instance with base URL + error interceptor
 ├── tests/                           # 6 test files: recognition, recognition_pipeline, recognition_pipeline_stages, embedding_history, thread_safety, track_finalizer
-├── docs/                            # ARCHITECTURE, FORMULAS, ISSUES, CHANGELOG, PAPER, TERMINAL_OUTPUT
+├── docs/                            # ARCHITECTURE + structured vault (00-Home, 01-Getting Started, ..., 10-Problems)
 ├── models/                          # YOLOv8s weights + OpenVINO IR (gitignored)
 ├── scripts/                         # Debug/utility scripts (gitignored)
 ├── captures/                        # Face crop storage (gitignored)
