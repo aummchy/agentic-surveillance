@@ -159,8 +159,11 @@ def _put_label_with_bg(img, text, pos, font_scale, color, thickness=1, bg_color=
     (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
     # Ensure label stays within frame bounds
     ty = max(th + 4, ty)
-    cv2.rectangle(img, (tx, ty - th - 4), (tx + tw + 4, ty + 2), bg_color, -1)
-    cv2.putText(img, text, (tx + 2, ty - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
+    # Draw shadow outline for contrast on any background
+    for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        cv2.putText(img, text, (tx + 2 + dx, ty - 2 + dy), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.rectangle(img, (tx, ty - th - 6), (tx + tw + 8, ty + 4), bg_color, -1)
+    cv2.putText(img, text, (tx + 4, ty - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
 
 
 def compute_iou(box_a: tuple, box_b: tuple) -> float:
@@ -184,20 +187,22 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
     for track in tracks:
         x1, y1, x2, y2 = map(int, track.person_box)
         color = (0, 0, 255)
-        border_thickness = 2
+        border_thickness = 3
         is_verified = track.decision in ("authorized", "verified")
 
         if is_verified:
             color = (0, 255, 0)
-            border_thickness = 3
+            border_thickness = 4
         elif track.decision == "known_visitor":
             color = (0, 255, 255)
-            border_thickness = 2
+            border_thickness = 3
         elif track.decision is None:
             color = (255, 255, 0)
         if track.is_masked or track.decision in ("masked_unknown", "intentionally_hidden", "blacklist"):
             color = (0, 0, 255)
 
+        # Black outline for contrast on any background
+        cv2.rectangle(annotated, (x1 - 1, y1 - 1), (x2 + 1, y2 + 1), (0, 0, 0), border_thickness + 2)
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, border_thickness)
 
         name = getattr(track, 'person_name', None)
@@ -229,8 +234,8 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
             label += " MASK"
 
         if is_verified:
-            _put_label_with_bg(annotated, label, (x1, y1 - 8), 0.55, (255, 255, 255), 2, (0, 140, 0))
+            _put_label_with_bg(annotated, label, (x1, y1 - 10), 0.65, (255, 255, 255), 2, (0, 140, 0))
         else:
-            _put_label_with_bg(annotated, label, (x1, y1 - 8), 0.45, color, 1, (0, 0, 0))
+            _put_label_with_bg(annotated, label, (x1, y1 - 10), 0.55, (255, 255, 255), 2, (0, 0, 0))
 
     return annotated
