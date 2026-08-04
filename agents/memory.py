@@ -27,7 +27,7 @@ Output:
 """
 
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 from agents.base import BaseAgent
 from utils.db_utils import get_or_create_memory, update_visit_memory
@@ -261,15 +261,3 @@ class MemoryAgent(BaseAgent):
         except Exception as e:
             logger.error("visit_recording_failed", person_id=person_id, error=str(e))
             return {}
-
-
-# Convenience function
-def lookup_memory(person_id: str, camera_id: str, similarity: float, status: str) -> dict:
-    """Quick memory lookup without instantiating the agent."""
-    agent = MemoryAgent()
-    return agent.run({
-        "person_id": person_id,
-        "camera_id": camera_id,
-        "similarity": similarity,
-        "status": status,
-    })

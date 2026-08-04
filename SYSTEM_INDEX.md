@@ -46,7 +46,7 @@ Quick-lookup navigation map for AI agents. One sentence per file. See `AGENTS.md
 │       ├── App.jsx                  # Root: WebSocket, stats polling, view routing, alert state
 │       ├── components/              # LiveFeed, UnknownPersons, VerifiedPersons, EventLog, ChatPanel, VerifyModal, ErrorBoundary
 │       └── utils/api.js             # Axios instance with base URL + error interceptor
-├── tests/                           # 6 test files: recognition, recognition_pipeline, recognition_pipeline_stages, embedding_history, thread_safety, track_finalizer
+├── tests/                           # 7 test files: conftest, recognition, recognition_pipeline, recognition_pipeline_stages, embedding_history, thread_safety, track_finalizer
 ├── docs/                            # ARCHITECTURE + structured vault (00-Home, 01-Getting Started, ..., 10-Problems)
 ├── models/                          # YOLOv8s weights + OpenVINO IR (gitignored)
 ├── scripts/                         # Debug/utility scripts (gitignored)

@@ -20,7 +20,7 @@
 | Threshold | Default | Purpose | File |
 |-----------|---------|---------|------|
 | `MATCH_THRESHOLD` | 0.45 | Raw cosine for face match (max recommended) | settings.py |
-| `DEDUP_SIMILARITY_THRESHOLD` | 0.40 | Merge auto-registrations above this similarity | settings.py |
+| `DEDUP_SIMILARITY_THRESHOLD` | 0.5 | Merge auto-registrations above this similarity | settings.py |
 | `EMBEDDING_CACHE_COSINE_THRESHOLD` | 0.005 | Skip Atlas if embedding nearly identical | recognition_pipeline.py |
 
 ## Recognition
@@ -125,7 +125,7 @@
 | Threshold | Default | Purpose | File |
 |-----------|---------|---------|------|
 | `JPEG_QUALITY_STORE` | 85 | Quality for stored images | settings.py |
-| `JPEG_QUALITY_BROADCAST` | 65 | Quality for WebSocket broadcast | settings.py |
+| `JPEG_QUALITY_BROADCAST` | 90 | Quality for WebSocket broadcast | settings.py |
 
 ## CLAHE
 

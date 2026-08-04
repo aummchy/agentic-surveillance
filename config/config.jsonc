@@ -12,7 +12,7 @@
   // Higher = stricter (fewer false positives), lower = more matches (more false positives).
   // ArcFace optimal range: 0.40–0.60. Max recommended: 0.45.
   "MATCH_THRESHOLD": 0.45,
-  "DEDUP_SIMILARITY_THRESHOLD": 0.4,
+  "DEDUP_SIMILARITY_THRESHOLD": 0.5,
 
   // ── Model / Pipeline ─────────────────────────────────────────
   // YOLO_MODEL: PyTorch (.pt) or OpenVINO IR (_openvino_model/) path.
@@ -110,7 +110,7 @@
   // BROADCAST: Quality for live WebSocket stream (lower = less bandwidth).
   // At 640x480, 80 is recommended — 65 makes compression blocks visibly noisy.
   "JPEG_QUALITY_STORE": 85,
-  "JPEG_QUALITY_BROADCAST": 85,
+  "JPEG_QUALITY_BROADCAST": 90,
 
   // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
   "DEBUG_FACE_CROPS": true,

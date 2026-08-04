@@ -52,29 +52,35 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 
 ```
 main.py (entry point, wires everything)
-├── agents/camera_agent.py    — capture loop + ByteTrack + progressive recognition
-├── agents/matching_agent.py  — embedding + MongoDB vector search
-├── agents/decision_agent.py  — delegates to PolicyAgent
-├── agents/memory.py          — visit history tracking
-├── agents/alert_agent.py     — alert dispatch (console/email/sms/webhook)
-├── agents/recognition.py     — multi-signal identity classification
-├── agents/scoring.py         — confidence scoring (weighted normalization + logging)
-├── agents/policy.py          — business rule evaluation
-├── pipeline/tracker.py       — YOLOv8 + ByteTrack (single model instance)
+├── agents/camera_agent.py        — capture loop + ByteTrack + progressive recognition
+├── agents/matching_agent.py      — embedding + MongoDB vector search
+├── agents/decision_agent.py      — delegates to PolicyAgent
+├── agents/memory.py              — visit history tracking
+├── agents/alert_agent.py         — alert dispatch (console/email/sms/webhook)
+├── agents/recognition.py         — multi-signal identity classification
+├── agents/scoring.py             — confidence scoring (weighted normalization + logging)
+├── agents/policy.py              — business rule evaluation
+├── agents/track_processor.py     — track finalization + dashboard broadcasting
+├── agents/finalizer.py           — final embedding retry on track expiry
+├── agents/timing.py              — thread-safe timing diagnostics collector
+├── agents/report.py              — incident/stats/summary reports via LLM
+├── pipeline/tracker.py           — YOLOv8 + ByteTrack (single model instance)
 ├── config/bytetrack_surveillance.yaml — ByteTrack params tuned for fixed-camera surveillance
-├── pipeline/face.py          — SCRFD detection + ArcFace embedding + mask heuristic
-├── pipeline/models.py        — Track, MatchResult, DecisionResult, etc.
-├── pipeline/track_state.py   — per-track accumulation with threading.Lock
-├── utils/db_utils.py         — MongoDB CRUD + vector search + Python fallback
-├── utils/embedding_utils.py  — InsightFace singleton (load once, never per-frame)
-├── utils/llm_client.py       — Ollama HTTP client (generate, chat, NL summaries)
-├── utils/image_utils.py      — crop, save, upload to Cloudinary
-├── config/settings.py        — loads .env + config.jsonc, validate_config()
-├── config/config.jsonc       — tunable parameters (edit this, not settings.py)
-├── tests/                    — pytest test suite
+├── pipeline/recognition_pipeline.py — orchestrates detect → quality → embed → match → decide
+├── pipeline/quality_agent.py     — face quality scoring (validity gates + weighted composite)
+├── pipeline/face.py              — compute_face_ratio() — face area / person bbox ratio
+├── pipeline/models.py            — Track, MatchResult, DecisionResult, QualityResult, etc.
+├── pipeline/track_state.py       — per-track accumulation with threading.Lock
+├── utils/db_utils.py             — MongoDB CRUD + vector search + Python fallback
+├── utils/embedding_utils.py      — InsightFace singleton (load once, never per-frame)
+├── utils/llm_client.py           — Ollama HTTP client (generate, chat, NL summaries)
+├── utils/image_utils.py          — crop, save, upload to Cloudinary
+├── config/settings.py            — loads .env + config.jsonc, validate_config()
+├── config/config.jsonc           — tunable parameters (edit this, not settings.py)
+├── tests/                        — pytest test suite (7 test files)
 └── dashboard/
-    ├── backend/main.py       — FastAPI app (REST + WebSocket)
-    └── frontend/             — React + Vite
+    ├── backend/main.py           — FastAPI app (REST + WebSocket)
+    └── frontend/                 — React + Vite
 ```
 
 ## Critical patterns
@@ -89,7 +95,7 @@ main.py (entry point, wires everything)
 
 ## Quality scoring
 
-Two-tier system in `pipeline/face.py`:
+Two-tier system in `pipeline/quality_agent.py`:
 
 1. **Validity gates** — Reject unusable faces (too blurry, too dark, too small):
    - Blur: Laplacian variance ≥ `QUALITY_VALID_BLUR_MIN` (40)
@@ -143,7 +149,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 - **2026-07-09**: Added lock-protected setters for `cached_embedding` and `pending_recognition` in `TrackState`.
 - **2026-07-09**: Fixed LLM client shutdown — replaced deprecated `asyncio.get_event_loop()` with `get_running_loop()` + `asyncio.run()` fallback.
 - **2026-07-09**: Tightened CORS to explicit methods/headers.
-- **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→65.
+- **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→90.
 - **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
 - **2026-07-30**: Performance — unconditional `cv2.resize()` to 1280×720 before YOLO inference (`camera_agent.py:146`); `FRAME_SKIP` skips every other frame before JPEG encode (`track_processor.py:46`); WebSocket broadcast resized to 640×360 preview (`track_processor.py:52`).
 
@@ -162,7 +168,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 | Folder | Purpose | Key files |
 |--------|---------|-----------|
 | agents/ | AI orchestration (7 agents) | camera_agent, matching, recognition, scoring, policy, memory, alerts, report |
-| pipeline/ | Computer vision pipeline | tracker, face, models, track_state |
+| pipeline/ | Computer vision pipeline | tracker, face, models, track_state, quality_agent, recognition_pipeline |
 | utils/ | Shared utilities | db_utils, embedding_utils, llm_client, image_utils |
 | config/ | Configuration | settings.py, config.jsonc, bytetrack_surveillance.yaml |
 | dashboard/ | Web dashboard | backend/main.py, frontend/src/ |

@@ -130,7 +130,7 @@ class TestRegistrationDedup:
             person_id=track.track_id, name="Unknown", role="unknown",
             embedding=track.embedding, image_url="/captures/test.jpg",
             tags=["auto_registered"], camera_id="cam_01",
-            skip_search=False, quality_score=track.best_face_score,
+            quality_score=track.best_face_score,
         )
         assert stored_id == "new_person_id"
         mock_store.assert_called_once()

@@ -58,10 +58,10 @@ def should_send_alert(track_id: str, alert_level: str, status: str = None) -> bo
 
 def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> bool:
     if not decision.should_alert:
-        return True
+        return False
 
     if track.alerted:
-        return True
+        return False
 
     if not should_send_alert(track.track_id, decision.alert_level, decision.status):
         return False

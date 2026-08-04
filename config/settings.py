@@ -360,7 +360,15 @@ def setup_logging():
         track_id = event_dict.get("track_id")
         if isinstance(track_id, str):
             try:
-                event_dict["byte_track_id"] = str(int(track_id.rsplit("_", 1)[-1]))
+                parts = track_id.split("_")
+                if len(parts) >= 4:
+                    # New format: {camera}_{epoch}_{bt_id}_{generation}
+                    event_dict["byte_track_id"] = str(int(parts[-2]))
+                elif len(parts) >= 3:
+                    # Old format: {camera}_{epoch}_{bt_id}
+                    event_dict["byte_track_id"] = str(int(parts[-1]))
+                else:
+                    event_dict["byte_track_id"] = track_id
             except (ValueError, IndexError):
                 event_dict["byte_track_id"] = "?"
         return event_dict
@@ -577,7 +585,6 @@ JPEG_QUALITY_BROADCAST = _get("JPEG_QUALITY_BROADCAST", "JPEG_QUALITY_BROADCAST"
 
 # ── Vector Search ──────────────────────────────────────────────
 VECTOR_SEARCH_CANDIDATES = _get("VECTOR_SEARCH_CANDIDATES", "VECTOR_SEARCH_CANDIDATES", 150, int)
-VECTOR_SEARCH_LIMIT = _get("VECTOR_SEARCH_LIMIT", "VECTOR_SEARCH_LIMIT", 5, int)
 SCAN_LIMIT = _get("SCAN_LIMIT", "SCAN_LIMIT", 500, int)
 
 # ── Face Matching ──────────────────────────────────────────────
@@ -588,12 +595,9 @@ DEDUP_SIMILARITY_THRESHOLD = _get("DEDUP_SIMILARITY_THRESHOLD", "DEDUP_SIMILARIT
 EMBEDDING_HISTORY_CAP = _get("EMBEDDING_HISTORY_CAP", "EMBEDDING_HISTORY_CAP", 25, int)
 
 # ── Recognition Thresholds ─────────────────────────────────────
-VERY_HIGH_SIMILARITY = _get("VERY_HIGH_SIMILARITY", "VERY_HIGH_SIMILARITY", 0.90, float)
 HIGH_CONFIDENCE_SIMILARITY = _get("HIGH_CONFIDENCE_SIMILARITY", "HIGH_CONFIDENCE_SIMILARITY", 0.85, float)
 KNOWN_VISITOR_SIMILARITY = _get("KNOWN_VISITOR_SIMILARITY", "KNOWN_VISITOR_SIMILARITY", 0.85, float)
 KNOWN_VISITOR_CONFIDENCE = _get("KNOWN_VISITOR_CONFIDENCE", "KNOWN_VISITOR_CONFIDENCE", 80, float)
-BORDERLINE_FACE_QUALITY = _get("BORDERLINE_FACE_QUALITY", "BORDERLINE_FACE_QUALITY", 0.8, float)
-MASK_CONFIDENCE_PENALTY = _get("MASK_CONFIDENCE_PENALTY", "MASK_CONFIDENCE_PENALTY", 0.85, float)
 
 # ── Confidence Formula Weights ─────────────────────────────────
 WEIGHT_SIMILARITY = _get("WEIGHT_SIMILARITY", "WEIGHT_SIMILARITY", 0.65, float)

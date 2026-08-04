@@ -64,7 +64,7 @@ Input: frame (full), track (with person_box)
 2. Detect faces in person crop (min_score=DET_SCORE_RELAXED=0.20)
 3. Check if any face has det_score >= EMBEDDING_DET_SCORE_MIN (0.40)
 4. IF no embedding-grade face in crop:
-   → Fallback: detect faces in full frame
+   → Fallback: detect faces in full frame (disabled by default, ENABLE_FULL_FRAME_FALLBACK=false)
 5. Pick best face by det_score
 6. Gate: det_score must be >= EMBEDDING_DET_SCORE_MIN (0.40)
 7. Compute face_ratio = face_area / person_area

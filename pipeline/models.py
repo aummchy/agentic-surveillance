@@ -3,7 +3,22 @@ import threading
 import time
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from enum import Enum
+from typing import Optional
+
+
+class DedupStatus(Enum):
+    MERGED = "merged"
+    NEW = "new"
+    FAILED = "failed"
+
+
+@dataclass
+class DedupResult:
+    status: DedupStatus
+    person_id: Optional[str] = None
+    reason: str = ""
+    similarity: float = 0.0
 
 
 @dataclass
@@ -12,6 +27,8 @@ class Track:
     first_seen: float
     last_seen: float
     person_box: tuple
+    byte_track_id: int = 0       # raw ByteTrack ID (before composite_id wrapping)
+    generation: int = 0           # reuse generation (0 = first person with this bt_id)
     best_face_crop: Optional[np.ndarray] = None
     best_face_score: float = 0.0
     best_full_frame: Optional[np.ndarray] = None
@@ -23,9 +40,10 @@ class Track:
     decision: Optional[str] = None
     confidence: int = 0  # Highest confidence seen — only upgrades, never downgrades
     person_name: Optional[str] = None  # Name from match result
+    person_name_similarity: float = 0.0  # Highest sim for name — only upgrades, never downgrades
     alerted: bool = False
+    last_alert_time: float = 0.0  # Timestamp of last alert dispatch (for per-track cooldown)
     image_url: Optional[str] = None  # Cloudinary URL (set after upload)
-    last_recognition_frame: int = 0
     last_recognition_quality: float = 0.0     # face quality at last recognition
     last_recognition_status: str = ""         # "known" / "unknown" / "uncertain"
     last_recognition_time: float = 0.0        # timestamp of last recognition (for time-based rescan)
@@ -45,7 +63,7 @@ class Track:
     max_face_ratio: float = 0.0
     best_face_ratio: float = 0.0
     best_face_crop_path: str = ""
-    cached_embedding: Optional[list] = None  # Last embedding searched against Atlas
+    best_person_crop_jpeg: Optional[bytes] = None  # JPEG bytes of person crop (for display)
     visibility: str = "unknown"
     max_track_secs: float = 300.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -84,6 +102,8 @@ class Track:
                 first_seen=self.first_seen,
                 last_seen=self.last_seen,
                 person_box=self.person_box,
+                byte_track_id=self.byte_track_id,
+                generation=self.generation,
                 best_face_crop=np.array(self.best_face_crop, copy=True) if self.best_face_crop is not None else None,
                 best_face_score=self.best_face_score,
                 best_full_frame=np.array(self.best_full_frame, copy=True) if self.best_full_frame is not None else None,
@@ -97,7 +117,6 @@ class Track:
                 person_name=self.person_name,
                 alerted=self.alerted,
                 image_url=self.image_url,
-                last_recognition_frame=self.last_recognition_frame,
                 last_recognition_quality=self.last_recognition_quality,
                 last_recognition_status=self.last_recognition_status,
                 last_recognition_time=self.last_recognition_time,
@@ -112,7 +131,7 @@ class Track:
                 max_face_ratio=self.max_face_ratio,
                 best_face_ratio=self.best_face_ratio,
                 best_face_crop_path=self.best_face_crop_path,
-                cached_embedding=list(self.cached_embedding) if self.cached_embedding is not None else None,
+                best_person_crop_jpeg=self.best_person_crop_jpeg,
                 visibility=self.visibility,
                 max_track_secs=self.max_track_secs,
             )
@@ -124,6 +143,8 @@ class TrackSnapshot:
     first_seen: float = 0.0
     last_seen: float = 0.0
     person_box: tuple = ()
+    byte_track_id: int = 0
+    generation: int = 0
     best_face_crop: Optional[np.ndarray] = None
     best_face_score: float = 0.0
     best_full_frame: Optional[np.ndarray] = None
@@ -137,7 +158,6 @@ class TrackSnapshot:
     person_name: Optional[str] = None
     alerted: bool = False
     image_url: Optional[str] = None
-    last_recognition_frame: int = 0
     last_recognition_quality: float = 0.0
     last_recognition_status: str = ""
     last_recognition_time: float = 0.0
@@ -152,7 +172,7 @@ class TrackSnapshot:
     max_face_ratio: float = 0.0
     best_face_ratio: float = 0.0
     best_face_crop_path: str = ""
-    cached_embedding: Optional[list] = None
+    best_person_crop_jpeg: Optional[bytes] = None  # JPEG bytes of person crop (for display)
     visibility: str = "unknown"
     max_track_secs: float = 300.0
 
@@ -172,17 +192,6 @@ class QualityResult:
         Use when quality assessment cannot be performed (e.g., empty crop or invalid ROI).
         """
         return cls(blur_score=0.0, brightness=0.0, face_area=0, is_valid=False, overall_score=0.0)
-
-
-@dataclass
-class EmbeddingResult:
-    embedding: Optional[np.ndarray] = None
-    face_detected: bool = False
-    detection_score: float = 0.0
-    embedding_score: float = 0.0
-    bbox: Optional[tuple] = None
-    is_masked: bool = False
-    error: Optional[str] = None
 
 
 @dataclass

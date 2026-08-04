@@ -182,8 +182,8 @@ function App() {
             <button className="notification-close" onClick={() => setActiveAlert(null)}>&times;</button>
           </div>
           <div className="notification-body">
-            {activeAlert.image_url && (
-              <img src={getImageUrl(activeAlert.image_url)} alt="Unknown" className="notification-image" />
+            {(activeAlert.person_crop_url || activeAlert.image_url) && (
+              <img src={getImageUrl(activeAlert.person_crop_url || activeAlert.image_url)} alt="Unknown" className="notification-image" />
             )}
             <div className="notification-details">
               <div className="notification-time">
@@ -258,7 +258,7 @@ function App() {
           {notifications.map((n, i) => (
             <div key={n.timestamp + i} className="notification-sidebar-item" onClick={() => dismissNotification(i)}>
               <div className="notif-img-wrap">
-                {n.image_url && <img src={getImageUrl(n.image_url)} alt="" className="notif-thumb" />}
+                {(n.person_crop_url || n.image_url) && <img src={getImageUrl(n.person_crop_url || n.image_url)} alt="" className="notif-thumb" />}
               </div>
               <div className="notif-info">
                 <div className="notif-label">

@@ -60,6 +60,9 @@ function VerifiedPersons({ refreshKey }) {
   }
 
   const getLatestImage = (person) => {
+    if (person.person_crop_url) {
+      return getImageUrl(person.person_crop_url)
+    }
     if (person.images && person.images.length > 0) {
       return getImageUrl(person.images[person.images.length - 1].url)
     }

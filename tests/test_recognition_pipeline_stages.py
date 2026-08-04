@@ -204,21 +204,7 @@ class TestPipelineCache:
         ):
             yield mock_if
 
-    def test_cache_hit_skips_atlas(self, _patch_detection):
-        mock_match = MagicMock()
-        pipe = RecognitionPipeline(matching_fn=mock_match)
-        track = _track()
-        track.cached_embedding = [0.5] * 512
-        track.pending_match_result = _make_match()
-        _patch_detection.return_value.detect_faces_raw.return_value = _face(
-            np.full(512, 0.5, dtype=np.float32))
-
-        result = pipe.run(_frame(), track)
-        assert result.skip_reason == "success"
-        assert result.metrics.used_cached_match is True
-        mock_match.assert_not_called()
-
-    def test_no_cache_calls_atlas(self, _patch_detection):
+    def test_always_calls_atlas(self, _patch_detection):
         mock_match = MagicMock(return_value=_make_match())
         pipe = RecognitionPipeline(matching_fn=mock_match)
         track = _track()
@@ -226,6 +212,4 @@ class TestPipelineCache:
 
         result = pipe.run(_frame(), track)
         assert result.skip_reason == "success"
-        assert result.metrics.had_cached_embedding is False
-        assert result.metrics.used_cached_match is False
         mock_match.assert_called_once()

@@ -6,6 +6,7 @@ import structlog
 from typing import Dict, Optional
 from config import settings
 from pipeline.models import Track
+from utils.image_utils import compute_iou
 
 logger = structlog.get_logger(__name__)
 
@@ -16,69 +17,94 @@ class TrackState:
         self._lock = threading.Lock()
         self._session_epoch = int(time.time())
         self._in_flight: Dict[str, int] = {}  # track_id → active recognition count
+        self._bt_active: Dict[int, int] = {}   # bt_id → current active generation
+        self._bt_next_gen: Dict[int, int] = {} # bt_id → next generation to allocate
+
+    def allocate_generation(self, bt_id: int) -> int:
+        """Allocate a generation for a new track with the given bt_id.
+
+        Returns 0 if first time, or the next generation after the previous
+        one was released.  Must be called under self._lock.
+        """
+        if bt_id in self._bt_active:
+            logger.warning("bytetrack_id_already_active",
+                           bt_id=bt_id, gen=self._bt_active[bt_id])
+            return self._bt_active[bt_id]
+        gen = self._bt_next_gen.get(bt_id, 0)
+        self._bt_active[bt_id] = gen
+        return gen
+
+    def release_generation(self, bt_id: int):
+        """Release the generation for a removed track.
+
+        Increments the next generation for this bt_id.
+        Must be called under self._lock.
+        """
+        gen = self._bt_active.pop(bt_id, None)
+        if gen is not None:
+            self._bt_next_gen[bt_id] = gen + 1
 
     @staticmethod
-    def _compute_iou(box1: tuple, box2: tuple) -> float:
-        x1 = max(box1[0], box2[0])
-        y1 = max(box1[1], box2[1])
-        x2 = min(box1[2], box2[2])
-        y2 = min(box1[3], box2[3])
-        inter = max(0, x2 - x1) * max(0, y2 - y1)
-        if inter == 0:
-            return 0.0
-        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-        union = area1 + area2 - inter
-        return inter / union if union > 0 else 0.0
-
-    def make_composite_id(self, camera_id: str, byte_track_id: int) -> str:
-        return f"{camera_id}_{self._session_epoch}_{byte_track_id}"
+    def make_composite_id(camera_id: str, bt_id: int, generation: int, session_epoch: int) -> str:
+        """Pure formatter — no mutable state."""
+        return f"{camera_id}_{session_epoch}_{bt_id}_{generation}"
 
     def update(self, camera_id: str, track_id: int, box: tuple,
                frame: np.ndarray = None) -> Optional[Track]:
-        composite_id = self.make_composite_id(camera_id, track_id)
-
         with self._lock:
-            if composite_id in self._tracks:
-                track = self._tracks[composite_id]
-                with track._lock:
-                    track.last_seen = time.time()
-                    track.person_box = box
-                    track.total_frames_seen += 1
-                return track
-            else:
-                track = Track(
+            # Check if this bt_id already has an active track
+            for cid, existing in self._tracks.items():
+                if existing.byte_track_id == track_id:
+                    with existing._lock:
+                        existing.last_seen = time.time()
+                        existing.person_box = box
+                        existing.total_frames_seen += 1
+                    return existing
+
+            # New track — allocate generation
+            generation = self.allocate_generation(track_id)
+            composite_id = self.make_composite_id(camera_id, track_id, generation, self._session_epoch)
+
+            if generation > 0:
+                logger.info("bytetrack_id_reused",
+                            bt_id=track_id, generation=generation,
+                            composite_id=composite_id)
+
+            track = Track(
+                track_id=composite_id,
+                first_seen=time.time(),
+                last_seen=time.time(),
+                person_box=box,
+                byte_track_id=track_id,
+                generation=generation,
+                max_track_secs=settings.MAX_TRACK_SECS
+            )
+            self._tracks[composite_id] = track
+            if settings.DEBUG_RECOGNITION:
+                # Find the nearest existing track by IoU for fragmentation detection
+                nearest_id = None
+                nearest_iou = 0.0
+                gap_ms = None
+                now = time.time()
+                for cid, existing in self._tracks.items():
+                    if cid == composite_id:
+                        continue
+                    iou_val = compute_iou(box, existing.person_box)
+                    if iou_val > nearest_iou:
+                        nearest_iou = iou_val
+                        nearest_id = existing.track_id
+                        gap_ms = round((now - existing.last_seen) * 1000, 1)
+                log_fields = dict(
                     track_id=composite_id,
-                    first_seen=time.time(),
-                    last_seen=time.time(),
-                    person_box=box,
-                    max_track_secs=settings.MAX_TRACK_SECS
-                )
-                self._tracks[composite_id] = track
-                if settings.DEBUG_RECOGNITION:
-                    # Find the nearest existing track by IoU for fragmentation detection
-                    nearest_id = None
-                    nearest_iou = 0.0
-                    gap_ms = None
-                    now = time.time()
-                    for cid, existing in self._tracks.items():
-                        if cid == composite_id:
-                            continue
-                        iou_val = self._compute_iou(box, existing.person_box)
-                        if iou_val > nearest_iou:
-                            nearest_iou = iou_val
-                            nearest_id = existing.track_id
-                            gap_ms = round((now - existing.last_seen) * 1000, 1)
-                    log_fields = dict(
-                        track_id=composite_id,
-                        active_count=len(self._tracks),
-                        bt_track_id=track_id)
-                    if nearest_id and nearest_iou > 0.01:
-                        log_fields["nearest_track_id"] = nearest_id
-                        log_fields["nearest_iou"] = round(nearest_iou, 3)
-                        log_fields["time_gap_ms"] = gap_ms
-                    logger.debug("track_created", **log_fields)
-                return track
+                    active_count=len(self._tracks),
+                    bt_track_id=track_id,
+                    generation=generation)
+                if nearest_id and nearest_iou > 0.01:
+                    log_fields["nearest_track_id"] = nearest_id
+                    log_fields["nearest_iou"] = round(nearest_iou, 3)
+                    log_fields["time_gap_ms"] = gap_ms
+                logger.debug("track_created", **log_fields)
+            return track
 
     def get(self, composite_id: str) -> Optional[Track]:
         with self._lock:
@@ -106,7 +132,10 @@ class TrackState:
 
     def remove(self, composite_id: str) -> Optional[Track]:
         with self._lock:
-            return self._tracks.pop(composite_id, None)
+            track = self._tracks.pop(composite_id, None)
+            if track:
+                self.release_generation(track.byte_track_id)
+            return track
 
     def get_expired_tracks(self) -> list:
         expired = []
@@ -124,16 +153,18 @@ class TrackState:
                     if self._in_flight.get(cid, 0) == 0:
                         to_remove.append(cid)
             for cid in to_remove:
-                if settings.DEBUG_RECOGNITION:
-                    track_obj = self._tracks.get(cid)
-                    lifetime = round(time.time() - track_obj.first_seen, 1) if track_obj else None
+                track_obj = self._tracks.get(cid)
+                if settings.DEBUG_RECOGNITION and track_obj:
+                    lifetime = round(time.time() - track_obj.first_seen, 1)
                     logger.debug("track_removed",
                                  track_id=cid,
                                  reason="expired",
                                  active_count=len(self._tracks) - 1,
                                  lifetime_secs=lifetime,
-                                 total_frames=track_obj.total_frames_seen if track_obj else None,
-                                 face_detected=track_obj.face_detected_once if track_obj else None)
+                                 total_frames=track_obj.total_frames_seen,
+                                 face_detected=track_obj.face_detected_once)
+                if track_obj:
+                    self.release_generation(track_obj.byte_track_id)
                 del self._tracks[cid]
         return expired
 
@@ -192,12 +223,14 @@ class TrackState:
                                      lifetime_secs=lifetime,
                                      total_frames=track.total_frames_seen,
                                      face_detected=track.face_detected_once)
+                    self.release_generation(track.byte_track_id)
                     del self._tracks[composite_id]
             else:
                 self._in_flight[composite_id] = count - 1
 
     def set_best_face(self, composite_id: str, face_crop: np.ndarray,
-                      face_score: float, full_frame: np.ndarray, face_ratio: float):
+                      face_score: float, full_frame: np.ndarray, face_ratio: float,
+                      person_crop: np.ndarray = None):
         with self._lock:
             track = self._tracks.get(composite_id)
             if not track:
@@ -206,12 +239,18 @@ class TrackState:
                 if face_score <= track.best_face_score + 0.03:
                     return
 
-        # Encode JPEG outside the lock (expensive operation) — only if score improved significantly
+        # Encode JPEGs outside the lock (expensive operations) — only if score improved significantly
         success, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
         if not success:
             logger.warning("jpeg_encode_failed", composite_id=composite_id, context="set_best_face")
             return
         jpeg_bytes = jpeg_buf.tobytes()
+
+        person_crop_jpeg = None
+        if person_crop is not None and person_crop.size > 0:
+            ok, pc_buf = cv2.imencode(".jpg", person_crop, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
+            if ok:
+                person_crop_jpeg = pc_buf.tobytes()
 
         with self._lock:
             track = self._tracks.get(composite_id)
@@ -223,6 +262,8 @@ class TrackState:
                         track.best_full_frame = full_frame
                         track.best_face_ratio = face_ratio
                         track.best_frame_jpeg = jpeg_bytes
+                        if person_crop_jpeg is not None:
+                            track.best_person_crop_jpeg = person_crop_jpeg
 
     def ensure_fallback_frame(self, composite_id: str, frame: np.ndarray):
         """Guarantee every track gets at least one photo, independent of face quality.
@@ -268,11 +309,14 @@ class TrackState:
                     track.decision = decision
                     # Never overwrite alerted=True — mark_alerted_once() is the sole writer
 
-    def set_person_name(self, composite_id: str, name: str):
+    def set_person_name(self, composite_id: str, name: str, similarity: float = 0.0):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                track.person_name = name
+                existing_sim = track.person_name_similarity
+                if existing_sim == 0.0 or similarity >= existing_sim:
+                    track.person_name = name
+                    track.person_name_similarity = similarity
 
     def set_face_crop_path(self, composite_id: str, path: str):
         with self._lock:
@@ -284,25 +328,38 @@ class TrackState:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                track.pending_match_result = match_result
+                existing = track.pending_match_result
+                # Never let a no-match (sim=0) clobber a real match.
+                # Only upgrade: new sim >= existing sim.
+                if existing is None or match_result.similarity_score >= existing.similarity_score:
+                    track.pending_match_result = match_result
 
     def set_pending_memory_context(self, composite_id: str, memory_context: dict):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                track.pending_memory_context = memory_context
-
-    def set_cached_embedding(self, composite_id: str, embedding: list):
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if track:
-                track.cached_embedding = embedding
+                existing = track.pending_memory_context
+                new_known = memory_context.get("is_known", False)
+                existing_known = existing.get("is_known", False) if existing else False
+                # Only upgrade: is_known True > False; visit_count higher > lower.
+                if new_known or not existing_known:
+                    if new_known and existing_known:
+                        # Both known — keep the one with higher visit count
+                        if memory_context.get("visit_count", 0) >= existing.get("visit_count", 0):
+                            track.pending_memory_context = memory_context
+                    else:
+                        track.pending_memory_context = memory_context
 
     def set_pending_recognition_data(self, composite_id: str, recognition_result: dict):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                track.pending_recognition = recognition_result
+                existing = track.pending_recognition
+                new_conf = recognition_result.get("confidence", 0)
+                existing_conf = existing.get("confidence", 0) if existing else 0
+                # Only upgrade: new confidence > existing confidence.
+                if new_conf > existing_conf:
+                    track.pending_recognition = recognition_result
 
     def set_recognition_snapshot(self, composite_id: str, quality: float, status: str):
         with self._lock:

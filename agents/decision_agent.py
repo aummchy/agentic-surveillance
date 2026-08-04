@@ -7,6 +7,7 @@ Policy Agent for centralized rule management.
 Phase 2.3: Rules are now in agents/policy.py
 """
 
+import threading
 import structlog
 from pipeline.models import Track, MatchResult, DecisionResult
 from agents.policy import PolicyAgent
@@ -15,13 +16,15 @@ logger = structlog.get_logger(__name__)
 
 # Singleton policy agent
 _policy_agent = None
+_policy_lock = threading.Lock()
 
 
 def _get_policy_agent() -> PolicyAgent:
     global _policy_agent
-    if _policy_agent is None:
-        _policy_agent = PolicyAgent()
-    return _policy_agent
+    with _policy_lock:
+        if _policy_agent is None:
+            _policy_agent = PolicyAgent()
+        return _policy_agent
 
 
 def decide(track: Track, match_result: MatchResult,

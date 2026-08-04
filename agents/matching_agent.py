@@ -17,6 +17,17 @@ def run_matching_from_embedding(embedding: list, track_id: str = "unknown") -> M
     matches = result["matches"]
 
     if not matches:
+        all_candidates = result.get("all_candidates", [])
+        if all_candidates:
+            best_cand = all_candidates[0]
+            return MatchResult(
+                similarity_score=best_cand["similarity"],
+                matched=False,
+                second_best_similarity=result["top2"],
+                margin=result["margin"],
+                candidate_count=len(all_candidates),
+                all_candidates=all_candidates,
+            )
         return MatchResult(matched=False)
 
     best = matches[0]

@@ -437,3 +437,70 @@ class TestPhase4_4_TrackExpirationRace:
         # end_recognition removes it
         ts.end_recognition(track.track_id)
         assert ts.get(track.track_id) is None
+
+
+class TestByteTrackIdReuse:
+    """Regression tests for ByteTrack ID reuse lifecycle tracking."""
+
+    def test_first_track_gets_generation_zero(self):
+        ts = TrackState()
+        t1 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        assert t1.generation == 0
+        assert t1.byte_track_id == 2
+        assert t1.track_id.endswith("_0")
+
+    def test_reuse_gets_unique_composite_id(self):
+        ts = TrackState()
+        t1 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        assert t1.generation == 0
+        ts.remove(t1.track_id)
+
+        t2 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        assert t2.generation == 1
+        assert t2.byte_track_id == 2
+        assert t2.track_id.endswith("_1")
+        assert t1.track_id != t2.track_id
+
+    def test_multiple_reuses_increment_generation(self):
+        ts = TrackState()
+        t1 = ts.update("cam_01", 5, (10, 10, 50, 50))
+        assert t1.generation == 0
+        ts.remove(t1.track_id)
+
+        t2 = ts.update("cam_01", 5, (10, 10, 50, 50))
+        assert t2.generation == 1
+        ts.remove(t2.track_id)
+
+        t3 = ts.update("cam_01", 5, (10, 10, 50, 50))
+        assert t3.generation == 2
+        assert t3.track_id.endswith("_2")
+
+    def test_different_bt_ids_independent_generations(self):
+        ts = TrackState()
+        t_a = ts.update("cam_01", 2, (100, 100, 200, 200))
+        t_b = ts.update("cam_01", 3, (300, 300, 400, 400))
+        assert t_a.generation == 0
+        assert t_b.generation == 0
+        assert t_a.track_id != t_b.track_id
+
+        ts.remove(t_a.track_id)
+        t_a2 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        assert t_a2.generation == 1
+        assert t_b.generation == 0  # bt_id=3 still generation 0
+
+    def test_release_generation_idempotent(self):
+        ts = TrackState()
+        t1 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        ts.remove(t1.track_id)
+        # Second release should be a no-op
+        ts.remove(t1.track_id)
+
+        t2 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        assert t2.generation == 1  # only incremented once
+
+    def test_update_existing_track_returns_same_track(self):
+        ts = TrackState()
+        t1 = ts.update("cam_01", 2, (100, 100, 200, 200))
+        t2 = ts.update("cam_01", 2, (105, 105, 205, 205))
+        assert t1.track_id == t2.track_id  # same composite_id
+        assert t1 is t2  # same object

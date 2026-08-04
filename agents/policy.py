@@ -218,6 +218,19 @@ class PolicyAgent(BaseAgent):
         # RULE 5: Matched but not verified (new or uncertain)
         # ═══════════════════════════════════════════════════════
         if matched:
+            # If recognition agent already classified as "known", respect that
+            # — it considered multi-signal scoring (quality, track duration, memory).
+            # This prevents RECOG=KNOWN but POLICY=UNKNOWN divergence.
+            if rec_status == "known":
+                return DecisionResult(
+                    status="known_visitor",
+                    alert_level="low",
+                    person_id=person_id,
+                    name=name,
+                    reason=f"Known visitor: {name}. Recognition confidence {confidence}%",
+                    should_alert=False,
+                    should_register=False
+                )
             # Check similarity or confidence — high similarity alone is sufficient
             if similarity >= settings.KNOWN_VISITOR_SIMILARITY or confidence >= settings.KNOWN_VISITOR_CONFIDENCE:
                 return DecisionResult(

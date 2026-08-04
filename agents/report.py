@@ -25,12 +25,10 @@ Output:
 """
 
 import structlog
-from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from agents.base import BaseAgent
 from utils.db_utils import (
-    get_events_with_faces, get_stats, get_visit_history,
-    get_memory_collection, get_events_collection
+    get_events_with_faces, get_stats, get_visit_history
 )
 from utils import llm_client
 
@@ -306,25 +304,3 @@ class ReportAgent(BaseAgent):
             base += " Returning visitor — check if pattern is normal."
 
         return base
-
-
-# Convenience functions
-def generate_incident_report(track_id: str, camera_id: str, status: str,
-                            alert_level: str, reason: str, **kwargs) -> dict:
-    """Quick incident report generation."""
-    agent = ReportAgent()
-    return agent.run({
-        "report_type": "incident",
-        "track_id": track_id,
-        "camera_id": camera_id,
-        "status": status,
-        "alert_level": alert_level,
-        "reason": reason,
-        **kwargs,
-    })
-
-
-def generate_summary(period: str = "daily") -> dict:
-    """Quick summary generation."""
-    agent = ReportAgent()
-    return agent.run({"report_type": "summary", "period": period})

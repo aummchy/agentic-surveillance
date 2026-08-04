@@ -35,6 +35,7 @@ class FaceResponse(BaseModel):
     source: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+    person_crop_url: Optional[str] = None
 
 
 class UnknownFacesResponse(BaseModel):
@@ -61,6 +62,7 @@ class EventResponse(BaseModel):
     image_url: Optional[str] = None
     reason: str = ""
     alerted: bool = False
+    person_crop_url: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 

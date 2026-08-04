@@ -41,7 +41,7 @@ Priority: `.env` > `config.jsonc` > defaults
 | `YOLO_MODEL` | `models/yolov8s_openvino_model/` | YOLO model path |
 | `YOLO_DEVICE` | `cpu` | YOLO device |
 | `INSIGHTFACE_MODEL` | `buffalo_l` | InsightFace model pack |
-| `INSIGHTFACE_DET_SIZE` | `1280` | Face detection input size |
+| `INSIGHTFACE_DET_SIZE` | `640` | Face detection input size |
 | `INSIGHTFACE_PROVIDER` | `CPUExecutionProvider` | ONNX provider |
 | `OPENVINO_DEVICE` | `GPU` | OpenVINO accelerator |
 
@@ -49,12 +49,12 @@ Priority: `.env` > `config.jsonc` > defaults
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `CAMERA_SOURCE` | `""` | RTSP URL or file path |
+| `CAMERA_SOURCE` | `videos/low_4.mp4` | RTSP URL or file path |
 | `CAMERA_INDEX` | `0` | Webcam device index |
 | `CAMERA_ID` | `cam_01` | Camera identifier |
 | `CAMERA_BACKEND` | `""` | Video backend |
-| `FRAME_WIDTH` | `1280` | Capture width |
-| `FRAME_HEIGHT` | `720` | Capture height |
+| `FRAME_WIDTH` | `1920` | Capture width |
+| `FRAME_HEIGHT` | `1080` | Capture height |
 | `FRAME_SKIP` | `2` | Skip every Nth frame |
 
 ### Detection & Tracking
@@ -67,6 +67,7 @@ Priority: `.env` > `config.jsonc` > defaults
 | `DET_SCORE_MIN` | 0.40 | Standard face detection |
 | `DET_SCORE_RELAXED` | 0.20 | Relaxed face detection |
 | `EMBEDDING_DET_SCORE_MIN` | 0.40 | Min for embedding generation |
+| `ENABLE_FULL_FRAME_FALLBACK` | False | Full-frame SCRFD scan fallback |
 
 ### Recognition
 
@@ -101,7 +102,7 @@ Priority: `.env` > `config.jsonc` > defaults
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `MATCH_THRESHOLD` | 0.45 | Match gate (max 0.45) |
-| `DEDUP_SIMILARITY_THRESHOLD` | 0.40 | Dedup gate |
+| `DEDUP_SIMILARITY_THRESHOLD` | 0.5 | Dedup gate |
 
 ### Confidence
 
@@ -143,6 +144,12 @@ Priority: `.env` > `config.jsonc` > defaults
 | `LOITER_SECS` | 30 | Loitering threshold |
 | `MASK_RATIO_THRESHOLD` | 0.30 | Mask detection ratio |
 
+### Visit Dedup
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `MIN_VISIT_GAP_SECS` | 60 | Suppress visit if same person recorded within this window |
+
 ### Visibility
 
 | Setting | Default | Purpose |
@@ -171,7 +178,7 @@ Priority: `.env` > `config.jsonc` > defaults
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `JPEG_QUALITY_STORE` | 85 | Stored image quality |
-| `JPEG_QUALITY_BROADCAST` | 65 | Broadcast quality |
+| `JPEG_QUALITY_BROADCAST` | 90 | Broadcast quality |
 
 ### CLAHE
 
@@ -184,6 +191,7 @@ Priority: `.env` > `config.jsonc` > defaults
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
+| `LLM_ENABLED` | False | Enable Ollama LLM features |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server |
 | `OLLAMA_MODEL` | `gemma3:4b` | Model name |
 | `OLLAMA_TIMEOUT` | 30 | Request timeout |
@@ -192,11 +200,11 @@ Priority: `.env` > `config.jsonc` > defaults
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `DEBUG_RECOGNITION` | False | Verbose recognition logs |
-| `DEBUG_FACE_CROPS` | False | Save face crops |
-| `DEBUG_DUPLICATE_BOXES` | False | Duplicate detection logs |
-| `PERFORMANCE_STATS` | True | FPS + timing logs |
-| `ENABLE_CALC_LOG` | False | Confidence calculation log |
+| `DEBUG_RECOGNITION` | True | Verbose recognition logs |
+| `DEBUG_FACE_CROPS` | True | Save face crops |
+| `DEBUG_DUPLICATE_BOXES` | True | Duplicate detection logs |
+| `PERFORMANCE_STATS` | False | FPS + timing logs |
+| `ENABLE_CALC_LOG` | True | Confidence calculation log |
 | `CALC_LOG_MAX_SIZE_MB` | 10 | Calc log max size |
 
 ## See also

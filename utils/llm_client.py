@@ -27,9 +27,7 @@ logger = structlog.get_logger(__name__)
 
 # Module-level client for connection pooling
 _client: Optional[httpx.Client] = None
-_async_client: Optional[httpx.AsyncClient] = None
 _client_lock = threading.Lock()
-_async_client_lock = threading.Lock()
 _shut_down = False
 
 
@@ -47,22 +45,6 @@ def _get_client() -> httpx.Client:
                     timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
                 )
     return _client
-
-
-def _get_async_client() -> httpx.AsyncClient:
-    global _async_client, _shut_down
-    if _shut_down:
-        raise RuntimeError("llm_client has been shut down")
-    if _async_client is None or _async_client.is_closed:
-        with _async_client_lock:
-            if _shut_down:
-                raise RuntimeError("llm_client has been shut down")
-            if _async_client is None or _async_client.is_closed:
-                _async_client = httpx.AsyncClient(
-                    base_url=settings.OLLAMA_URL,
-                    timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
-                )
-    return _async_client
 
 
 def generate(
@@ -123,47 +105,6 @@ def generate(
     return None
 
 
-async def generate_async(
-    prompt: str,
-    system: str = "",
-    model: str = None,
-    temperature: float = 0.3,
-    max_tokens: int = 512,
-) -> Optional[str]:
-    """Async version of generate()."""
-    model = model or settings.OLLAMA_MODEL
-    client = _get_async_client()
-
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
-    }
-    if system:
-        payload["system"] = system
-
-    for attempt in range(3):
-        try:
-            resp = await client.post("/api/generate", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("response", "").strip()
-        except httpx.TimeoutException:
-            logger.warning("llm_async_timeout", attempt=attempt + 1, model=model)
-        except httpx.ConnectError:
-            logger.warning("llm_async_connect_failed", attempt=attempt + 1)
-            break
-        except Exception as e:
-            logger.error("llm_async_error", error=str(e), model=model)
-            break
-
-    return None
-
-
 def chat_completion(
     message: str,
     system: str = "",
@@ -214,50 +155,6 @@ def chat_completion(
             break
         except Exception as e:
             logger.error("llm_chat_error", error=str(e), model=model)
-            break
-
-    return None
-
-
-async def chat_completion_async(
-    message: str,
-    system: str = "",
-    model: str = None,
-    temperature: float = 0.3,
-    max_tokens: int = 1024,
-) -> Optional[str]:
-    """Async chat completion."""
-    model = model or settings.OLLAMA_MODEL
-    client = _get_async_client()
-
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": message})
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
-    }
-
-    for attempt in range(3):
-        try:
-            resp = await client.post("/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("message", {}).get("content", "").strip()
-        except httpx.TimeoutException:
-            logger.warning("llm_chat_async_timeout", attempt=attempt + 1)
-        except httpx.ConnectError:
-            logger.warning("llm_chat_async_connect_failed")
-            break
-        except Exception as e:
-            logger.error("llm_chat_async_error", error=str(e))
             break
 
     return None
@@ -370,32 +267,15 @@ _shutdown_lock = threading.Lock()
 
 def shutdown():
     """Close HTTP clients on process exit."""
-    global _client, _async_client, _shut_down
+    global _client, _shut_down
     with _shutdown_lock:
         if _shut_down:
             return
         _shut_down = True
-    # Capture references before clearing globals
     client = _client
-    async_client = _async_client
     _client = None
-    _async_client = None
     try:
         if client and not client.is_closed:
             client.close()
-    finally:
-        try:
-            if async_client and not async_client.is_closed:
-                try:
-                    import asyncio
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    import asyncio as _aio
-                    try:
-                        _aio.run(async_client.aclose())
-                    except RuntimeError:
-                        pass
-                else:
-                    loop.create_task(async_client.aclose())
-        except Exception as e:
-            logger.warning("async_client_close_failed", error=str(e))
+    except Exception as e:
+        logger.warning("client_close_failed", error=str(e))

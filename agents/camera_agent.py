@@ -28,10 +28,13 @@ class CameraAgent:
         self._stop_event = threading.Event()
         self._pipeline = recognition_pipeline or RecognitionPipeline()
         self._recognizing_tracks = set()
+        # Intentionally not pruned.
+        # This set prevents duplicate progressive alerts and duplicate
+        # finalization scheduling for the lifetime of the camera session.
         self._finalized_track_ids = set()
         self._track_sets_lock = threading.Lock()
         self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="recognition"
+            max_workers=4, thread_name_prefix="recognition"
         )
         self._timing = TimingCollector()
 
@@ -161,9 +164,9 @@ class CameraAgent:
 
             active_ids = set()
             for t in tracks:
-                composite_id = self.track_state.make_composite_id(settings.CAMERA_ID, t["track_id"])
-                active_ids.add(composite_id)
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
+                if track:
+                    active_ids.add(track.track_id)
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
                     if settings.DEBUG_RECOGNITION:
@@ -242,18 +245,12 @@ class CameraAgent:
 
             all_tracks = self.track_state.get_all()
 
-            # Prune _finalized_track_ids to only keep active tracks
-            active_track_ids = {t.track_id for t in all_tracks}
-            with self._track_sets_lock:
-                self._finalized_track_ids &= active_track_ids
-
             if getattr(settings, "DEBUG_DUPLICATE_BOXES", False):
                 snapshot = self.track_state.debug_snapshot()
                 logger.debug("duplicate_boxes_diag",
                              raw_track_count=len(tracks),
                              state_track_count=len(snapshot),
                              all_tracks_count=len(all_tracks),
-                             active_ids=list(active_track_ids),
                              snapshot=snapshot)
                 high_iou_pairs = []
                 for i, a in enumerate(all_tracks):
@@ -301,6 +298,18 @@ class CameraAgent:
 
     def _progressive_recognition(self, frame: np.ndarray, track: Track):
         worker_start = time.perf_counter()
+
+        # Bail out if the track was already resolved by a previous worker.
+        # This closes the scheduling race where multiple passes are queued
+        # before the first one finishes and sets track.decision.
+        current_track = self.track_state.get(track.track_id)
+        if current_track and current_track.decision in RESOLVED_STATUSES:
+            if settings.DEBUG_RECOGNITION:
+                logger.debug("recognition_worker_skip_resolved",
+                             track_id=track.track_id,
+                             decision=current_track.decision)
+            return
+
         if settings.DEBUG_RECOGNITION:
             submit_time = self._timing.pop_submit(track.track_id)
             queue_delay = (worker_start - submit_time) if submit_time is not None else None
@@ -325,15 +334,22 @@ class CameraAgent:
                 if result.quality and result.quality.is_valid and result.face_crop is not None:
                     self.track_state.set_best_face(
                         track.track_id, result.face_crop,
-                        result.quality.overall_score, frame, result.face_ratio)
+                        result.quality.overall_score, frame, result.face_ratio,
+                        person_crop=result.person_crop)
                 return
 
             self.track_state.update_face_visibility(track.track_id, True, result.face_ratio)
 
             if result.face_crop is not None:
+                if result.quality is None:
+                    logger.error("quality_none_on_success",
+                                 track_id=track.track_id,
+                                 skip_reason=result.skip_reason)
+                    return
                 self.track_state.set_best_face(
                     track.track_id, result.face_crop,
-                    result.quality.overall_score, frame, result.face_ratio)
+                    result.quality.overall_score, frame, result.face_ratio,
+                    person_crop=result.person_crop)
                 if settings.DEBUG_FACE_CROPS:
                     crop_path = f"captures/debug/face_crops/{track.track_id}/{self._frame_count}.jpg"
                     save_image(result.face_crop, crop_path)
@@ -345,11 +361,10 @@ class CameraAgent:
                 self.track_state.set_embedding(
                     track.track_id, result.embedding,
                     result.is_masked, det_score=result.det_score)
-                self.track_state.set_cached_embedding(track.track_id, result.embedding)
 
             if result.match is not None:
                 if result.match.matched and result.match.name:
-                    self.track_state.set_person_name(track.track_id, result.match.name)
+                    self.track_state.set_person_name(track.track_id, result.match.name, result.match.similarity_score)
                 self.track_state.set_pending_match_result(track.track_id, result.match)
 
             if result.recognition is not None:
@@ -370,13 +385,22 @@ class CameraAgent:
                                  should_alert=result.decision.should_alert,
                                  alert_level=result.decision.alert_level)
 
+                # Per-track alert cooldown: suppress repeated HIGH alerts
+                alert_cooldown_active = (
+                    result.decision.should_alert
+                    and result.decision.alert_level in ("high", "critical")
+                    and track.last_alert_time > 0
+                    and (time.time() - track.last_alert_time) < settings.ALERT_COOLDOWN_SECS
+                )
+
                 if result.decision.should_alert and result.decision.alert_level == "critical" and track.mark_alerted_once():
                     with self._track_sets_lock:
                         already_finalized = track.track_id in self._finalized_track_ids
-                    if not already_finalized:
+                    if not already_finalized and not alert_cooldown_active:
                         from agents.alert_agent import dispatch
                         image_url = resolve_track_image_url(track)
                         dispatch(track, result.decision, image_url)
+                        track.last_alert_time = time.time()
                         self.track_state.set_decision(track.track_id, result.decision.status)
                         track.update_confidence_if_higher(new_confidence)
                         logger.info("progressive_critical_alert",
@@ -384,7 +408,8 @@ class CameraAgent:
                                     alert_level=result.decision.alert_level,
                                     status=result.decision.status)
                 elif track.update_confidence_if_higher(new_confidence):
-                    self.track_state.set_decision(track.track_id, result.decision.status)
+                    if track.decision not in RESOLVED_STATUSES:
+                        self.track_state.set_decision(track.track_id, result.decision.status)
                     if result.decision.should_alert:
                         logger.debug("progressive_alert_deferred_to_finalization",
                                      track_id=track.track_id,
@@ -453,3 +478,7 @@ class CameraAgent:
         finally:
             if self.on_track_finalized:
                 self.on_track_finalized(track)
+            # Allow ByteTrack ID reuse — remove from set after finalization
+            # completes so a new track with the same ID can finalize.
+            with self._track_sets_lock:
+                self._finalized_track_ids.discard(track.track_id)

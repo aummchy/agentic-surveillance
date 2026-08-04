@@ -191,9 +191,9 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
         <div className="events-list">
           {events.map((event) => (
             <div key={event._id} className={`event-item ${getEventItemClass(event.status)}`}>
-              {getImageUrl(event.image_url || event.person_image) ? (
+              {getImageUrl(event.person_crop_url || event.image_url || event.person_image) ? (
                 <img
-                  src={getImageUrl(event.image_url || event.person_image)}
+                  src={getImageUrl(event.person_crop_url || event.image_url || event.person_image)}
                   alt="Event"
                   className="event-image"
                 />
@@ -216,9 +216,9 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
                   </div>
                   <div className="event-ago">{formatTimeAgo(event.timestamp)}</div>
                 </div>
-                {(event.name || event.person_name) && (
+                {(event.person_name || event.name) && (
                   <div className="event-person-name">
-                    {event.name || event.person_name}
+                    {event.person_name || event.name}
                   </div>
                 )}
                 <div className="event-full-time">

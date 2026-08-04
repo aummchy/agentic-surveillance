@@ -248,6 +248,24 @@ class TestMatchResultPropagation:
         assert result.margin is None
         assert result.candidate_count == 0
 
+    def test_no_matches_but_candidates_propagates_similarity(self):
+        self.mock_vs.return_value = {
+            "matches": [],
+            "top2": 0.214,
+            "margin": 0.159,
+            "all_candidates": [
+                {"name": "Person A", "similarity": 0.373},
+                {"name": "Person B", "similarity": 0.214},
+            ],
+        }
+        from agents.matching_agent import run_matching_from_embedding
+        result = run_matching_from_embedding([0.1] * 512)
+        assert result.matched is False
+        assert result.similarity_score == 0.373
+        assert result.second_best_similarity == 0.214
+        assert result.margin == 0.159
+        assert result.candidate_count == 2
+
     def test_none_embedding_returns_unmatched(self):
         from agents.matching_agent import run_matching_from_embedding
         result = run_matching_from_embedding(None)

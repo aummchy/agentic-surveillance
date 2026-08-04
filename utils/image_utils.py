@@ -1,9 +1,6 @@
 import cv2
 import numpy as np
 import structlog
-import uuid
-import os
-from datetime import datetime
 from pathlib import Path
 from config import settings
 
@@ -85,10 +82,6 @@ def crop_person(frame: np.ndarray, box: tuple) -> np.ndarray:
     return frame[y1:y2, x1:x2].copy()
 
 
-def resize_image(image: np.ndarray, target_size: tuple = (112, 112)) -> np.ndarray:
-    return cv2.resize(image, target_size, interpolation=cv2.INTER_LINEAR)
-
-
 def save_image(image: np.ndarray, path: str) -> bool:
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -96,45 +89,6 @@ def save_image(image: np.ndarray, path: str) -> bool:
         return True
     except Exception:
         return False
-
-
-def save_image_atomic(data, final_path: str, is_jpeg_bytes: bool = False) -> bool:
-    """Write to captures/_tmp/ then os.replace() (atomic on both POSIX and Windows).
-
-    Args:
-        data: numpy array (image) or bytes (pre-encoded JPEG)
-        final_path: destination path (parent dir created automatically)
-        is_jpeg_bytes: True if data is raw JPEG bytes, False if numpy array
-    """
-    try:
-        final_full = Path(final_path)
-        final_full.parent.mkdir(parents=True, exist_ok=True)
-
-        tmp_dir = Path("captures/_tmp")
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = tmp_dir / f"{uuid.uuid4()}.jpg"
-
-        if is_jpeg_bytes:
-            with open(tmp_path, "wb") as f:
-                f.write(data)
-        else:
-            cv2.imwrite(str(tmp_path), data)
-
-        os.replace(str(tmp_path), str(final_full))
-        return True
-    except Exception:
-        return False
-
-
-def get_unknown_image_path() -> str:
-    month = datetime.now().strftime("%Y-%m")
-    return f"captures/unknown/{month}/{uuid.uuid4()}.jpg"
-
-
-def get_person_image_path(person_id: str) -> str:
-    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    suffix = uuid.uuid4().hex[:6]
-    return f"captures/people/{person_id}/{ts}_{suffix}.jpg"
 
 
 def resolve_track_image_url(track) -> str | None:
@@ -171,6 +125,32 @@ def resolve_track_image_url(track) -> str | None:
         return track.image_url
 
     return None
+
+
+def resolve_track_person_crop_url(track) -> str | None:
+    """Resolve URL for the person crop image (bounding-box area, not full frame).
+
+    Priority: existing person_crop_url > best_person_crop_jpeg > fallback to resolve_track_image_url.
+    """
+    if getattr(track, "person_crop_url", None):
+        return track.person_crop_url
+
+    jpeg_data = getattr(track, "best_person_crop_jpeg", None)
+    if jpeg_data:
+        url = upload_jpeg_to_cloudinary(jpeg_data)
+        if url:
+            track.person_crop_url = url
+            return url
+        # Cloudinary failed — persist locally
+        path = f"captures/crops/{track.track_id}_person.jpg"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(jpeg_data)
+        track.person_crop_url = path
+        return path
+
+    # No person crop available — fall back to full frame
+    return resolve_track_image_url(track)
 
 
 def _put_label_with_bg(img, text, pos, font_scale, color, thickness=1, bg_color=(0, 0, 0)):
@@ -221,7 +201,7 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, border_thickness)
 
         name = getattr(track, 'person_name', None)
-        short_id = track.track_id.rsplit("_", 1)[-1] if "_" in track.track_id else track.track_id
+        short_id = str(track.byte_track_id) if track.byte_track_id else (track.track_id.rsplit("_", 1)[-1] if "_" in track.track_id else track.track_id)
         label = f"ID:{short_id}"
         if name:
             label += f" {name}"

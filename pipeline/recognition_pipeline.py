@@ -15,8 +15,6 @@ from utils.embedding_utils import get_insightface
 
 logger = structlog.get_logger(__name__)
 
-EMBEDDING_CACHE_COSINE_THRESHOLD = 0.005
-
 
 @dataclass
 class RecognitionMetrics:
@@ -32,8 +30,6 @@ class RecognitionMetrics:
     fallback_used: bool = False
     faces_on_crop: int = 0
     person_crop_shape: str = ""
-    used_cached_match: bool = False
-    had_cached_embedding: bool = False
 
 
 @dataclass
@@ -45,6 +41,7 @@ class PipelineResult:
     embedding: Optional[list] = None
     quality: Optional[QualityResult] = None
     face_crop: Optional[np.ndarray] = None
+    person_crop: Optional[np.ndarray] = None
     face_bbox: Optional[tuple] = None
     face_ratio: float = 0.0
     det_score: float = 0.0
@@ -140,6 +137,7 @@ class RecognitionPipeline:
             embedding=embed_result.embedding,
             quality=quality,
             face_crop=face_det.face_crop,
+            person_crop=face_det.person_crop,
             face_bbox=face_det.frame_bbox,
             face_ratio=face_det.face_ratio,
             det_score=face_det.best.get("det_score", 0.0),
@@ -240,6 +238,7 @@ class RecognitionPipeline:
         return _FaceResult(
             best=best,
             face_crop=face_crop,
+            person_crop=person_crop,
             frame_bbox=frame_bbox,
             face_ratio=face_ratio,
             detected_in_person_crop=detected_in_person_crop,
@@ -264,35 +263,13 @@ class RecognitionPipeline:
         embedding_list = _embedding_to_list(face_det.best["embedding"])
         embed_ms = round((time.perf_counter() - t_embed) * 1000, 1)
 
-        with track._lock:
-            cached_emb = track.cached_embedding
-            pmr = track.pending_match_result
-        had_cached = cached_emb is not None
-        used_cached = False
-        match = None
-
-        if had_cached and cached_emb is not None and pmr is not None:
-            a = np.array(cached_emb, dtype=np.float32)
-            b = np.array(embedding_list, dtype=np.float32)
-            norm_a = np.linalg.norm(a)
-            norm_b = np.linalg.norm(b)
-            if norm_a > 0 and norm_b > 0:
-                cos_dist = 1.0 - float(np.dot(a, b) / (norm_a * norm_b))
-                if cos_dist < EMBEDDING_CACHE_COSINE_THRESHOLD:
-                    match = pmr
-                    used_cached = True
-                    logger.debug("embedding_cache_hit", track_id=track.track_id, distance=cos_dist)
-
         t_db = time.perf_counter()
-        if match is None:
-            match = self._matching_fn(embedding_list, track_id=track.track_id)
+        match = self._matching_fn(embedding_list, track_id=track.track_id)
         db_ms = round((time.perf_counter() - t_db) * 1000, 1)
 
         metrics = RecognitionMetrics(
             embed_ms=embed_ms,
             db_ms=db_ms,
-            had_cached_embedding=had_cached,
-            used_cached_match=used_cached,
         )
 
         return _EmbedResult(embedding=embedding_list, match=match, metrics=metrics)
@@ -321,7 +298,7 @@ class RecognitionPipeline:
         track_duration = time.time() - track.first_seen
         face_quality = quality.overall_score if quality and quality.overall_score > 0 else None
         return self._recognition_agent.run({
-            "similarity": match.similarity_score if match and match.matched else 0.0,
+            "similarity": match.similarity_score if match else 0.0,
             "is_masked": face_det.best.get("is_masked", False),
             "face_quality": face_quality,
             "track_duration": track_duration,
@@ -339,13 +316,14 @@ class RecognitionPipeline:
 
 
 class _FaceResult:
-    __slots__ = ("best", "face_crop", "frame_bbox", "face_ratio",
+    __slots__ = ("best", "face_crop", "person_crop", "frame_bbox", "face_ratio",
                  "detected_in_person_crop", "metrics")
 
-    def __init__(self, best, face_crop, frame_bbox, face_ratio,
+    def __init__(self, best, face_crop, person_crop, frame_bbox, face_ratio,
                  detected_in_person_crop, metrics):
         self.best = best
         self.face_crop = face_crop
+        self.person_crop = person_crop
         self.frame_bbox = frame_bbox
         self.face_ratio = face_ratio
         self.detected_in_person_crop = detected_in_person_crop

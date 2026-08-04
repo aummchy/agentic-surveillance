@@ -6,6 +6,7 @@ from typing import Optional
 from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from config import settings
+from pipeline.models import DedupResult, DedupStatus
 from utils.embedding_utils import compare_similarity, atlas_score_to_cosine
 
 logger = structlog.get_logger(__name__)
@@ -255,49 +256,76 @@ def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
                 "similarity_score": similarity
             })
 
+    similar.sort(key=lambda x: x["similarity_score"], reverse=True)
     return similar
 
 
-def find_similar_faces(embedding: list, threshold: float = None) -> list:
-    """Search ALL faces (not just unknowns) by embedding similarity."""
+def deduplicate_identity(embedding: list, threshold: float = None) -> DedupResult:
+    """Check if this embedding already exists in the database.
+
+    Pure decision function — does NOT mutate the database.
+    Atlas vector search is the primary engine. Python cosine scan
+    runs only when Atlas throws an exception.
+
+    NOTE: TOCTOU race — two tracks finalizing simultaneously can both
+    see "no match" and both insert. Not solved here. Can be addressed
+    later with a unique index + upsert or embedding-hash lock.
+    """
     if threshold is None:
         threshold = settings.DEDUP_SIMILARITY_THRESHOLD
 
-    import numpy as np
-    collection = get_faces_collection()
+    # --- Atlas vector search (primary) ---
+    try:
+        result = vector_search(embedding, limit=5)
+        matches = result["matches"]
+    except Exception:
+        logger.warning("dedup_atlas_failed",
+                       msg="Atlas vector search unavailable — falling back to Python scan",
+                       exc_info=True)
+        matches = None  # sentinel: Atlas failed
 
-    all_faces = list(collection.find(
-        {},
-        {"latest_embedding": 1, "person_id": 1, "role": 1, "verified": 1, "name": 1}
-    ).limit(500))
+    # Atlas succeeded — use its answer, do NOT fall back to Python
+    if matches is not None:
+        for m in matches:
+            if m["similarity_score"] < threshold:
+                continue
+            existing_id = m["person_id"]
+            existing = get_faces_collection().find_one(
+                {"person_id": existing_id}, {"role": 1, "verified": 1}
+            )
+            if not existing:
+                continue
+            if existing.get("verified"):
+                logger.warning("dedup_verified_conflict",
+                               existing_person_id=existing_id,
+                               similarity=m["similarity_score"])
+                continue
+            return DedupResult(
+                status=DedupStatus.MERGED,
+                person_id=existing_id,
+                similarity=m["similarity_score"],
+            )
+        return DedupResult(status=DedupStatus.NEW)
 
-    if not all_faces:
-        return []
-
-    query_emb = np.asarray(embedding, dtype=np.float32)
-    query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-6)
-
-    similar = []
-    for face in all_faces:
-        stored_emb = face.get("latest_embedding", [])
-        if not stored_emb:
-            continue
-        stored_emb = np.asarray(stored_emb, dtype=np.float32)
-        if stored_emb.ndim != 1 or stored_emb.size == 0 or stored_emb.size != query_emb.size:
-            continue
-        stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
-        similarity = float(np.dot(query_emb, stored_emb))
-        if similarity >= threshold:
-            similar.append({
-                "person_id": face.get("person_id"),
-                "similarity_score": similarity,
-                "verified": face.get("verified", False),
-                "role": face.get("role", "unknown"),
-                "name": face.get("name", "Unknown")
-            })
-
-    similar.sort(key=lambda x: x["similarity_score"], reverse=True)
-    return similar
+    # --- Python cosine scan (fallback on Atlas exception only) ---
+    try:
+        similar = find_similar_unknowns(embedding, threshold=threshold)
+        if similar:
+            best = similar[0]  # already sorted by similarity desc
+            return DedupResult(
+                status=DedupStatus.MERGED,
+                person_id=best["person_id"],
+                similarity=best["similarity_score"],
+            )
+        return DedupResult(status=DedupStatus.NEW)
+    except Exception:
+        logger.error("dedup_python_failed",
+                     msg="Both Atlas and Python dedup failed — aborting registration",
+                     exc_info=True)
+        return DedupResult(
+            status=DedupStatus.FAILED,
+            reason="python_unavailable",
+        )
 
 
 def _compute_mean_embedding(embeddings: list) -> list:
@@ -315,49 +343,12 @@ def _compute_mean_embedding(embeddings: list) -> list:
 
 def store_face(person_id: str, name: str, role: str, embedding: list,
                image_url: str, tags: list = None, quality_scores: dict = None,
-               camera_id: str = None, skip_search: bool = False,
-               quality_score: float = None) -> str:
+               camera_id: str = None,
+               quality_score: float = None,
+               person_crop_url: str = None) -> str:
+    """Insert a new face record. Dedup must be handled by the caller
+    via deduplicate_identity() — this function is a pure insert."""
     collection = get_faces_collection()
-
-    # Skip vector search if caller already has match results (avoids redundant query)
-    if not skip_search:
-        # Try vector search first (fast, index-backed), fall back to scan
-        try:
-            result = vector_search(embedding, limit=3)
-            matches = result["matches"]
-        except Exception:
-            logger.warning("vector_search_failed",
-                           msg="Atlas vector search failed — dedup skipped, new doc may be created",
-                           exc_info=True)
-            matches = []
-
-        # Single dedup loop — check all roles in one pass
-        for m in matches:
-            if m["similarity_score"] < settings.DEDUP_SIMILARITY_THRESHOLD:
-                continue
-
-            existing_id = m["person_id"]
-            existing = collection.find_one(
-                {"person_id": existing_id}, {"role": 1, "verified": 1}
-            )
-            if not existing:
-                continue
-
-            # NEVER silently overwrite a verified person's embedding
-            if existing.get("verified"):
-                logger.warning("store_face_verified_conflict",
-                               existing_person_id=existing_id,
-                               similarity=m["similarity_score"],
-                               note="New embedding not merged — verified person. Operator review needed.")
-                continue
-
-            # Safe to merge into unknown/unverified
-            update_face(existing_id, image_url, embedding, quality_score=quality_score)
-            logger.info("store_face_merged",
-                        existing_person_id=existing_id,
-                        role=existing.get("role"),
-                        similarity=m["similarity_score"])
-            return existing_id
 
     doc = {
         "person_id": person_id,
@@ -369,6 +360,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
         "latest_embedding_quality": quality_score if quality_score is not None else 0.0,
         "embedding_model": "arcface",
         "images": [{"id": str(uuid.uuid4()), "url": image_url, "captured_at": datetime.utcnow()}],
+        "person_crop_url": person_crop_url,
         "source": {"camera_id": camera_id, "captured_at": datetime.utcnow()},
         "quality_scores": quality_scores or {},
         "tags": tags or [],
@@ -513,15 +505,6 @@ def get_face_by_id(person_id: str) -> dict:
     return face
 
 
-def update_alert_level(person_id: str, alert_level: str) -> bool:
-    collection = get_faces_collection()
-    result = collection.update_one(
-        {"person_id": person_id},
-        {"$set": {"alert_level": alert_level, "updated_at": datetime.utcnow()}}
-    )
-    return result.modified_count > 0
-
-
 def delete_face(person_id: str) -> bool:
     collection = get_faces_collection()
     result = collection.delete_one({"person_id": person_id})
@@ -549,7 +532,7 @@ def get_events_with_faces(limit: int = 50, offset: int = 0,
     if person_ids:
         faces = faces_collection.find(
             {"person_id": {"$in": person_ids}},
-            {"person_id": 1, "name": 1, "verified": 1, "images": 1}
+            {"person_id": 1, "name": 1, "verified": 1, "images": 1, "person_crop_url": 1}
         )
         for face in faces:
             face_map[face["person_id"]] = face
@@ -563,6 +546,8 @@ def get_events_with_faces(limit: int = 50, offset: int = 0,
             event["person_verified"] = face.get("verified", False)
             event["person_image"] = (face.get("images", [{}])[0].get("url")
                                     if face.get("images") else None)
+            if face.get("person_crop_url"):
+                event["person_crop_url"] = face["person_crop_url"]
 
     return {"events": events, "total": total, "limit": limit, "offset": offset}
 
@@ -570,7 +555,8 @@ def get_events_with_faces(limit: int = 50, offset: int = 0,
 def log_event(track_id: str, camera_id: str, status: str, alert_level: str,
               person_id: str = None, name: str = None, is_masked: bool = False,
               similarity_score: float = 0.0, image_url: str = None,
-              reason: str = "", alerted: bool = False):
+              reason: str = "", alerted: bool = False,
+              person_crop_url: str = None):
     collection = get_events_collection()
 
     doc = {
@@ -584,6 +570,7 @@ def log_event(track_id: str, camera_id: str, status: str, alert_level: str,
         "is_masked": is_masked,
         "similarity_score": similarity_score,
         "image_url": image_url,
+        "person_crop_url": person_crop_url,
         "reason": reason,
         "alerted": alerted
     }
@@ -785,19 +772,6 @@ def get_visit_history(person_id: str) -> dict:
     """Get visit history for a person."""
     collection = get_memory_collection()
     return collection.find_one({"person_id": person_id}) or {}
-
-
-def get_recent_unknowns(hours: int = 24, limit: int = 50) -> list:
-    """Get recently seen unknown persons."""
-    collection = get_memory_collection()
-    from datetime import timedelta
-    
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
-    
-    return list(collection.find({
-        "last_seen": {"$gte": cutoff},
-        "last_status": {"$in": ["unknown", "masked_unknown"]}
-    }).sort("last_seen", -1).limit(limit))
 
 
 def get_memory_stats() -> dict:

@@ -1,6 +1,7 @@
 ﻿# Bug Report — agentic_ai_singlecam
 
 > Generated: 2026-08-01  
+> Updated: 2026-08-02  
 > Scope: Full codebase static analysis across all Python source files.  
 > Severity: 🔴 Critical · 🟠 High · 🟡 Medium · 🟢 Low / Style
 
@@ -8,26 +9,29 @@
 
 ## Summary Table
 
-| # | File | Severity | Problem |
-|---|------|----------|---------|
-| 1 | `agents/camera_agent.py` | 🔴 Critical | `submit_time` variable assigned but result never used in `_loop` (dead write) |
-| 2 | `agents/camera_agent.py` | 🟠 High | `result.quality.overall_score` accessed without null guard on success path |
-| 3 | `agents/decision_agent.py` | 🟠 High | `_policy_agent` singleton not thread-safe — two recognition workers race on first call |
-| 4 | `agents/track_processor.py` + `utils/db_utils.py` | 🟡 Medium | `datetime.utcnow()` deprecated since Python 3.12 |
-| 5 | `agents/alert_agent.py` | 🟠 High | `dispatch()` returns `True` when alert is NOT dispatched — misleading API contract |
-| 6 | `agents/memory.py` | 🟡 Medium | `last_seen` from MongoDB may be a string; silently skips confidence boost |
-| 7 | `pipeline/recognition_pipeline.py` | 🟠 High | Stale `pmr` (pending match result) reused via embedding cache — stale similarity/margin |
-| 8 | `pipeline/track_state.py` | 🟠 High | TOCTOU race in `set_best_face` double-checked locking (threshold mismatch between checks) |
-| 9 | `utils/llm_client.py` | 🟡 Medium | `shutdown()` fire-and-forgets `aclose()` task — async HTTP client leaks on process exit |
-| 10 | `utils/db_utils.py` | 🟡 Medium | `update_face` mean embedding computed from stale pre-push list; misleading comment |
-| 11 | `utils/image_utils.py` | 🟡 Medium | `resolve_track_image_url` writes `track.image_url` without holding `track._lock` |
-| 12 | `config/settings.py` | 🟡 Medium | `_get()` with `cast=list` returns raw strings when `default=[]` |
-| 13 | `dashboard/backend/routes/live.py` | 🟢 Low | `FRAME_SKIP = 2` hardcoded — ignores `settings.FRAME_SKIP` |
-| 14 | `dashboard/backend/routes/live.py` | 🟢 Low | f-string logger calls bypass structlog — lose structured context |
-| 15 | `agents/policy.py` | 🟡 Medium | `track_lifetime` mixes `datetime.now().timestamp()` with `time.time()` — fragile |
-| 16 | `pipeline/tracker.py` | 🟢 Low | `os.environ["OPENVINO_DEVICE"]` set on every frame — global write in hot path |
-| 17 | `agents/camera_agent.py` | 🟠 High | `_finalized_track_ids` pruned to active tracks each frame — removes guard for expired tracks |
-| 18 | `utils/db_utils.py` | 🟢 Low | Collection init uses unlocked outer check — fragile on free-threaded Python 3.13+ |
+| # | File | Severity | Problem | Status |
+|---|------|----------|---------|--------|
+| 1 | `agents/camera_agent.py` | 🔴 Critical | `submit_time` variable assigned but result never used in `_loop` (dead write) | 🟢 Open |
+| 2 | `agents/camera_agent.py` | 🟠 High | `result.quality.overall_score` accessed without null guard on success path | ✅ Fixed (explicit error + return) |
+| 3 | `agents/decision_agent.py` | 🟠 High | `_policy_agent` singleton not thread-safe — two recognition workers race on first call | ✅ Fixed (threading.Lock) |
+| 4 | `agents/track_processor.py` + `utils/db_utils.py` | 🟡 Medium | `datetime.utcnow()` deprecated since Python 3.12 | 🟢 Open |
+| 5 | `agents/alert_agent.py` | 🟠 High | `dispatch()` returns `True` when alert is NOT dispatched — misleading API contract | ✅ Fixed (return False) |
+| 6 | `agents/memory.py` | 🟡 Medium | `last_seen` from MongoDB may be a string; silently skips confidence boost | 🟢 Open |
+| 7 | `pipeline/recognition_pipeline.py` | 🟠 High | Stale `pmr` (pending match result) reused via embedding cache — stale similarity/margin | ✅ Fixed (embedding cache removed) |
+| 8 | `pipeline/track_state.py` | 🟠 High | TOCTOU race in `set_best_face` double-checked locking (threshold mismatch between checks) | ✅ Fixed (design confirmed correct, docs updated) |
+| 9 | `utils/llm_client.py` | 🟡 Medium | `shutdown()` fire-and-forgets `aclose()` task — async HTTP client leaks on process exit | 🟢 Open |
+| 10 | `utils/db_utils.py` | 🟡 Medium | `update_face` mean embedding computed from stale pre-push list; misleading comment | 🟢 Open |
+| 11 | `utils/image_utils.py` | 🟡 Medium | `resolve_track_image_url` writes `track.image_url` without holding `track._lock` | 🟢 Open |
+| 12 | `config/settings.py` | 🟡 Medium | `_get()` with `cast=list` returns raw strings when `default=[]` | 🟢 Open |
+| 13 | `dashboard/backend/routes/live.py` | 🟢 Low | `FRAME_SKIP = 2` hardcoded — ignores `settings.FRAME_SKIP` | 🟢 Open |
+| 14 | `dashboard/backend/routes/live.py` | 🟢 Low | f-string logger calls bypass structlog — lose structured context | 🟢 Open |
+| 15 | `agents/policy.py` | 🟡 Medium | `track_lifetime` mixes `datetime.now().timestamp()` with `time.time()` — fragile | 🟢 Open |
+| 16 | `pipeline/tracker.py` | 🟢 Low | `os.environ["OPENVINO_DEVICE"]` set on every frame — global write in hot path | 🟢 Open |
+| 17 | `agents/camera_agent.py` | 🟠 High | `_finalized_track_ids` pruned to active tracks each frame — removes guard for expired tracks | ✅ Fixed (prune removed, comment added, cleanup after finalization) |
+| 18 | `utils/db_utils.py` | 🟢 Low | Collection init uses unlocked outer check — fragile on free-threaded Python 3.13+ | 🟢 Open |
+| 19 | `agents/camera_agent.py` | 🟠 High | Recognition thread pool too small (max_workers=2) — 30-60s recognition delay | ✅ Fixed (increased to 4) |
+| 20 | `agents/camera_agent.py` | 🔴 Critical | ByteTrack ID reuse causes composite ID collision — new track blocked by old finalized ID | ✅ Fixed (cleanup after finalization) |
+| 21 | `agents/camera_agent.py` | 🟠 High | No per-track HIGH alert cooldown — repeated alerts on every progressive recognition pass | ✅ Fixed (per-track cooldown added) |
 
 ---
 
@@ -571,23 +575,125 @@ def get_faces_collection() -> Collection:
 
 ## Quick-Fix Priority Order
 
-| Priority | Bug # | Severity | Effort | Description |
-|----------|-------|----------|--------|-------------|
-| 1 | #3 | 🟠 High | Trivial | Add lock to `_policy_agent` singleton |
-| 2 | #5 | 🟠 High | Trivial | Fix `dispatch()` return values |
-| 3 | #17 | 🟠 High | Low | Remove `_finalized_track_ids` per-frame prune |
-| 4 | #16 | 🟢 Low | Trivial | Move `os.environ` write out of hot path |
-| 5 | #13 | 🟢 Low | Trivial | Use `settings.FRAME_SKIP` in `live.py` |
-| 6 | #9 | 🟡 Medium | Low | Fix async client leak in `shutdown()` |
-| 7 | #11 | 🟡 Medium | Low | Add lock around `track.image_url` writes |
-| 8 | #15 | 🟡 Medium | Trivial | Use `time.time()` instead of `datetime.now().timestamp()` |
-| 9 | #2 | 🟠 High | Trivial | Add `result.quality is not None` guard |
-| 10 | #4 | 🟡 Medium | Medium | Replace all `datetime.utcnow()` with `datetime.now(tz=timezone.utc)` |
-| 11 | #6 | 🟡 Medium | Low | Parse ISO string `last_seen` in `memory.py` |
-| 12 | #7 | 🟠 High | Medium | Don't reuse stale `pmr` from embedding cache |
-| 13 | #14 | 🟢 Low | Trivial | Use structured logging in `live.py` |
-| 14 | #1 | 🔴 Critical | Trivial | Remove unused `submit_time` assignment in `_loop` |
-| 15 | #18 | 🟢 Low | Trivial | Remove outer unlocked check in collection init |
+| Priority | Bug # | Severity | Effort | Description | Status |
+|----------|-------|----------|--------|-------------|--------|
+| 1 | #3 | 🟠 High | Trivial | Add lock to `_policy_agent` singleton | ✅ Fixed |
+| 2 | #5 | 🟠 High | Trivial | Fix `dispatch()` return values | ✅ Fixed |
+| 3 | #17 | 🟠 High | Low | Remove `_finalized_track_ids` per-frame prune | ✅ Fixed |
+| 4 | #20 | 🔴 Critical | Low | ByteTrack ID reuse causes composite ID collision | ✅ Fixed |
+| 5 | #19 | 🟠 High | Trivial | Increase recognition thread pool to 4 workers | ✅ Fixed |
+| 6 | #21 | 🟠 High | Low | Add per-track HIGH alert cooldown | ✅ Fixed |
+| 7 | #16 | 🟢 Low | Trivial | Move `os.environ` write out of hot path | 🟢 Open |
+| 8 | #13 | 🟢 Low | Trivial | Use `settings.FRAME_SKIP` in `live.py` | 🟢 Open |
+| 9 | #9 | 🟡 Medium | Low | Fix async client leak in `shutdown()` | 🟢 Open |
+| 10 | #11 | 🟡 Medium | Low | Add lock around `track.image_url` writes | 🟢 Open |
+| 11 | #15 | 🟡 Medium | Trivial | Use `time.time()` instead of `datetime.now().timestamp()` | 🟢 Open |
+| 12 | #4 | 🟡 Medium | Medium | Replace all `datetime.utcnow()` with `datetime.now(tz=timezone.utc)` | 🟢 Open |
+| 13 | #6 | 🟡 Medium | Low | Parse ISO string `last_seen` in `memory.py` | 🟢 Open |
+| 14 | #14 | 🟢 Low | Trivial | Use structured logging in `live.py` | 🟢 Open |
+| 15 | #1 | 🔴 Critical | Trivial | Remove unused `submit_time` assignment in `_loop` | 🟢 Open |
+| 16 | #18 | 🟢 Low | Trivial | Remove outer unlocked check in collection init | 🟢 Open |
+
+---
+
+## New Bugs (from 2026-08-02 log analysis)
+
+---
+
+### Bug #19 — Recognition thread pool too small
+
+**File:** `agents/camera_agent.py` — Line 37  
+**Severity:** 🟠 High (30-60s recognition delay)  
+**Status:** ✅ Fixed (increased to 4)
+
+**Problem:**
+```python
+self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="recognition"
+)
+```
+
+With 11+ concurrent tracks, the 2-worker pool saturates. Tracks queue for 30-60+ seconds before recognition, extending their lifetime and increasing concurrency (feedback loop).
+
+**Log evidence:**
+```
+2026-08-02T17:18:19 RECOG trk=5 unknown UNKNOWN sim=0.209 dur=66s conf=18
+```
+Track 5 waited 66 seconds before its first recognition — the pool was saturated with tracks 2, 3, 6, 9.
+
+**Fix:**
+```python
+self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="recognition"
+)
+```
+
+---
+
+### Bug #20 — ByteTrack ID reuse causes composite ID collision
+
+**File:** `agents/camera_agent.py` — Lines 31-34, 242-244  
+**Severity:** 🔴 Critical (new track blocked from finalization)  
+**Status:** ✅ Fixed (cleanup after finalization)
+
+**Problem:**
+Composite IDs use the format `{camera_id}_{session_epoch}_{byte_track_id}`. When ByteTrack reuses a numeric ID (e.g., after a track expires), the new track gets the same composite ID. `_finalized_track_ids` still contains the old ID, permanently blocking the new track from finalizing.
+
+**Log evidence:**
+```
+# First lifecycle — same person, finalized correctly
+2026-08-02T17:18:50 FINAL trk=2 Unknown KNOWN_VISITOR sim=0.880 conf=90
+
+# Second lifecycle — different person, same ID, BLOCKED
+2026-08-02T17:19:03 RECOG trk=2 unknown UNKNOWN sim=0.327 conf=28
+```
+
+**Fix:**
+```python
+def _finalize_track(self, track: Track):
+    ...
+    finally:
+        if self.on_track_finalized:
+            self.on_track_finalized(track)
+        # Allow ByteTrack ID reuse — remove from set after finalization
+        with self._track_sets_lock:
+            self._finalized_track_ids.discard(track.track_id)
+```
+
+---
+
+### Bug #21 — No per-track HIGH alert cooldown
+
+**File:** `agents/camera_agent.py` — Lines 388-408  
+**Severity:** 🟠 High (alert fatigue, 1 alert every 8.5s)  
+**Status:** ✅ Fixed (per-track cooldown added)
+
+**Problem:**
+The progressive recognition path fires `should_alert=True` on every pass for UNKNOWN tracks. While `mark_alerted_once()` prevents duplicate dispatch during finalization, the POLICY log line shows `ALERT` every time, creating operator noise.
+
+**Log evidence:**
+```
+2026-08-02T17:18:19 POLICY trk=5 UNKNOWN alert=high ALERT vis=0
+2026-08-02T17:18:29 POLICY trk=5 UNKNOWN alert=high ALERT vis=0
+2026-08-02T17:18:35 POLICY trk=5 UNKNOWN alert=high ALERT vis=0
+2026-08-02T17:18:47 POLICY trk=5 UNKNOWN alert=high ALERT vis=0
+2026-08-02T17:19:05 POLICY trk=5 UNKNOWN alert=high ALERT vis=0
+```
+
+5 HIGH alerts for the same track in 46 seconds.
+
+**Fix:**
+Added `last_alert_time` field to Track model. Progressive critical alerts now check cooldown:
+```python
+alert_cooldown_active = (
+    result.decision.should_alert
+    and result.decision.alert_level in ("high", "critical")
+    and track.last_alert_time > 0
+    and (time.time() - track.last_alert_time) < settings.ALERT_COOLDOWN_SECS
+)
+```
+
+---
 
 ---
 
