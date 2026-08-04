@@ -174,7 +174,7 @@ class PolicyAgent(BaseAgent):
         # ═══════════════════════════════════════════════════════
         # RULE 3: Verified
         # ═══════════════════════════════════════════════════════
-        if verified and rec_status == "known":
+        if verified and (rec_status == "known" or similarity > settings.VERIFIED_SIMILARITY_THRESHOLD):
             return DecisionResult(
                 status="verified",
                 alert_level="none",
@@ -188,7 +188,7 @@ class PolicyAgent(BaseAgent):
         # ═══════════════════════════════════════════════════════
         # RULE 4a: Auto-registered self-match (similarity > 0.65)
         # ═══════════════════════════════════════════════════════
-        if "auto_registered" in tags and similarity > 0.65:
+        if "auto_registered" in tags and similarity > settings.AUTO_REGISTERED_SIMILARITY:
             return DecisionResult(
                 status="known_visitor",
                 alert_level="low",

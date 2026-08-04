@@ -122,7 +122,10 @@ class MemoryAgent(BaseAgent):
         )
 
         # Determine if this is a returning visitor
-        is_known = visit_count > 0 and last_status in ["known", "verified", "authorized"]
+        # Use best_status (highest-priority status ever seen) instead of
+        # last_status, so a single low-quality visit doesn't reset is_known.
+        best_status = memory.get("best_status") or last_status
+        is_known = visit_count > 0 and best_status in ["known", "verified", "authorized"]
 
         # Build reason
         reason = self._build_reason(visit_count, days_since_last, is_typical_time, is_known)
@@ -140,6 +143,7 @@ class MemoryAgent(BaseAgent):
             "is_typical_time": is_typical_time,
             "is_typical_camera": is_typical_camera,
             "last_status": last_status,
+            "best_status": best_status,
             "confidence_boost": confidence_boost,
             "reason": reason,
         }

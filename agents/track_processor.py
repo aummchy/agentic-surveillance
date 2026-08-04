@@ -180,6 +180,10 @@ class TrackProcessor:
                     is_masked=snap.is_masked,
                     visit_action=memory_context.get("action", "recorded") if memory_context else "recorded",
                 )
+                # Increment visit_count in memory_context so the log below
+                # reflects the count AFTER this visit (not before).
+                if memory_context:
+                    memory_context["visit_count"] = memory_context.get("visit_count", 0) + 1
 
             alert_dispatched = False
             if decision.should_alert and track.mark_alerted_once():

@@ -612,6 +612,7 @@ def get_or_create_memory(person_id: str) -> dict:
             "last_seen": now,
             "last_camera": None,
             "last_status": None,
+            "best_status": None,
             "typical_hours": [],
             "typical_cameras": [],
             "avg_similarity": 0.0,
@@ -698,6 +699,20 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
                     "suppressed": True,
                 }
 
+    # ── Compute best_status ─────────────────────────────────────
+    # best_status tracks the highest-priority status ever seen for this
+    # person, so that is_known survives a single low-quality visit.
+    _STATUS_RANK = {"authorized": 5, "verified": 4, "known": 3,
+                    "known_visitor": 2, "uncertain": 1, "unknown": 0}
+    current_best = collection.find_one(
+        {"person_id": person_id},
+        {"best_status": 1, "_id": 0},
+    )
+    prev_best = (current_best or {}).get("best_status")
+    prev_rank = _STATUS_RANK.get(prev_best, -1) if prev_best else -1
+    new_rank = _STATUS_RANK.get(status, 0)
+    best_status = status if new_rank > prev_rank else (prev_best or status)
+
     # Upsert with atomic operators — no prior read needed.
     #   $inc  — visit_count is always safe to atomically increment.
     #   $push/$slice — bounded arrays (similarity_history, status_history,
@@ -725,6 +740,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
                 "last_seen": now,
                 "last_camera": camera_id,
                 "last_status": status,
+                "best_status": best_status,
                 "updated_at": now,
             },
         },
@@ -743,6 +759,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
             "last_seen": now,
             "last_camera": camera_id,
             "last_status": status,
+            "best_status": status,
             "avg_similarity": 0.0,
             "similarity_history": [similarity],
             "status_history": [status_entry],
@@ -758,6 +775,7 @@ def update_visit_memory(person_id: str, camera_id: str, status: str,
         "last_seen": now,
         "last_camera": camera_id,
         "last_status": status,
+        "best_status": best_status,
         "avg_similarity": result.get("avg_similarity", 0.0),
         "similarity_history": result.get("similarity_history", []),
         "status_history": result.get("status_history", []),
