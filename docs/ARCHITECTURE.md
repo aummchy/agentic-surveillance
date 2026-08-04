@@ -5,7 +5,7 @@
 | Component | What we use | How |
 |-----------|------------|-----|
 | **Detection** | YOLOv8 (`yolov8s.pt` or OpenVINO IR) via Ultralytics | Singleton model in `pipeline/tracker.py:track_persons()`. OpenVINO IR export for GPU: `yolo export model=yolov8s.pt format=openvino half=True`, then set `YOLO_MODEL=yolov8s_openvino_model/`, `YOLO_DEVICE=intel:GPU`. ~8× speedup (128ms→16ms) on Arc iGPU. |
-| **Tracking** | ByteTrack (custom `config/bytetrack_surveillance.yaml`) | Cross-frame person ID 0,1,2... per session. Converted to composite IDs `{cam_id}_{epoch}_{track_id}` in `pipeline/track_state.py`. Tuned for fixed-camera surveillance: `track_high_thresh=0.45`, `track_buffer=60`, `new_track_thresh=0.50`. |
+| **Tracking** | ByteTrack (custom `config/bytetrack_surveillance.yaml`) | Cross-frame person ID 0,1,2... per session. Converted to composite IDs `{cam_id}_{epoch}_{track_id}_{generation}` in `pipeline/track_state.py`. Tuned for fixed-camera surveillance: `track_high_thresh=0.45`, `track_buffer=60`, `new_track_thresh=0.50`. |
 | **Face detection** | InsightFace SCRFD (`buffalo_l` in `.env`) | Loaded once as singleton in `utils/embedding_utils.py:InsightFaceSingleton`. Two-stage: crop person first, full frame fallback when crop has no faces ≥ `EMBEDDING_DET_SCORE_MIN`. CLAHE applied before detection. No redundant `DET_SCORE_MIN` tier. |
 | **Face embedding** | InsightFace ArcFace (512-d normed) | Generated from best face detected. Quality-gated: only overwrites `track.embedding` if `det_score` exceeds existing by ≥ 0.05. Used for vector search. Embedding cache skips Atlas search if cosine distance < 0.005 from last searched embedding. |
 | **Face quality** | Two-tier quality system (`pipeline/quality_agent.py`) | Validity gates reject unusable faces (blur < 40, brightness outside 35-255, area < 1200px²). Weighted composite score [0,1] (50% blur, 25% brightness, 25% area). |
@@ -31,7 +31,7 @@
 main.py
 ├── # Thread: CameraAgent._loop()
 │   ├── YOLOv8 detect persons per frame
-│   ├── TrackState.update() (thread-safe, composite IDs)
+│   ├── TrackState.update() (thread-safe, composite IDs with generation)
 │   ├── Every 20 frames: ThreadPool → progressive_recognition()
 │   │   ├── InsightFace detection + embedding (quality-gated overwrite)
 │   │   ├── Quality gate: skip embedding if face invalid (blur/brightness/area)
@@ -71,6 +71,7 @@ main.py
 - **Best face hysteresis** — quality score buffer of +0.03 in `track_state.py:202` requires >3% improvement to replace best face
 - **Atlas vector search fallback** — if Atlas `$vectorSearch` fails/timeouts, falls to `_python_cosine_scan()` scanning up to 500 docs
 - **LLM optional** — system runs without Ollama; NL summaries fall back to template strings
+- **Composite track IDs** — Format: `{camera_id}_{session_epoch}_{byte_track_id}_{generation}` — unique across camera restarts and ByteTrack ID reuse
 
 ## MongoDB Collections
 
@@ -85,12 +86,13 @@ main.py
 | Setting | Default | Note |
 |---------|---------|------|
 | MATCH_THRESHOLD | 0.45 | Max recommended. Converts via `(atlas_score*2)-1`. |
-| VERY_HIGH_SIMILARITY | 0.90 | Skips memory + recognition, immediate known. |
+| HIGH_CONFIDENCE_SIMILARITY | 0.85 | Skips memory + recognition, immediate known. |
 | EMBEDDING_DET_SCORE_MIN | 0.40 | Minimum score to generate embedding. |
 | DET_SCORE_RELAXED | 0.20 | Entry gate for face detection (single tier, `DET_SCORE_MIN` removed). |
-| EMBEDDING_CACHE_COSINE_THRESHOLD | 0.005 | Skip Atlas search if cosine dist from last searched < threshold. |
 | QUALITY_BLUR_MIN | 40 | Minimum Laplacian variance for scoring normalization. |
 | QUALITY_FACE_AREA_MIN | 1500 | Min face area for scoring normalization. |
 | TRACK_TIMEOUT_SECS | 3.0 | Person gone for 3s = track ends. |
 | RECOGNITION_INTERVAL_FRAMES | 20 | Run recognition every N frames |
 | ALERT_COOLDOWN_SECS | 60 | Per-level dedup window. |
+| CONFIDENCE_KNOWN_MIN | 70 | Minimum confidence for "known" status |
+| CONFIDENCE_UNCERTAIN_MIN | 55 | Minimum confidence for "uncertain" status |

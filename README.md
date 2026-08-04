@@ -18,20 +18,25 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 
 ## Prerequisites
 
-- Python 3.11
-- MongoDB Atlas cluster with vector search index
-- `.env` with `MONGODB_URI` (copy from `.env.example`)
-- Camera at `CAMERA_INDEX=0` or `CAMERA_SOURCE=http://<phone-ip>:8080/video`
+- Python 3.11 (InsightFace/onnxruntime wheels unreliable on other versions)
+- MongoDB Atlas cluster with `surveillance` database, `faces`/`events`/`visit_memory` collections
+- Atlas Vector Search index named `vector_index` on `faces.latest_embedding` (512 dims, cosine)
+- `.env` with at minimum `MONGODB_URI` (copy from `.env.example`)
+- Camera device at `CAMERA_INDEX=0` or `CAMERA_SOURCE=http://<phone-ip>:8080/video` for mobile (adjust in `.env`)
+- For Intel Arc iGPU acceleration: `pip install openvino` and export YOLO (optional — CPU works too)
 
 ## Commands
 
 | Task | Command |
 |------|---------|
 | Run surveillance | `python main.py` |
+| Run dashboard API | FastAPI starts automatically on port 8000 inside `main.py` |
 | Run dashboard frontend | `cd dashboard/frontend && npm run dev` |
 | Install Python deps | `pip install -r requirements.txt` |
 | Install frontend deps | `cd dashboard/frontend && npm install` |
+| Export YOLO to OpenVINO IR | `yolo export model=models/yolov8s.pt format=openvino half=True` |
 | Run tests | `python -m pytest tests/ -v` |
+| Run specific test | `python -m pytest tests/test_recognition.py -v` |
 
 ## Documentation
 

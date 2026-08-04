@@ -29,16 +29,16 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 
 ## Commands
 
-| Task | Command |
-|------|---------|
-| Run surveillance | `python main.py` |
-| Run dashboard API | FastAPI starts automatically on port 8000 inside `main.py` |
-| Run dashboard frontend | `cd dashboard/frontend && npm run dev` |
-| Install Python deps | `pip install -r requirements.txt` |
-| Install frontend deps | `cd dashboard/frontend && npm install` |
+| Task                       | Command                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| Run surveillance           | `python main.py`                                                |
+| Run dashboard API          | FastAPI starts automatically on port 8000 inside `main.py`      |
+| Run dashboard frontend     | `cd dashboard/frontend && npm run dev`                          |
+| Install Python deps        | `pip install -r requirements.txt`                               |
+| Install frontend deps      | `cd dashboard/frontend && npm install`                          |
 | Export YOLO to OpenVINO IR | `yolo export model=models/yolov8s.pt format=openvino half=True` |
-| Run tests | `python -m pytest tests/ -v` |
-| Run specific test | `python -m pytest tests/test_recognition.py -v` |
+| Run tests                  | `python -m pytest tests/ -v`                                    |
+| Run specific test          | `python -m pytest tests/test_recognition.py -v`                 |
 
 ## Configuration system
 
@@ -64,6 +64,7 @@ main.py (entry point, wires everything)
 ├── agents/finalizer.py           — final embedding retry on track expiry
 ├── agents/timing.py              — thread-safe timing diagnostics collector
 ├── agents/report.py              — incident/stats/summary reports via LLM
+├── agents/base.py                — BaseAgent abstract class (ABC)
 ├── pipeline/tracker.py           — YOLOv8 + ByteTrack (single model instance)
 ├── config/bytetrack_surveillance.yaml — ByteTrack params tuned for fixed-camera surveillance
 ├── pipeline/recognition_pipeline.py — orchestrates detect → quality → embed → match → decide
@@ -77,7 +78,7 @@ main.py (entry point, wires everything)
 ├── utils/image_utils.py          — crop, save, upload to Cloudinary
 ├── config/settings.py            — loads .env + config.jsonc, validate_config()
 ├── config/config.jsonc           — tunable parameters (edit this, not settings.py)
-├── tests/                        — pytest test suite (7 test files)
+├── tests/                        — pytest test suite (76 tests)
 └── dashboard/
     ├── backend/main.py           — FastAPI app (REST + WebSocket)
     └── frontend/                 — React + Vite
@@ -152,29 +153,30 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 - **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→90.
 - **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
 - **2026-07-30**: Performance — unconditional `cv2.resize()` to 1280×720 before YOLO inference (`camera_agent.py:146`); `FRAME_SKIP` skips every other frame before JPEG encode (`track_processor.py:46`); WebSocket broadcast resized to 640×360 preview (`track_processor.py:52`).
+- **2026-08-04**: Updated documentation — refreshed AGENTS.md with current architecture, added base.py to architecture tree, updated test count to 76.
 
 ## Common entry points
 
-| File | What it starts | How to run |
-|------|----------------|------------|
-| `main.py` | Full pipeline + API server | `python main.py` |
-| `agents/camera_agent.py` | Capture loop, recognition, track finalization | Loaded by main.py |
-| `dashboard/backend/main.py` | FastAPI REST + WebSocket | Starts automatically on port 8000 |
-| `pipeline/tracker.py` | YOLO + ByteTrack model loading | Loaded by camera_agent |
-| `config/settings.py` | All configuration loading | Imported by every module |
+| File                        | What it starts                                | How to run                        |
+| --------------------------- | --------------------------------------------- | --------------------------------- |
+| `main.py`                   | Full pipeline + API server                    | `python main.py`                  |
+| `agents/camera_agent.py`    | Capture loop, recognition, track finalization | Loaded by main.py                 |
+| `dashboard/backend/main.py` | FastAPI REST + WebSocket                      | Starts automatically on port 8000 |
+| `pipeline/tracker.py`       | YOLO + ByteTrack model loading                | Loaded by camera_agent            |
+| `config/settings.py`        | All configuration loading                     | Imported by every module          |
 
 ## Folder responsibilities
 
-| Folder | Purpose | Key files |
-|--------|---------|-----------|
-| agents/ | AI orchestration (7 agents) | camera_agent, matching, recognition, scoring, policy, memory, alerts, report |
-| pipeline/ | Computer vision pipeline | tracker, face, models, track_state, quality_agent, recognition_pipeline |
-| utils/ | Shared utilities | db_utils, embedding_utils, llm_client, image_utils |
-| config/ | Configuration | settings.py, config.jsonc, bytetrack_surveillance.yaml |
-| dashboard/ | Web dashboard | backend/main.py, frontend/src/ |
-| tests/ | 76 pytest tests | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer |
-| scripts/ | Session query tools | query_*.py (11 files) |
-| docs/ | Documentation | ARCHITECTURE, 00-Home, 01-Getting Started, 02-Architecture, 03-Agents, 04-Pipeline, 05-Utilities, 06-Formulas, 07-Dashboard, 08-Logging, 09-Reference, 10-Problems |
+| Folder     | Purpose                     | Key files                                                                                                                                                          |
+| ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| agents/    | AI orchestration (7 agents) | camera_agent, matching, recognition, scoring, policy, memory, alerts, report                                                                                       |
+| pipeline/  | Computer vision pipeline    | tracker, face, models, track_state, quality_agent, recognition_pipeline                                                                                            |
+| utils/     | Shared utilities            | db_utils, embedding_utils, llm_client, image_utils                                                                                                                 |
+| config/    | Configuration               | settings.py, config.jsonc, bytetrack_surveillance.yaml                                                                                                             |
+| dashboard/ | Web dashboard               | backend/main.py, frontend/src/                                                                                                                                     |
+| tests/     | 76 pytest tests             | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer                    |
+| scripts/   | Session query tools         | query\_\*.py (11 files)                                                                                                                                            |
+| docs/      | Documentation               | ARCHITECTURE, 00-Home, 01-Getting Started, 02-Architecture, 03-Agents, 04-Pipeline, 05-Utilities, 06-Formulas, 07-Dashboard, 08-Logging, 09-Reference, 10-Problems |
 
 ## Coding rules
 
@@ -188,7 +190,8 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 
 ## Do / Don'ts
 
-Do: 
+Do:
+
 - Edit `config/config.jsonc` for detection, quality, recognition settings
 - Edit `.env` for secrets (MONGODB_URI, API keys, passwords)
 - Run `python -m pytest tests/ -v` before committing
@@ -197,6 +200,7 @@ Do:
 - Use `track.best_face_crop` for numpy array (not `best_face_crop_path`)
 
 Don't:
+
 - Edit `config/settings.py` hardcoded defaults
 - Reload InsightFace in per-frame loops
 - Block camera loop with I/O (MongoDB, Cloudinary, alerts)
@@ -205,6 +209,4 @@ Don't:
 
 ## Current priorities
 
-1. ~~Fix blurry face identity corruption~~ (DONE — quality gate skip in `camera_agent.py:321`)
-2. ~~ByteTrack tuning~~ (DONE — `config/bytetrack_surveillance.yaml`)
-3. Next: RAG over event history, person behavior profiles, temporal analytics
+1. fix code issues and make the working correct.
