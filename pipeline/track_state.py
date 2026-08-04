@@ -228,16 +228,19 @@ class TrackState:
             else:
                 self._in_flight[composite_id] = count - 1
 
-    def set_best_face(self, composite_id: str, face_crop: np.ndarray,
+    def set_best_face(self, track: 'Track', face_crop: np.ndarray,
                       face_score: float, full_frame: np.ndarray, face_ratio: float,
                       person_crop: np.ndarray = None):
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if not track:
+        """Update the best face data for a track.
+
+        Accepts the Track object directly (not composite_id lookup) so that
+        data is written even if end_recognition() removed the track from
+        _tracks before this call.  The caller always holds a valid reference.
+        """
+        composite_id = track.track_id
+        with track._lock:
+            if face_score <= track.best_face_score + 0.03:
                 return
-            with track._lock:
-                if face_score <= track.best_face_score + 0.03:
-                    return
 
         # Encode JPEGs outside the lock (expensive operations) — only if score improved significantly
         success, jpeg_buf = cv2.imencode(".jpg", full_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
@@ -252,40 +255,37 @@ class TrackState:
             if ok:
                 person_crop_jpeg = pc_buf.tobytes()
 
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if track:
-                with track._lock:
-                    if face_score > track.best_face_score:
-                        track.best_face_crop = face_crop.copy()
-                        track.best_face_score = face_score
-                        track.best_full_frame = full_frame
-                        track.best_face_ratio = face_ratio
-                        track.best_frame_jpeg = jpeg_bytes
-                        if person_crop_jpeg is not None:
-                            track.best_person_crop_jpeg = person_crop_jpeg
+        with track._lock:
+            if face_score > track.best_face_score:
+                track.best_face_crop = face_crop.copy()
+                track.best_face_score = face_score
+                track.best_full_frame = full_frame
+                track.best_face_ratio = face_ratio
+                track.best_frame_jpeg = jpeg_bytes
+                if person_crop_jpeg is not None:
+                    track.best_person_crop_jpeg = person_crop_jpeg
 
-    def ensure_fallback_frame(self, composite_id: str, frame: np.ndarray):
+    def ensure_fallback_frame(self, track: 'Track', frame: np.ndarray):
         """Guarantee every track gets at least one photo, independent of face quality.
 
         Called unconditionally on the first recognition pass. Uses double-checked
         locking: cheap read under lock → expensive JPEG encode outside lock →
-        re-check and write under lock.
+        re-check and write under lock.  Accepts Track directly so that the
+        fallback is saved even if end_recognition() removed the track from
+        _tracks before this call.
         """
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if not track or track.fallback_frame_jpeg is not None:
+        with track._lock:
+            if track.fallback_frame_jpeg is not None:
                 return
 
         success, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.JPEG_QUALITY_STORE])
         if not success:
-            logger.warning("jpeg_encode_failed", composite_id=composite_id, context="ensure_fallback_frame")
+            logger.warning("jpeg_encode_failed", composite_id=track.track_id, context="ensure_fallback_frame")
             return
         jpeg_bytes = jpeg_buf.tobytes()
 
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if track and track.fallback_frame_jpeg is None:
+        with track._lock:
+            if track.fallback_frame_jpeg is None:
                 track.fallback_frame_jpeg = jpeg_bytes
 
     def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0) -> tuple[bool, str]:
@@ -318,11 +318,14 @@ class TrackState:
                     track.person_name = name
                     track.person_name_similarity = similarity
 
-    def set_face_crop_path(self, composite_id: str, path: str):
-        with self._lock:
-            track = self._tracks.get(composite_id)
-            if track:
-                track.best_face_crop_path = path
+    def set_face_crop_path(self, track: 'Track', path: str):
+        """Set the face crop path on the track directly.
+
+        Accepts the Track object so that the path is written even if
+        end_recognition() removed the track from _tracks before this call.
+        """
+        with track._lock:
+            track.best_face_crop_path = path
 
     def set_pending_match_result(self, composite_id: str, match_result):
         with self._lock:

@@ -323,7 +323,7 @@ class CameraAgent:
         self.track_state.begin_recognition(track.track_id)
 
         # Guarantee every track gets at least one photo, independent of face quality
-        self.track_state.ensure_fallback_frame(track.track_id, frame)
+        self.track_state.ensure_fallback_frame(track, frame)
 
         try:
             result = self._pipeline.run(frame, track)
@@ -333,7 +333,7 @@ class CameraAgent:
             if result.skip_reason in ("no_face", "low_quality", "embedding_failed"):
                 if result.quality and result.quality.is_valid and result.face_crop is not None:
                     self.track_state.set_best_face(
-                        track.track_id, result.face_crop,
+                        track, result.face_crop,
                         result.quality.overall_score, frame, result.face_ratio,
                         person_crop=result.person_crop)
                 return
@@ -347,13 +347,13 @@ class CameraAgent:
                                  skip_reason=result.skip_reason)
                     return
                 self.track_state.set_best_face(
-                    track.track_id, result.face_crop,
+                    track, result.face_crop,
                     result.quality.overall_score, frame, result.face_ratio,
                     person_crop=result.person_crop)
                 if settings.DEBUG_FACE_CROPS:
                     crop_path = f"captures/debug/face_crops/{track.track_id}/{self._frame_count}.jpg"
                     save_image(result.face_crop, crop_path)
-                    self.track_state.set_face_crop_path(track.track_id, crop_path)
+                    self.track_state.set_face_crop_path(track, crop_path)
                     logger.info("face_crop_saved", track_id=track.track_id, path=crop_path,
                                 url=f"http://localhost:8000/{crop_path.replace(chr(92), '/')}")
 

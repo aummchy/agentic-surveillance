@@ -44,7 +44,7 @@
   // Person detection confidence threshold.
   // Lower = track more persons (good for low light), higher = fewer false detections.
   "PERSON_CONF_THRESHOLD": 0.4,
-  "TRACK_TIMEOUT_SECS": 3.0,
+  "TRACK_TIMEOUT_SECS": 15.0,
   "MAX_TRACK_SECS": 300,
 
   // ── Face Detection Fallback ──────────────────────────────────

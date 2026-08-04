@@ -391,7 +391,9 @@ class TestPhase4_4_TrackExpirationRace:
             ts.set_embedding(track_id, [0.1] * 512)
             # Pass a real numpy array so cv2.imencode doesn't crash
             dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
-            ts.set_best_face(track_id, dummy_frame, 0.9, dummy_frame, 0.5)
+            track_obj = ts.get(track_id)
+            if track_obj:
+                ts.set_best_face(track_obj, dummy_frame, 0.9, dummy_frame, 0.5)
             ts.end_recognition(track_id)
 
         def camera_worker():
