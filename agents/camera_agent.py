@@ -163,10 +163,31 @@ class CameraAgent:
                              recognizing=len(self._recognizing_tracks))
 
             active_ids = set()
+            skipped_overlap = set()  # track IDs skipped due to overlap with existing track
             for t in tracks:
                 track = self.track_state.update(settings.CAMERA_ID, t["track_id"], t["box"])
                 if track:
                     active_ids.add(track.track_id)
+
+                # ── IoU overlap dedup ──────────────────────────────
+                # If this track overlaps >threshold with an already-active
+                # track, skip it — it's a fragmented duplicate of the same person.
+                if track and track.track_id not in skipped_overlap:
+                    for other_id, other_track in self.track_state._tracks.items():
+                        if other_id == track.track_id:
+                            continue
+                        if other_track.track_id in active_ids and other_track.track_id != track.track_id:
+                            iou = compute_iou(track.person_box, other_track.person_box)
+                            if iou > settings.OVERLAP_IOU_THRESHOLD:
+                                skipped_overlap.add(track.track_id)
+                                logger.debug("track_skipped_overlap",
+                                             track_id=track.track_id,
+                                             overlaps_with=other_track.track_id,
+                                             iou=round(iou, 3))
+                                break
+
+                if track and track.track_id in skipped_overlap:
+                    continue  # skip recognition for this overlapping track
 
                 if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
                     if settings.DEBUG_RECOGNITION:

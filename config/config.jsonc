@@ -154,6 +154,12 @@
   // Set to 0 to disable. Default 60s.
   "MIN_VISIT_GAP_SECS": 60,
 
+  // ── Track Overlap Dedup ─────────────────────────────────────
+  // OVERLAP_IOU_THRESHOLD: If a new track overlaps > this IoU with an
+  // existing active track, the new track is skipped (no recognition).
+  // Prevents duplicate processing when ByteTrack fragments a single person.
+  "OVERLAP_IOU_THRESHOLD": 0.50,
+
   // ── CLAHE (Contrast Enhancement) ────────────────────────────
   // Applied to every frame before face detection.
   "CLAHE_CLIP_LIMIT": 2.0,
