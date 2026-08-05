@@ -1,17 +1,17 @@
 import asyncio
 import json
 import base64
-import logging
+import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
+from config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 connected_clients: Set[WebSocket] = set()
 MAX_FRAME_SIZE = 1024 * 1024  # 1MB max frame size
 _frame_counter = 0
-FRAME_SKIP = 2  # broadcast every Nth frame to reduce load
 
 _SEND_TIMEOUT = 3.0
 
@@ -23,6 +23,26 @@ async def _send_or_disconnect(client, message, label=""):
     except (asyncio.TimeoutError, Exception) as e:
         logger.warning("client_send_timeout", client=client, label=label, error=str(e))
         return client, False
+
+
+async def _broadcast(message: str, label: str):
+    """Send message to all connected clients, disconnecting silent ones."""
+    if not connected_clients:
+        return
+
+    results = await asyncio.gather(
+        *[_send_or_disconnect(c, message, label) for c in list(connected_clients)],
+        return_exceptions=True
+    )
+    disconnected = set()
+    for result in results:
+        if isinstance(result, tuple):
+            client, ok = result
+            if not ok:
+                disconnected.add(client)
+    if disconnected:
+        connected_clients.difference_update(disconnected)
+        logger.warning("clients_dropped_silent", count=len(disconnected), remaining=len(connected_clients))
 
 
 async def broadcast_frame(frame_data: bytes):
@@ -44,69 +64,30 @@ async def broadcast_frame(frame_data: bytes):
     if _frame_counter % 100 == 1:
         logger.info("frame_broadcast", frame_num=_frame_counter, clients=len(connected_clients), size=len(frame_data))
 
-    results = await asyncio.gather(*[_send_or_disconnect(c, message, "frame") for c in list(connected_clients)], return_exceptions=True)
-    disconnected = set()
-    for result in results:
-        if isinstance(result, tuple):
-            client, ok = result
-            if not ok:
-                disconnected.add(client)
-    if disconnected:
-        connected_clients.difference_update(disconnected)
-        logger.warning("clients_dropped_silent", count=len(disconnected), remaining=len(connected_clients))
+    await _broadcast(message, "frame")
 
 
 async def broadcast_event(event: dict):
-    if not connected_clients:
-        return
-
-    message = json.dumps({
-        "type": "event",
-        "data": event
-    })
-
-    results = await asyncio.gather(*[_send_or_disconnect(c, message, "event") for c in list(connected_clients)], return_exceptions=True)
-    disconnected = set()
-    for result in results:
-        if isinstance(result, tuple):
-            client, ok = result
-            if not ok:
-                disconnected.add(client)
-    if disconnected:
-        connected_clients.difference_update(disconnected)
+    message = json.dumps({"type": "event", "data": event})
+    await _broadcast(message, "event")
 
 
 async def broadcast_alert(alert_data: dict):
-    if not connected_clients:
-        return
-
-    message = json.dumps({
-        "type": "alert",
-        "data": alert_data
-    })
-
-    results = await asyncio.gather(*[_send_or_disconnect(c, message, "alert") for c in list(connected_clients)], return_exceptions=True)
-    disconnected = set()
-    for result in results:
-        if isinstance(result, tuple):
-            client, ok = result
-            if not ok:
-                disconnected.add(client)
-    if disconnected:
-        connected_clients.difference_update(disconnected)
+    message = json.dumps({"type": "alert", "data": alert_data})
+    await _broadcast(message, "alert")
 
 
 @router.websocket("/live")
 async def websocket_live(websocket: WebSocket):
     origin = websocket.headers.get("origin", "")
-    allowed_origins = {"http://localhost:5173", "http://localhost:3000"}
+    allowed_origins = set(settings.ALLOWED_ORIGINS)
     if origin and origin not in allowed_origins:
         await websocket.close(code=4003, reason="origin not allowed")
         return
 
     await websocket.accept()
     connected_clients.add(websocket)
-    logger.info(f"Client connected. Total clients: {len(connected_clients)}")
+    logger.info("client_connected", total=len(connected_clients))
 
     try:
         while True:
@@ -116,7 +97,7 @@ async def websocket_live(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error("websocket_error", error=str(e))
     finally:
         connected_clients.discard(websocket)
-        logger.info(f"Client disconnected. Total clients: {len(connected_clients)}")
+        logger.info("client_disconnected", total=len(connected_clients))

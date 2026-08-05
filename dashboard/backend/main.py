@@ -1,12 +1,9 @@
-import logging
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dashboard.backend.routes import faces, events, live, reports, chat
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from config import settings
 
 CAPTURES_DIR = Path(__file__).resolve().parent.parent.parent / "captures"
 CAPTURES_DIR.mkdir(exist_ok=True)
@@ -19,7 +16,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization"],

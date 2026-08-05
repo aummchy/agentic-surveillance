@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 from config import settings
+from config.status import Status, UNVERIFIED_STATUSES
 from pipeline.models import Track, DecisionResult
 from utils import llm_client
 
@@ -35,17 +36,15 @@ def _prune_stale_alerts():
         logger.debug("alert_timestamps_pruned", count=len(stale_keys))
 
 
-_UNVERIFIED_STATUSES = {"unknown", "masked_unknown", "uncertain", "intentionally_hidden"}
 
-
-def should_send_alert(track_id: str, alert_level: str, status: str = None) -> bool:
+def should_send_alert(track_id: str, alert_level: str, status: int = None) -> bool:
     now = time.time()
     with _alert_lock:
         _prune_stale_alerts()
         # Per-track, per-level dedup. Include track_id for unverified
         # statuses too, so two different unknown people don't suppress
         # each other's alerts within the cooldown window.
-        if status in _UNVERIFIED_STATUSES:
+        if status in UNVERIFIED_STATUSES:
             key = f"{track_id}:unverified:{alert_level}"
         else:
             key = f"{track_id}:{alert_level}"

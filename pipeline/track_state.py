@@ -301,7 +301,7 @@ class TrackState:
                     return (False, "rejected_quality")
             return (False, "track_removed")
 
-    def set_decision(self, composite_id: str, decision: str):
+    def set_decision(self, composite_id: str, decision: int):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -364,7 +364,7 @@ class TrackState:
                 if new_conf > existing_conf:
                     track.pending_recognition = recognition_result
 
-    def set_recognition_snapshot(self, composite_id: str, quality: float, status: str):
+    def set_recognition_snapshot(self, composite_id: str, quality: float, status: int):
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:

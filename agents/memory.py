@@ -9,7 +9,7 @@ Input:
     "person_id": "cam_01_123_42",
     "camera_id": "cam_01",
     "similarity": 0.83,
-    "status": "unknown"
+    "status": 1
 }
 
 Output:
@@ -30,6 +30,7 @@ import structlog
 from datetime import datetime
 from typing import Any, Dict, Optional
 from agents.base import BaseAgent
+from config.status import Status, IS_KNOWN_THRESHOLD, LABEL_TO_STATUS
 from utils.db_utils import get_or_create_memory, update_visit_memory
 
 logger = structlog.get_logger(__name__)
@@ -53,7 +54,7 @@ class MemoryAgent(BaseAgent):
                 - person_id (str): The person's ID
                 - camera_id (str): Current camera
                 - similarity (float): Current similarity score
-                - status (str): Current recognition status
+                - status (int): Current recognition status
 
         Returns:
             Dict with memory context for the Recognition Agent.
@@ -61,7 +62,7 @@ class MemoryAgent(BaseAgent):
         person_id = input_data.get("person_id")
         camera_id = input_data.get("camera_id", "unknown")
         similarity = input_data.get("similarity", 0.0)
-        status = input_data.get("status", "unknown")
+        status = input_data.get("status", Status.UNKNOWN)
 
         if not person_id:
             return self._empty_result("No person_id provided")
@@ -77,7 +78,7 @@ class MemoryAgent(BaseAgent):
         return result
 
     def _analyze(self, person_id: str, camera_id: str,
-                 similarity: float, status: str) -> dict:
+                 similarity: float, status: int) -> dict:
         """Core memory analysis logic."""
         try:
             memory = get_or_create_memory(person_id)
@@ -125,7 +126,10 @@ class MemoryAgent(BaseAgent):
         # Use best_status (highest-priority status ever seen) instead of
         # last_status, so a single low-quality visit doesn't reset is_known.
         best_status = memory.get("best_status") or last_status
-        is_known = visit_count > 0 and best_status in ["known", "verified", "authorized"]
+        # Convert string statuses from old MongoDB data to int
+        if isinstance(best_status, str):
+            best_status = LABEL_TO_STATUS.get(best_status, Status.UNKNOWN)
+        is_known = visit_count > 0 and (best_status or Status.UNKNOWN) >= IS_KNOWN_THRESHOLD
 
         # Build reason
         reason = self._build_reason(visit_count, days_since_last, is_typical_time, is_known)
@@ -233,7 +237,7 @@ class MemoryAgent(BaseAgent):
             "reason": reason,
         }
 
-    def record_visit(self, person_id: str, camera_id: str, status: str,
+    def record_visit(self, person_id: str, camera_id: str, status: int,
                      similarity: float, is_masked: bool = False,
                      visit_action: str = "recorded") -> dict:
         """Record a visit in memory. Call after recognition is complete.

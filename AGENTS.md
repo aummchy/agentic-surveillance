@@ -54,12 +54,11 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 main.py (entry point, wires everything)
 ├── agents/camera_agent.py        — capture loop + ByteTrack + progressive recognition
 ├── agents/matching_agent.py      — embedding + MongoDB vector search
-├── agents/decision_agent.py      — delegates to PolicyAgent
 ├── agents/memory.py              — visit history tracking
 ├── agents/alert_agent.py         — alert dispatch (console/email/sms/webhook)
 ├── agents/recognition.py         — multi-signal identity classification
 ├── agents/scoring.py             — confidence scoring (weighted normalization + logging)
-├── agents/policy.py              — business rule evaluation
+├── agents/policy.py              — business rule evaluation + decide() entry point
 ├── agents/track_processor.py     — track finalization + dashboard broadcasting
 ├── agents/finalizer.py           — final embedding retry on track expiry
 ├── agents/timing.py              — thread-safe timing diagnostics collector
@@ -68,17 +67,22 @@ main.py (entry point, wires everything)
 ├── pipeline/tracker.py           — YOLOv8 + ByteTrack (single model instance)
 ├── config/bytetrack_surveillance.yaml — ByteTrack params tuned for fixed-camera surveillance
 ├── pipeline/recognition_pipeline.py — orchestrates detect → quality → embed → match → decide
-├── pipeline/quality_agent.py     — face quality scoring (validity gates + weighted composite)
-├── pipeline/face.py              — compute_face_ratio() — face area / person bbox ratio
+├── pipeline/quality_agent.py     — face quality scoring + compute_face_ratio()
 ├── pipeline/models.py            — Track, MatchResult, DecisionResult, QualityResult, etc.
 ├── pipeline/track_state.py       — per-track accumulation with threading.Lock
-├── utils/db_utils.py             — MongoDB CRUD + vector search + Python fallback
+├── utils/db_client.py            — MongoDB connection singleton + collection getters
+├── utils/db_faces.py             — face CRUD, deduplication, embedding history
+├── utils/db_events.py            — event logging + stats queries
+├── utils/db_memory.py            — visit memory CRUD
+├── utils/db_search.py            — vector search (Atlas + Python fallback) + backfill
+├── utils/db_utils.py             — re-export facade (all consumers import from here)
 ├── utils/embedding_utils.py      — InsightFace singleton (load once, never per-frame)
 ├── utils/llm_client.py           — Ollama HTTP client (generate, chat, NL summaries)
 ├── utils/image_utils.py          — crop, save, upload to Cloudinary
 ├── config/settings.py            — loads .env + config.jsonc, validate_config()
+├── config/logging_setup.py       — Colors, CompactTerminalRenderer, JSONFileRenderer, setup_logging()
 ├── config/config.jsonc           — tunable parameters (edit this, not settings.py)
-├── tests/                        — pytest test suite (76 tests)
+├── tests/                        — pytest test suite (84 tests)
 └── dashboard/
     ├── backend/main.py           — FastAPI app (REST + WebSocket)
     └── frontend/                 — React + Vite
@@ -89,7 +93,7 @@ main.py (entry point, wires everything)
 - **Load models once.** YOLO in `tracker.py`, InsightFace as singleton in `embedding_utils.py`. Never reload in per-frame loops.
 - **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (2 threads) run concurrently.
 - **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
-- **Threshold conversion.** Atlas `vectorSearchScore = (1+cosine)/2`. Always convert back: `raw_cosine = (atlas_score * 2) - 1` before comparing against `MATCH_THRESHOLD`. Use `compare_similarity()` in `db_utils.py`.
+- **Threshold conversion.** Atlas `vectorSearchScore = (1+cosine)/2`. Always convert back: `raw_cosine = (atlas_score * 2) - 1` before comparing against `MATCH_THRESHOLD`. Use `compare_similarity()` in `utils/embedding_utils.py`.
 - **Match threshold.** Keep `MATCH_THRESHOLD` ≤ 0.45. Default is 0.45. Higher rejects genuine same-person matches under indoor lighting.
 - **One decision per track.** Recognition + decision runs once when track ends (or progressively every 20 frames). Not per-frame.
 - **Composite track IDs.** Format: `{camera_id}_{session_epoch}_{byte_track_id}` — unique across camera restarts.
@@ -123,9 +127,32 @@ Quality gates prevent low-quality embeddings from overwriting high-quality ones 
 - Both Gemma 3 4B and Qwen 3.5 4B fit in 4GB VRAM at Q4_K_M quantization (~2.7GB weights)
 - On Windows, if MSMF drops frames (error -1072875772), set `CAMERA_BACKEND=dshow` in `.env`
 
+## Status system
+
+Centralized in `config/status.py` — single source of truth for all identity status values.
+
+```python
+class Status(IntEnum):
+    UNKNOWN = 1           # Unrecognized person
+    UNCERTAIN = 2         # Weak match, low confidence
+    KNOWN = 3             # Matched identity, confidence above threshold
+    KNOWN_VISITOR = 4     # Confirmed returning visitor
+    VERIFIED = 5          # Verified visitor (manual or high-similarity)
+    AUTHORIZED = 6        # Employee / authorized person
+    BLACKLIST = 7         # Blacklisted person (highest priority)
+    MASKED_UNKNOWN = 8    # Masked / partial-visibility unknown
+    HIDDEN = 9            # Intentionally avoiding detection
+```
+
+- **Higher number = more trusted.** `is_known` becomes `status >= 3`.
+- Numeric everywhere: MongoDB, API, logs, frontend.
+- `alert_level` and `visibility` remain strings (separate concepts).
+- Display labels via `STATUS_LABELS` dict; reverse lookup via `LABEL_TO_STATUS`.
+- Migration script: `scripts/migrate_status_ints.py [--dry-run]`.
+
 ## Logging system
 
-3-tier logging architecture in `config/settings.py`:
+3-tier logging architecture in `config/logging_setup.py`:
 
 - **Terminal** — Compact one-liner with ANSI colors (`CompactTerminalRenderer`)
 - **JSON file** (`logs/surveillance.jsonl`) — Machine-readable JSON lines
@@ -154,6 +181,8 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 - **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
 - **2026-07-30**: Performance — unconditional `cv2.resize()` to 1280×720 before YOLO inference (`camera_agent.py:146`); `FRAME_SKIP` skips every other frame before JPEG encode (`track_processor.py:46`); WebSocket broadcast resized to 640×360 preview (`track_processor.py:52`).
 - **2026-08-04**: Updated documentation — refreshed AGENTS.md with current architecture, added base.py to architecture tree, updated test count to 76.
+- **2026-08-05**: Refactored codebase — deleted `pipeline/face.py` (inlined `compute_face_ratio()` into `quality_agent.py`), deleted `agents/decision_agent.py` (replaced with `decide()` in `policy.py`), extracted `config/logging_setup.py` from `settings.py`, split `utils/db_utils.py` (879 lines) into 5 domain modules (`db_client.py`, `db_faces.py`, `db_events.py`, `db_memory.py`, `db_search.py`) + re-export facade. Updated test mocks to target domain modules directly.
+- **2026-08-05**: Status refactor — replaced all string statuses with centralized `Status(IntEnum)` enum in `config/status.py`. Updated 16 source files, 6 test files, and all MongoDB queries. Numeric everywhere (MongoDB, API, logs, frontend). Higher number = more trusted. Migration script: `scripts/migrate_status_ints.py`.
 
 ## Common entry points
 
@@ -170,11 +199,11 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 | Folder     | Purpose                     | Key files                                                                                                                                                          |
 | ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | agents/    | AI orchestration (7 agents) | camera_agent, matching, recognition, scoring, policy, memory, alerts, report                                                                                       |
-| pipeline/  | Computer vision pipeline    | tracker, face, models, track_state, quality_agent, recognition_pipeline                                                                                            |
-| utils/     | Shared utilities            | db_utils, embedding_utils, llm_client, image_utils                                                                                                                 |
-| config/    | Configuration               | settings.py, config.jsonc, bytetrack_surveillance.yaml                                                                                                             |
+| pipeline/  | Computer vision pipeline    | tracker, models, track_state, quality_agent, recognition_pipeline                                                                                                  |
+| utils/     | Shared utilities            | db_client, db_faces, db_events, db_memory, db_search, db_utils (facade), embedding_utils, llm_client, image_utils                                                 |
+| config/    | Configuration               | settings.py, status.py, logging_setup.py, config.jsonc, bytetrack_surveillance.yaml                                                                                 |
 | dashboard/ | Web dashboard               | backend/main.py, frontend/src/                                                                                                                                     |
-| tests/     | 76 pytest tests             | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer                    |
+| tests/     | 84 pytest tests             | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer                    |
 | scripts/   | Session query tools         | query\_\*.py (11 files)                                                                                                                                            |
 | docs/      | Documentation               | ARCHITECTURE, 00-Home, 01-Getting Started, 02-Architecture, 03-Agents, 04-Pipeline, 05-Utilities, 06-Formulas, 07-Dashboard, 08-Logging, 09-Reference, 10-Problems |
 
@@ -185,6 +214,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 - **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
 - **Quality gates before embedding storage.** Invalid faces (blur < 40, brightness outside 35-255, area < 1200px²) never get embeddings stored or searched.
 - **Confidence never downgrades.** Only upgrades across recognition passes. Critical alerts always update.
+- **Status is numeric.** Use `Status.X` from `config/status.py` — never raw strings. `is_known` = `status >= 3`.
 - **Edit config/config.jsonc** for tunables (detection, quality, recognition). Never edit config/settings.py defaults.
 - **Run tests before committing.** `python -m pytest tests/ -v`
 
@@ -195,9 +225,10 @@ Do:
 - Edit `config/config.jsonc` for detection, quality, recognition settings
 - Edit `.env` for secrets (MONGODB_URI, API keys, passwords)
 - Run `python -m pytest tests/ -v` before committing
-- Use `compare_similarity()` in `db_utils.py` for threshold checks
+- Use `compare_similarity()` in `utils/embedding_utils.py` for threshold checks
 - Convert Atlas scores: `raw_cosine = (atlas_score * 2) - 1`
 - Use `track.best_face_crop` for numpy array (not `best_face_crop_path`)
+- Use `Status.X` from `config/status.py` for all status comparisons
 
 Don't:
 
@@ -206,6 +237,7 @@ Don't:
 - Block camera loop with I/O (MongoDB, Cloudinary, alerts)
 - Set `MATCH_THRESHOLD` above 0.45
 - Store embeddings from low-quality faces (quality gates block this)
+- Use raw string statuses — always use `Status.X` enum values
 
 ## Current priorities
 

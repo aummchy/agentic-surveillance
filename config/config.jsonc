@@ -198,6 +198,11 @@
   // FRAME_SKIP: Broadcast every Nth frame to the dashboard WebSocket.
   // Higher = less bandwidth, lower FPS on dashboard.
   "FRAME_SKIP": 2,
+  // BROADCAST_WIDTH/HEIGHT: Preview resize dimensions for WebSocket stream.
+  "BROADCAST_WIDTH": 640,
+  "BROADCAST_HEIGHT": 360,
+  // ALLOWED_ORIGINS: CORS and WebSocket origin whitelist.
+  "ALLOWED_ORIGINS": ["http://localhost:5173", "http://localhost:3000"],
 
   // ── Debug Flags ──────────────────────────────────────────────
   // DEBUG_RECOGNITION: Enable diagnostic logging for recognition pipeline investigation.

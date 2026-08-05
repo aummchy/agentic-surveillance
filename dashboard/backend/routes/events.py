@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
 from dashboard.backend.models import EventsResponse
 from utils.db_utils import get_events_with_faces
+from config.status import Status
 import asyncio
 import structlog
 
@@ -23,7 +24,7 @@ async def get_stats():
 
 @router.get("", response_model=EventsResponse)
 async def list_events(
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: Optional[int] = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
@@ -52,7 +53,7 @@ async def list_unknown_events(
             get_events_with_faces,
             limit=limit,
             offset=offset,
-            status_filter="unknown"
+            status_filter=Status.UNKNOWN
         )
         return result
     except RuntimeError:

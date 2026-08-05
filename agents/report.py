@@ -27,6 +27,7 @@ Output:
 import structlog
 from typing import Any, Dict, List, Optional
 from agents.base import BaseAgent
+from config.status import Status, STATUS_LABELS
 from utils.db_utils import (
     get_events_with_faces, get_stats, get_visit_history
 )
@@ -74,7 +75,7 @@ class ReportAgent(BaseAgent):
         """Generate a report for a single incident."""
         track_id = data.get("track_id", "unknown")
         camera_id = data.get("camera_id", "unknown")
-        status = data.get("status", "unknown")
+        status = data.get("status", Status.UNKNOWN)
         alert_level = data.get("alert_level", "medium")
         reason = data.get("reason", "")
         timestamp = data.get("timestamp", datetime.utcnow().isoformat())
@@ -158,7 +159,7 @@ class ReportAgent(BaseAgent):
         status_counts = {}
         camera_counts = {}
         for event in events:
-            status = event.get("status", "unknown")
+            status = event.get("status", Status.UNKNOWN)
             camera = event.get("camera_id", "unknown")
             status_counts[status] = status_counts.get(status, 0) + 1
             camera_counts[camera] = camera_counts.get(camera, 0) + 1
@@ -250,18 +251,16 @@ class ReportAgent(BaseAgent):
             "stats": stats,
         }
 
-    def _build_title(self, status: str, name: str, camera_id: str) -> str:
+    def _build_title(self, status: int, name: str, camera_id: str) -> str:
         """Build incident report title."""
         status_titles = {
-            "blacklist": f"CRITICAL: Blacklisted Person at {camera_id}",
-            "masked_unknown": f"Masked Unknown Person at {camera_id}",
-            "intentionally_hidden": f"Suspicious: Person Avoiding Detection at {camera_id}",
-            "unknown": f"Unknown Visitor at {camera_id}",
-            "uncertain": f"Uncertain Match at {camera_id}",
+            Status.BLACKLIST: f"CRITICAL: Blacklisted Person at {camera_id}",
+            Status.MASKED_UNKNOWN: f"Masked Unknown Person at {camera_id}",
+            Status.UNKNOWN: f"Unknown Visitor at {camera_id}",
         }
         return status_titles.get(status, f"Incident at {camera_id}")
 
-    def _build_summary(self, status: str, name: str, camera_id: str,
+    def _build_summary(self, status: int, name: str, camera_id: str,
                        timestamp: str, visit_count: int, last_seen) -> str:
         """Build incident report summary."""
         parts = []
@@ -288,14 +287,12 @@ class ReportAgent(BaseAgent):
 
         return ". ".join(parts) + "."
 
-    def _build_recommendation(self, status: str, alert_level: str, visit_count: int) -> str:
+    def _build_recommendation(self, status: int, alert_level: str, visit_count: int) -> str:
         """Build recommendation based on status."""
         recommendations = {
-            "blacklist": "IMMEDIATE ACTION REQUIRED. Contact security team.",
-            "masked_unknown": "Manual verification recommended. Monitor closely.",
-            "intentionally_hidden": "Investigate. Person may be attempting to avoid detection.",
-            "unknown": "Manual verification recommended if in restricted area.",
-            "uncertain": "Low confidence match. Verify identity if important.",
+            Status.BLACKLIST: "IMMEDIATE ACTION REQUIRED. Contact security team.",
+            Status.MASKED_UNKNOWN: "Manual verification recommended. Monitor closely.",
+            Status.UNKNOWN: "Manual verification recommended if in restricted area.",
         }
 
         base = recommendations.get(status, "Monitor situation.")

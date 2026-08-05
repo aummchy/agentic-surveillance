@@ -36,10 +36,10 @@ def _mean_of(embeddings):
 class TestUpdateFaceMeanEmbedding:
     """Verify update_face builds correct update_ops (no double-count)."""
 
-    @patch("utils.db_utils.get_faces_collection")
+    @patch("utils.db_faces.get_faces_collection")
     def test_no_double_count_3_existing(self, mock_get_col):
         """With 3 existing embeddings, mean must be over 4 (not 5)."""
-        from utils.db_utils import update_face
+        from utils.db_faces import update_face
 
         existing_embs = [_make_emb(1), _make_emb(2), _make_emb(3)]
         new_emb = _make_emb(4)
@@ -79,10 +79,10 @@ class TestUpdateFaceMeanEmbedding:
         np.testing.assert_allclose(computed_mean, expected_mean, atol=1e-6,
                                    err_msg="mean_embedding was double-counted or wrong")
 
-    @patch("utils.db_utils.get_faces_collection")
+    @patch("utils.db_faces.get_faces_collection")
     def test_no_double_count_0_existing(self, mock_get_col):
         """With 0 existing embeddings, mean should equal the single new embedding."""
-        from utils.db_utils import update_face
+        from utils.db_faces import update_face
 
         new_emb = _make_emb(99)
         expected_mean = _mean_of([new_emb])
@@ -107,11 +107,11 @@ class TestUpdateFaceMeanEmbedding:
         computed_mean = update_ops_captured["$set"]["mean_embedding"]
         np.testing.assert_allclose(computed_mean, expected_mean, atol=1e-6)
 
-    @patch("utils.db_utils.get_faces_collection")
-    @patch("utils.db_utils.settings")
+    @patch("utils.db_faces.get_faces_collection")
+    @patch("utils.db_faces.settings")
     def test_uses_configurable_cap(self, mock_settings, mock_get_col):
         """$slice should use EMBEDDING_HISTORY_CAP from settings."""
-        from utils.db_utils import update_face
+        from utils.db_faces import update_face
 
         mock_settings.EMBEDDING_HISTORY_CAP = 50
 
@@ -140,11 +140,11 @@ class TestUpdateFaceMeanEmbedding:
         push = update_ops_captured["$push"]["embeddings"]
         assert push["$slice"] == -50, f"Expected $slice: -50, got {push['$slice']}"
 
-    @patch("utils.db_utils.get_faces_collection")
-    @patch("utils.db_utils.settings")
+    @patch("utils.db_faces.get_faces_collection")
+    @patch("utils.db_faces.settings")
     def test_cap_slicing(self, mock_settings, mock_get_col):
         """When existing + new exceeds cap, oldest embeddings should be trimmed."""
-        from utils.db_utils import update_face
+        from utils.db_faces import update_face
 
         mock_settings.EMBEDDING_HISTORY_CAP = 5
 
@@ -175,11 +175,11 @@ class TestUpdateFaceMeanEmbedding:
         computed_mean = update_ops_captured["$set"]["mean_embedding"]
         np.testing.assert_allclose(computed_mean, expected_mean, atol=1e-6)
 
-    @patch("utils.db_utils.get_faces_collection")
-    @patch("utils.db_utils.settings")
+    @patch("utils.db_faces.get_faces_collection")
+    @patch("utils.db_faces.settings")
     def test_cap_trims_oldest(self, mock_settings, mock_get_col):
         """With cap=3 and 5 existing + 1 new, oldest 3 should be dropped."""
-        from utils.db_utils import update_face
+        from utils.db_faces import update_face
 
         mock_settings.EMBEDDING_HISTORY_CAP = 3
 

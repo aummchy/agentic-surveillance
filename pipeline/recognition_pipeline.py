@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
 from config import settings
+from config.status import Status
 from pipeline.models import Track, QualityResult, MatchResult, DecisionResult
 from pipeline.quality_agent import compute_quality
-from pipeline.face import compute_face_ratio
+from pipeline.quality_agent import compute_face_ratio
 from utils.image_utils import crop_person
 from utils.embedding_utils import get_insightface
 
@@ -65,7 +66,7 @@ class RecognitionPipeline:
         from agents.matching_agent import run_matching_from_embedding
         from agents.recognition import RecognitionAgent
         from agents.memory import MemoryAgent
-        from agents.decision_agent import decide
+        from agents.policy import decide
 
         self._matching_fn = matching_fn or run_matching_from_embedding
         self._recognition_agent = recognition_agent or RecognitionAgent()
@@ -288,7 +289,7 @@ class RecognitionPipeline:
             "person_id": match.person_id,
             "camera_id": settings.CAMERA_ID,
             "similarity": match.similarity_score,
-            "status": "known" if match.matched else "unknown",
+            "status": Status.KNOWN if match.matched else Status.UNKNOWN,
         })
 
     def _run_recognition(self, track: Track, match: Optional[MatchResult],

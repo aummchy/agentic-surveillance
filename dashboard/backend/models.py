@@ -50,7 +50,7 @@ class EventResponse(BaseModel):
     track_id: str
     camera_id: str
     timestamp: datetime
-    status: str
+    status: int
     alert_level: str
     person_id: Optional[str] = None
     name: Optional[str] = None

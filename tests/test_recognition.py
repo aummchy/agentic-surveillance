@@ -18,6 +18,7 @@ from agents.scoring import compute_confidence, normalize_cosine, clip
 from agents.policy import PolicyAgent
 from pipeline.models import DecisionResult, MatchResult
 from config import settings
+from config.status import Status
 
 
 # ── Scorer unit tests ────────────────────────────────────────────
@@ -78,8 +79,8 @@ class TestRecognitionBands:
     def test_unknown_low_similarity(self):
         """sim=0.30, good quality, short dur -> unknown (below threshold + low conf)."""
         result = recognize(similarity=0.30, face_quality=0.8, track_duration=0.5)
-        assert result["status"] == "unknown", (
-            f"sim=0.30 should be 'unknown', got '{result['status']}'"
+        assert result["status"] == Status.UNKNOWN, (
+            f"sim=0.30 should be UNKNOWN, got {result['status']}"
         )
 
     def test_uncertain_below_threshold_with_max_boost(self):
@@ -88,8 +89,8 @@ class TestRecognitionBands:
             similarity=0.44, face_quality=1.0, track_duration=2.0,
             memory_context={"confidence_boost": 20},
         )
-        assert result["status"] == "uncertain", (
-            f"sim=0.44 with max boost should be 'uncertain', got '{result['status']}'"
+        assert result["status"] == Status.UNCERTAIN, (
+            f"sim=0.44 with max boost should be UNCERTAIN, got {result['status']}"
         )
 
     def test_known_with_good_match(self):
@@ -99,16 +100,16 @@ class TestRecognitionBands:
             memory_context={"confidence_boost": 10},
             margin=0.20,
         )
-        assert result["status"] == "known", (
-            f"sim=0.60 should be 'known', got '{result['status']}'"
+        assert result["status"] == Status.KNOWN, (
+            f"sim=0.60 should be KNOWN, got {result['status']}"
         )
         assert result["confidence"] >= 70
 
     def test_known_at_very_high_similarity(self):
         """sim=0.92 -> known (above threshold, very high confidence)."""
         result = recognize(similarity=0.92, face_quality=0.8, track_duration=1.0)
-        assert result["status"] == "known", (
-            f"sim=0.92 should be 'known', got '{result['status']}'"
+        assert result["status"] == Status.KNOWN, (
+            f"sim=0.92 should be KNOWN, got {result['status']}"
         )
         assert result["confidence"] >= 85
 
@@ -127,7 +128,7 @@ class TestRecognitionBands:
         result = recognize(
             similarity=0.60, face_quality=0.0, track_duration=1.0,
         )
-        assert result["status"] in ("known", "uncertain")
+        assert result["status"] in (Status.KNOWN, Status.UNCERTAIN)
 
     def test_memory_boost_small_effect(self):
         """Memory 10 vs 0 has a small positive effect on confidence."""
@@ -147,8 +148,8 @@ class TestRecognitionBands:
         result = recognize(
             similarity=0.44, face_quality=0.9, track_duration=1.0,
         )
-        assert result["status"] == "unknown", (
-            f"sim=0.44 with avg quality should be 'unknown', got '{result['status']}'"
+        assert result["status"] == Status.UNKNOWN, (
+            f"sim=0.44 with avg quality should be UNKNOWN, got {result['status']}"
         )
 
     def test_confidence_range_1_to_100(self):

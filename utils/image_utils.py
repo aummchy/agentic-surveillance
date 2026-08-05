@@ -3,6 +3,7 @@ import numpy as np
 import structlog
 from pathlib import Path
 from config import settings
+from config.status import Status
 
 logger = structlog.get_logger(__name__)
 
@@ -188,17 +189,17 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
         x1, y1, x2, y2 = map(int, track.person_box)
         color = (0, 0, 255)
         border_thickness = 3
-        is_verified = track.decision in ("authorized", "verified")
+        is_verified = track.decision in (Status.AUTHORIZED, Status.VERIFIED)
 
         if is_verified:
             color = (0, 255, 0)
             border_thickness = 4
-        elif track.decision == "known_visitor":
+        elif track.decision == Status.KNOWN_VISITOR:
             color = (0, 255, 255)
             border_thickness = 3
         elif track.decision is None:
             color = (255, 255, 0)
-        if track.is_masked or track.decision in ("masked_unknown", "intentionally_hidden", "blacklist"):
+        if track.is_masked or track.decision in (Status.MASKED_UNKNOWN, Status.HIDDEN, Status.BLACKLIST):
             color = (0, 0, 255)
 
         # Black outline for contrast on any background
@@ -212,19 +213,19 @@ def draw_annotations(frame: np.ndarray, tracks: list) -> np.ndarray:
             label += f" {name}"
 
         if track.decision:
-            if track.decision == "authorized":
+            if track.decision == Status.AUTHORIZED:
                 label += " [AUTHORIZED]"
-            elif track.decision == "verified":
+            elif track.decision == Status.VERIFIED:
                 label += " [VERIFIED]"
-            elif track.decision == "known_visitor":
+            elif track.decision == Status.KNOWN_VISITOR:
                 label += " [KNOWN VISITOR]"
-            elif track.decision == "blacklist":
+            elif track.decision == Status.BLACKLIST:
                 label += " [BLACKLIST]"
-            elif track.decision == "intentionally_hidden":
+            elif track.decision == Status.HIDDEN:
                 label += " [HIDDEN]"
-            elif track.decision in ("unknown", "masked_unknown"):
+            elif track.decision in (Status.UNKNOWN, Status.MASKED_UNKNOWN):
                 label += " [UNVERIFIED]"
-            elif track.decision == "uncertain":
+            elif track.decision == Status.UNCERTAIN:
                 label += " [UNCERTAIN]"
             else:
                 label += f" [{track.decision}]"

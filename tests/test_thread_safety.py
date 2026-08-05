@@ -20,6 +20,7 @@ import pytest
 from pipeline.track_state import TrackState
 from pipeline.models import Track
 from config import settings
+from config.status import Status
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -218,11 +219,11 @@ class TestPhase4_3_VisitMemoryRace:
 
         def worker(similarity):
             barrier.wait()
-            with patch("utils.db_utils.get_memory_collection",
+            with patch("utils.db_memory.get_memory_collection",
                        return_value=collection), \
-                 patch("utils.db_utils.settings") as mock_settings:
+                 patch("utils.db_memory.settings") as mock_settings:
                 mock_settings.MIN_VISIT_GAP_SECS = 0
-                update_visit_memory(person_id, "cam1", "known", similarity)
+                update_visit_memory(person_id, "cam1", Status.KNOWN, similarity)
 
         threads = [
             threading.Thread(target=worker, args=(i * 0.1,))
@@ -246,12 +247,12 @@ class TestPhase4_3_VisitMemoryRace:
         collection = FakeMemoryCollection(atomic=True)
         person_id = "bounded_history_person"
 
-        with patch("utils.db_utils.get_memory_collection",
+        with patch("utils.db_memory.get_memory_collection",
                    return_value=collection), \
-             patch("utils.db_utils.settings") as mock_settings:
+             patch("utils.db_memory.settings") as mock_settings:
             mock_settings.MIN_VISIT_GAP_SECS = 0
             for i in range(25):
-                update_visit_memory(person_id, "cam1", "known", i * 0.01)
+                update_visit_memory(person_id, "cam1", Status.KNOWN, i * 0.01)
 
         doc = collection._get(person_id)
         assert len(doc["similarity_history"]) <= 10, (
@@ -266,12 +267,12 @@ class TestPhase4_3_VisitMemoryRace:
         collection = FakeMemoryCollection(atomic=True)
         person_id = "dedup_cam_person"
 
-        with patch("utils.db_utils.get_memory_collection",
+        with patch("utils.db_memory.get_memory_collection",
                    return_value=collection), \
-             patch("utils.db_utils.settings") as mock_settings:
+             patch("utils.db_memory.settings") as mock_settings:
             mock_settings.MIN_VISIT_GAP_SECS = 0
             for _ in range(10):
-                update_visit_memory(person_id, "cam1", "known", 0.5)
+                update_visit_memory(person_id, "cam1", Status.KNOWN, 0.5)
 
         doc = collection._get(person_id)
         assert doc["typical_cameras"].count("cam1") == 1, (

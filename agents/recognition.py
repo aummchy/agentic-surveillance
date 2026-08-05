@@ -1,7 +1,7 @@
 """
 Phase 2.1 + 2.2 — Recognition Agent with Memory Context
 
-This module is now orchestration-only. All scoring logic lives in
+This module is orchestration-only. All scoring logic lives in
 agents/scoring.py, all tunables live in config/settings.py.
 
 Input:
@@ -19,7 +19,7 @@ Input:
 
 Output:
 {
-    "status": "known",
+    "status": 3,
     "confidence": 82,
     "reason": "Returning visitor, seen 5 times before. Borderline similarity but face quality is high."
 }
@@ -31,8 +31,13 @@ from agents.base import BaseAgent
 from agents.scoring import compute_confidence, is_match, confidence_status
 from pipeline.models import RecognitionResult
 from config import settings
+from config.status import Status, STATUS_LABELS
 
 logger = structlog.get_logger(__name__)
+
+# Face quality display bands (cosmetic, used only in reason strings)
+_QUALITY_GOOD_MIN = 0.55
+_QUALITY_USABLE_MIN = 0.25
 
 
 class RecognitionAgent(BaseAgent):
@@ -52,7 +57,6 @@ class RecognitionAgent(BaseAgent):
                 - face_quality (float): Quality score 0-1 (or None/0 for missing)
                 - track_duration (float): Seconds person was tracked
                 - memory_context (dict, optional): From Memory Agent
-                - top2 (float, optional): Second-best similarity
                 - margin (float, optional): Margin between top1 and top2
                 - name (str, optional): Person name for display
 
@@ -64,19 +68,19 @@ class RecognitionAgent(BaseAgent):
         face_quality = input_data.get("face_quality", 0.0)
         track_duration = input_data.get("track_duration", 0.0)
         memory_context = input_data.get("memory_context", {})
-        top2 = input_data.get("top2")
         margin = input_data.get("margin")
         name = input_data.get("name")
         track_id = input_data.get("track_id", "unknown")
 
-        result = self._decide(similarity, is_masked, face_quality, track_duration, memory_context, margin=margin, track_id=track_id)
+        result = self._decide(similarity, is_masked, face_quality,
+                              track_duration, memory_context,
+                              margin=margin, track_id=track_id)
 
         logger.info("recognition_decision",
                     track_id=track_id,
                     status=result.status,
                     confidence=result.confidence,
                     similarity=result.similarity,
-                    top2=top2,
                     margin=margin,
                     face_quality=face_quality,
                     track_duration=track_duration,
@@ -91,14 +95,12 @@ class RecognitionAgent(BaseAgent):
     def _decide(self, similarity: float, is_masked: bool,
                 face_quality: float, track_duration: float,
                 memory_context: Optional[Dict] = None,
-                margin: float = None,
+                margin: Optional[float] = None,
                 track_id: str = "unknown") -> RecognitionResult:
         """Core decision logic that delegates to the scorer module."""
         memory_boost = 0.0
         if memory_context:
             memory_boost = memory_context.get("confidence_boost", 0.0)
-
-        matched = is_match(similarity)
 
         confidence = compute_confidence(
             raw_cosine=similarity,
@@ -110,6 +112,7 @@ class RecognitionAgent(BaseAgent):
             track_id=track_id,
         )
 
+        matched = is_match(similarity)
         status = confidence_status(confidence, matched)
 
         return RecognitionResult(
@@ -119,17 +122,18 @@ class RecognitionAgent(BaseAgent):
             face_quality=face_quality,
             is_masked=is_masked,
             track_duration=track_duration,
-            reason=self._build_reason(status, similarity, face_quality, is_masked, memory_context),
+            reason=self._build_reason(status, similarity, face_quality,
+                                      is_masked, matched, memory_context),
         )
 
-    def _build_reason(self, status: str, similarity: float,
+    def _build_reason(self, status: int, similarity: float,
                       face_quality: float, is_masked: bool,
+                      matched: bool,
                       memory_context: Optional[Dict] = None) -> str:
         """Build a human-readable reason string."""
-        parts = [f"Decision: {status}"]
+        parts = [f"Decision: {STATUS_LABELS.get(status, str(status))}"]
 
         threshold = settings.MATCH_THRESHOLD
-        matched = similarity >= threshold
         if matched:
             parts.append(f"raw cosine={similarity:.3f}, above match threshold {threshold}")
         else:
@@ -137,9 +141,9 @@ class RecognitionAgent(BaseAgent):
 
         if face_quality is None or face_quality <= 0.0:
             parts.append("face quality unavailable")
-        elif face_quality >= 0.55:
+        elif face_quality >= _QUALITY_GOOD_MIN:
             parts.append("good face quality")
-        elif face_quality >= 0.25:
+        elif face_quality >= _QUALITY_USABLE_MIN:
             parts.append("usable face quality")
         else:
             parts.append("low face quality")
@@ -157,14 +161,28 @@ class RecognitionAgent(BaseAgent):
         return ". ".join(parts) + "."
 
 
+_recognition_agent = None
+_recognition_lock = None
+
+
+def _get_recognition_agent() -> RecognitionAgent:
+    global _recognition_agent, _recognition_lock
+    if _recognition_lock is None:
+        import threading
+        _recognition_lock = threading.Lock()
+    with _recognition_lock:
+        if _recognition_agent is None:
+            _recognition_agent = RecognitionAgent()
+        return _recognition_agent
+
+
 def recognize(similarity: float, is_masked: bool = False,
               face_quality: float = 0.0, track_duration: float = 0.0,
               memory_context: Optional[Dict] = None,
-              margin: float = None,
+              margin: Optional[float] = None,
               track_id: str = "unknown") -> dict:
     """Quick recognition without instantiating the agent."""
-    agent = RecognitionAgent()
-    return agent.run({
+    return _get_recognition_agent().run({
         "similarity": similarity,
         "is_masked": is_masked,
         "face_quality": face_quality,

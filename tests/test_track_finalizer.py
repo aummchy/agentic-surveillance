@@ -2,9 +2,10 @@ import pytest
 import time
 from unittest.mock import patch, MagicMock, call
 from pipeline.models import Track, DecisionResult
-from agents.decision_agent import decide
+from agents.policy import decide
 from agents.memory import MemoryAgent
 from agents.alert_agent import dispatch, should_send_alert
+from config.status import Status
 
 
 class TestFinalizationDecisionChain:
@@ -23,7 +24,7 @@ class TestFinalizationDecisionChain:
             "visit_count": 100, "last_seen": time.time() - 3600,
             "first_seen": time.time() - 63072000,
             "avg_similarity": 0.90, "typical_hours": [8, 9, 10],
-            "typical_cameras": ["cam_01"], "last_status": "authorized",
+            "typical_cameras": ["cam_01"], "last_status": Status.AUTHORIZED,
         }
 
         from agents.matching_agent import run_matching_from_embedding
@@ -37,7 +38,7 @@ class TestFinalizationDecisionChain:
         memory = MemoryAgent().run({
             "person_id": match.person_id, "camera_id": "cam_01",
             "similarity": match.similarity_score,
-            "status": "known" if match.matched else "unknown",
+            "status": Status.KNOWN if match.matched else Status.UNKNOWN,
         })
         from agents.recognition import RecognitionAgent
         recog = RecognitionAgent().run({
@@ -50,7 +51,7 @@ class TestFinalizationDecisionChain:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "authorized"
+        assert decision.status == Status.AUTHORIZED
         assert decision.should_register is False
 
     def test_unknown_person_triggers_registration(self, mock_vector_search, mock_get_or_create_memory):
@@ -73,7 +74,7 @@ class TestFinalizationDecisionChain:
         match = run_matching_from_embedding(track.embedding)
         memory = MemoryAgent().run({
             "person_id": None, "camera_id": "cam_01",
-            "similarity": 0.0, "status": "unknown",
+            "similarity": 0.0,             "status": Status.UNKNOWN,
         })
         from agents.recognition import RecognitionAgent
         recog = RecognitionAgent().run({
@@ -85,7 +86,7 @@ class TestFinalizationDecisionChain:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "unknown"
+        assert decision.status == Status.UNKNOWN
         assert decision.should_register is True
 
 
@@ -145,7 +146,7 @@ class TestVisitRecording:
         agent = MemoryAgent()
         agent.record_visit(
             person_id="p1", camera_id="cam_01",
-            status="known_visitor", similarity=0.75,
+            status=Status.KNOWN_VISITOR, similarity=0.75,
             is_masked=False, visit_action="recorded",
         )
         mock_update.assert_called_once()
@@ -155,7 +156,7 @@ class TestVisitRecording:
         agent = MemoryAgent()
         agent.record_visit(
             person_id=None, camera_id="cam_01",
-            status="unknown", similarity=0.0,
+            status=Status.UNKNOWN, similarity=0.0,
             is_masked=False, visit_action="recorded",
         )
         assert mock_update.called is False
@@ -166,7 +167,7 @@ class TestAlertDispatchConditions:
 
     def test_alert_dispatched_for_blacklist(self):
         decision = DecisionResult(
-            status="blacklist", alert_level="critical",
+            status=Status.BLACKLIST, alert_level="critical",
             should_alert=True, person_id="p_bad", name="Intruder",
             reason="Blacklisted person detected",
         )
@@ -175,7 +176,7 @@ class TestAlertDispatchConditions:
 
     def test_no_alert_for_authorized(self):
         decision = DecisionResult(
-            status="authorized", alert_level="none",
+            status=Status.AUTHORIZED, alert_level="none",
             should_alert=False, person_id="p1", name="Alice",
             reason="Authorized person",
         )
@@ -183,7 +184,7 @@ class TestAlertDispatchConditions:
 
     def test_alert_for_masked_unknown_loitering(self):
         decision = DecisionResult(
-            status="masked_unknown", alert_level="high",
+            status=Status.MASKED_UNKNOWN, alert_level="high",
             should_alert=True, name="Masked Person",
             reason="Masked unknown person loitering",
         )

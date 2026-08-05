@@ -7,7 +7,10 @@ All tunables come from config.settings — no hardcoded values here.
 import os
 import datetime
 import threading
+from dataclasses import dataclass
+from typing import Optional
 from config import settings
+from config.status import Status, STATUS_LABELS
 
 _CALC_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "logs", "calculation.log"
@@ -16,14 +19,31 @@ _calc_log_initialized = False
 _calc_log_lock = threading.Lock()
 
 
-def _ensure_log_dir():
-    log_dir = os.path.dirname(_CALC_LOG_PATH)
-    if not os.path.isdir(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
-
-
 def _ts() -> str:
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+@dataclass
+class ScoreBreakdown:
+    """All values needed for a calculation.log entry."""
+    track_id: str
+    raw_cosine: float
+    face_quality: Optional[float]
+    track_seconds: float
+    memory_boost: float
+    is_masked: bool
+    margin: Optional[float]
+    sim_norm: float
+    quality_norm: float
+    track_norm: float
+    memory_norm: float
+    margin_norm: float
+    mask_norm: float
+    base: float
+    adjusted: float
+    confidence: int
+    matched: bool
+    status: int
 
 
 def log_formula_header():
@@ -33,7 +53,7 @@ def log_formula_header():
         return
     if not getattr(settings, "ENABLE_CALC_LOG", False):
         return
-    _ensure_log_dir()
+    os.makedirs(os.path.dirname(_CALC_LOG_PATH), exist_ok=True)
     _calc_log_initialized = True
 
     lines = [
@@ -69,63 +89,57 @@ def log_formula_header():
         f.write("\n".join(lines))
 
 
-def _log_calculation(track_id: str, raw_cosine: float, face_quality,
-                     track_seconds: float, memory_boost: float,
-                     is_masked: bool, margin,
-                     sim_norm: float, quality_norm: float, track_norm: float,
-                     memory_norm: float, margin_norm: float, mask_norm: float,
-                     base: float, adjusted: float, confidence: int,
-                     matched: bool, status: str):
-    """Write a full calculation breakdown to calculation.log."""
-    if not getattr(settings, "ENABLE_CALC_LOG", False):
-        return
-    _ensure_log_dir()
+def _format_log_lines(b: ScoreBreakdown) -> list:
+    """Format a ScoreBreakdown into fixed-width log lines."""
     ts = _ts()
-    w_sim = settings.WEIGHT_SIMILARITY * sim_norm
-    w_qual = settings.WEIGHT_QUALITY * quality_norm
-    w_track = settings.WEIGHT_TRACK * track_norm
-    w_mem = settings.WEIGHT_MEMORY * memory_norm
-    w_mar = settings.WEIGHT_MARGIN * margin_norm
+    status_label = STATUS_LABELS.get(b.status, str(b.status))
+    w_sim = settings.WEIGHT_SIMILARITY * b.sim_norm
+    w_qual = settings.WEIGHT_QUALITY * b.quality_norm
+    w_track = settings.WEIGHT_TRACK * b.track_norm
+    w_mem = settings.WEIGHT_MEMORY * b.memory_norm
+    w_mar = settings.WEIGHT_MARGIN * b.margin_norm
 
-    mask_label = f"{mask_norm:.1f} (masked)" if is_masked else f"{mask_norm:.1f} (unmasked)"
-    mask_effect = f"× {1.0 - settings.MASK_PENALTY_MAX * mask_norm:.4f}" if is_masked else "→ no penalty"
+    mask_label = f"{b.mask_norm:.1f} (masked)" if b.is_masked else f"{b.mask_norm:.1f} (unmasked)"
+    mask_effect = f"× {1.0 - settings.MASK_PENALTY_MAX * b.mask_norm:.4f}" if b.is_masked else "→ no penalty"
 
-    quality_raw = f"{face_quality:.3f}" if face_quality is not None and face_quality > 0 else "N/A"
-    margin_raw = f"{margin:.3f}" if margin is not None else "N/A"
-    margin_norm_str = f"{margin_norm:.3f}" if margin is not None else "0.500"
+    quality_raw = f"{b.face_quality:.3f}" if b.face_quality is not None and b.face_quality > 0 else "N/A"
+    margin_raw = f"{b.margin:.3f}" if b.margin is not None else "N/A"
+    margin_norm_str = f"{b.margin_norm:.3f}" if b.margin is not None else "0.500"
 
-    # Fixed-width column layout
-    C1 = 20  # Component
-    C2 = 10  # Raw
-    C3 = 12  # Normalized
-    C4 = 28  # Weighted
-
+    C1, C2, C3, C4 = 20, 10, 12, 28
     sep = "─" * 72
 
-    lines = [
+    return [
         sep,
-        f"  track={track_id}  │  {ts}",
+        f"  track={b.track_id}  │  {ts}",
         sep,
         f"  {'Component':<{C1}} {'Raw':>{C2}} {'Normalized':>{C3}} {'Weighted':>{C4}}",
         f"  {'─'*C1} {'─'*C2} {'─'*C3} {'─'*C4}",
-        f"  {'Similarity':<{C1}} {raw_cosine:>{C2}.3f} {sim_norm:>{C3}.3f} {settings.WEIGHT_SIMILARITY}×{sim_norm:.3f} = {w_sim:.3f}",
-        f"  {'Face Quality':<{C1}} {quality_raw:>{C2}} {quality_norm:>{C3}.3f} {settings.WEIGHT_QUALITY}×{quality_norm:.3f} = {w_qual:.3f}",
-        f"  {'Track Duration':<{C1}} {track_seconds:>{C2-1}.1f}s {track_norm:>{C3}.3f} {settings.WEIGHT_TRACK}×{track_norm:.3f} = {w_track:.3f}",
-        f"  {'Memory Boost':<{C1}} {memory_boost:>{C2}.1f} {memory_norm:>{C3}.3f} {settings.WEIGHT_MEMORY}×{memory_norm:.3f} = {w_mem:.3f}",
-        f"  {'Margin':<{C1}} {margin_raw:>{C2}} {margin_norm_str:>{C3}} {settings.WEIGHT_MARGIN}×{margin_norm:.3f} = {w_mar:.3f}",
+        f"  {'Similarity':<{C1}} {b.raw_cosine:>{C2}.3f} {b.sim_norm:>{C3}.3f} {settings.WEIGHT_SIMILARITY}×{b.sim_norm:.3f} = {w_sim:.3f}",
+        f"  {'Face Quality':<{C1}} {quality_raw:>{C2}} {b.quality_norm:>{C3}.3f} {settings.WEIGHT_QUALITY}×{b.quality_norm:.3f} = {w_qual:.3f}",
+        f"  {'Track Duration':<{C1}} {b.track_seconds:>{C2-1}.1f}s {b.track_norm:>{C3}.3f} {settings.WEIGHT_TRACK}×{b.track_norm:.3f} = {w_track:.3f}",
+        f"  {'Memory Boost':<{C1}} {b.memory_boost:>{C2}.1f} {b.memory_norm:>{C3}.3f} {settings.WEIGHT_MEMORY}×{b.memory_norm:.3f} = {w_mem:.3f}",
+        f"  {'Margin':<{C1}} {margin_raw:>{C2}} {margin_norm_str:>{C3}} {settings.WEIGHT_MARGIN}×{b.margin_norm:.3f} = {w_mar:.3f}",
         f"  {'─'*C1} {'─'*C2} {'─'*C3} {'─'*C4}",
-        f"  BASE = {w_sim:.3f} + {w_qual:.3f} + {w_track:.3f} + {w_mem:.3f} + {w_mar:.3f} = {base:.3f}",
+        f"  BASE = {w_sim:.3f} + {w_qual:.3f} + {w_track:.3f} + {w_mem:.3f} + {w_mar:.3f} = {b.base:.3f}",
         f"  MASK = {mask_label} {mask_effect}",
-        f"  ADJUSTED = {base:.3f} × {1.0 - settings.MASK_PENALTY_MAX * mask_norm:.4f} = {adjusted:.3f}",
+        f"  ADJUSTED = {b.base:.3f} × {1.0 - settings.MASK_PENALTY_MAX * b.mask_norm:.4f} = {b.adjusted:.3f}",
         f"  {'─'*70}",
-        f"  CONFIDENCE = 1 + 99 × {adjusted:.3f} = {confidence}",
-        f"  STATUS = {status}  (matched={str(matched).lower()}, threshold={settings.MATCH_THRESHOLD})",
+        f"  CONFIDENCE = 1 + 99 × {b.adjusted:.3f} = {b.confidence}",
+        f"  STATUS = {status_label}  (matched={str(b.matched).lower()}, threshold={settings.MATCH_THRESHOLD})",
         sep,
         "",
     ]
 
+
+def _log_calculation(b: ScoreBreakdown):
+    """Write a full calculation breakdown to calculation.log."""
+    if not getattr(settings, "ENABLE_CALC_LOG", False):
+        return
+    os.makedirs(os.path.dirname(_CALC_LOG_PATH), exist_ok=True)
+    lines = _format_log_lines(b)
+
     with _calc_log_lock:
-        # Basic rotation: truncate if file exceeds max size
         max_bytes = getattr(settings, "CALC_LOG_MAX_SIZE_MB", 10) * 1024 * 1024
         try:
             if os.path.exists(_CALC_LOG_PATH) and os.path.getsize(_CALC_LOG_PATH) > max_bytes:
@@ -149,7 +163,7 @@ def normalize_cosine(raw_cosine: float) -> float:
     )
 
 
-def normalize_quality(face_quality: float | None) -> float:
+def normalize_quality(face_quality: Optional[float]) -> float:
     """Map quality to [0..1]. None or 0.0 -> default fallback."""
     if face_quality is None or face_quality <= 0.0:
         return settings.DEFAULT_FACE_QUALITY
@@ -171,7 +185,7 @@ def normalize_mask(is_masked: bool) -> float:
     return 1.0 if is_masked else 0.0
 
 
-def normalize_margin(margin: float | None) -> float:
+def normalize_margin(margin: Optional[float]) -> float:
     """Map margin [0..MARGIN_NORM_MAX] -> [0..1]. None -> 0.5 (neutral)."""
     if margin is None:
         return 0.5
@@ -180,11 +194,11 @@ def normalize_margin(margin: float | None) -> float:
 
 def compute_confidence(
     raw_cosine: float,
-    face_quality: float | None,
+    face_quality: Optional[float],
     track_seconds: float,
     memory_boost: float,
     is_masked: bool,
-    margin: float | None = None,
+    margin: Optional[float] = None,
     track_id: str = "unknown"
 ) -> int:
     """Compute confidence score 1-100 from normalized components."""
@@ -204,12 +218,12 @@ def compute_confidence(
     )
 
     adjusted = base * (1.0 - settings.MASK_PENALTY_MAX * mask_norm)
-    confidence = int(round(1 + 99 * clip(adjusted, 0.0, 1.0)))
+    confidence = round(1 + 99 * clip(adjusted, 0.0, 1.0))
 
     matched = is_match(raw_cosine)
     status = confidence_status(confidence, matched)
 
-    _log_calculation(
+    _log_calculation(ScoreBreakdown(
         track_id=track_id,
         raw_cosine=raw_cosine,
         face_quality=face_quality,
@@ -228,7 +242,7 @@ def compute_confidence(
         confidence=confidence,
         matched=matched,
         status=status,
-    )
+    ))
 
     return confidence
 
@@ -238,21 +252,21 @@ def is_match(raw_cosine: float) -> bool:
     return raw_cosine >= settings.MATCH_THRESHOLD
 
 
-def confidence_status(confidence: int, matched: bool) -> str:
-    """Map confidence + match gate -> status string.
+def confidence_status(confidence: int, matched: bool) -> int:
+    """Map confidence + match gate -> Status enum value.
 
-    matched=True  + confidence >= KNOWN_MIN   -> "known"
-    matched=True  + confidence >= UNCERTAIN_MIN -> "uncertain"
-    matched=True  + confidence <  UNCERTAIN_MIN -> "unknown"
-    matched=False + confidence >= UNCERTAIN_MIN -> "uncertain"
-    matched=False + confidence <  UNCERTAIN_MIN -> "unknown"
+    matched=True  + confidence >= KNOWN_MIN   -> Status.KNOWN
+    matched=True  + confidence >= UNCERTAIN_MIN -> Status.UNCERTAIN
+    matched=True  + confidence <  UNCERTAIN_MIN -> Status.UNKNOWN
+    matched=False + confidence >= UNCERTAIN_MIN -> Status.UNCERTAIN
+    matched=False + confidence <  UNCERTAIN_MIN -> Status.UNKNOWN
     """
     if matched:
         if confidence >= settings.CONFIDENCE_KNOWN_MIN:
-            return "known"
-        elif confidence >= settings.CONFIDENCE_UNCERTAIN_MIN:
-            return "uncertain"
-        return "unknown"
+            return Status.KNOWN
+        if confidence >= settings.CONFIDENCE_UNCERTAIN_MIN:
+            return Status.UNCERTAIN
+        return Status.UNKNOWN
     if confidence >= settings.CONFIDENCE_UNCERTAIN_MIN:
-        return "uncertain"
-    return "unknown"
+        return Status.UNCERTAIN
+    return Status.UNKNOWN

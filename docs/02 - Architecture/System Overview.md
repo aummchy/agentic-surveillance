@@ -69,9 +69,8 @@ This decoupling ensures the camera loop **never blocks** on slow I/O (MongoDB, C
 | `agents/finalizer.py` | Final embedding retry on track expiry |
 | `agents/timing.py` | Thread-safe timing diagnostics |
 | `pipeline/tracker.py` | YOLO + ByteTrack |
-| `pipeline/face.py` | Face ratio calculation |
 | `pipeline/recognition_pipeline.py` | Orchestrates face detect → quality → embed → match → decide |
-| `pipeline/quality_agent.py` | Face quality scoring (validity gates + weighted composite) |
+| `pipeline/quality_agent.py` | Face quality scoring + compute_face_ratio() |
 | `pipeline/track_state.py` | Thread-safe track dictionary |
 | `pipeline/models.py` | Data classes (Track, MatchResult, DecisionResult, etc.) |
 | `config/settings.py` | All configuration loading + validation |

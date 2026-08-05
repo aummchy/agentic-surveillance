@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pipeline.recognition_pipeline import RecognitionPipeline, PipelineResult, RecognitionMetrics
 from pipeline.models import Track, QualityResult, MatchResult, DecisionResult
+from config.status import Status
 
 _EMBEDDING_512 = np.random.rand(512).astype(np.float32)
 
@@ -117,9 +118,9 @@ class TestPipelineFullFlow:
     def test_known_visitor(self):
         mock_match = MagicMock(return_value=_make_match())
         mock_mem = MagicMock(return_value={"visit_count": 12, "is_known": True, "confidence_boost": 5})
-        mock_recog = MagicMock(return_value={"status": "known", "confidence": 87, "similarity": 0.65})
+        mock_recog = MagicMock(return_value={"status": Status.KNOWN, "confidence": 87, "similarity": 0.65})
         mock_decide = MagicMock(return_value=DecisionResult(
-            status="verified", alert_level="low", should_alert=False))
+            status=Status.VERIFIED, alert_level="low", should_alert=False))
 
         pipe = RecognitionPipeline(
             matching_fn=mock_match,
@@ -130,16 +131,16 @@ class TestPipelineFullFlow:
         result = pipe.run(_frame(), _track())
         assert result.skip_reason == "success"
         assert result.match and result.match.name == "aum"
-        assert result.recognition and result.recognition["status"] == "known"
-        assert result.decision and result.decision.status == "verified"
+        assert result.recognition and result.recognition["status"] == Status.KNOWN
+        assert result.decision and result.decision.status == Status.VERIFIED
         assert result.memory and result.memory["visit_count"] == 12
         assert result.embedding is not None
         assert result.quality and result.quality.is_valid
 
     def test_no_match(self):
         mock_match = MagicMock(return_value=MatchResult(matched=False))
-        mock_recog = MagicMock(return_value={"status": "unknown", "confidence": 15, "similarity": 0.0})
-        mock_decide = MagicMock(return_value=DecisionResult(status="unknown", alert_level="none"))
+        mock_recog = MagicMock(return_value={"status": Status.UNKNOWN, "confidence": 15, "similarity": 0.0})
+        mock_decide = MagicMock(return_value=DecisionResult(status=Status.UNKNOWN, alert_level="none"))
 
         pipe = RecognitionPipeline(
             matching_fn=mock_match,
@@ -149,14 +150,14 @@ class TestPipelineFullFlow:
         result = pipe.run(_frame(), _track())
         assert result.skip_reason == "success"
         assert result.match and result.match.matched is False
-        assert result.recognition["status"] == "unknown"
-        assert result.decision.status == "unknown"
+        assert result.recognition["status"] == Status.UNKNOWN
+        assert result.decision.status == Status.UNKNOWN
 
     def test_injected_agents_are_called(self):
         mock_match = MagicMock(return_value=_make_match())
         mock_mem = MagicMock(return_value={"visit_count": 5, "is_known": True})
-        mock_recog = MagicMock(return_value={"status": "known", "confidence": 80})
-        mock_decide = MagicMock(return_value=DecisionResult(status="verified", alert_level="low"))
+        mock_recog = MagicMock(return_value={"status": Status.KNOWN, "confidence": 80})
+        mock_decide = MagicMock(return_value=DecisionResult(status=Status.VERIFIED, alert_level="low"))
 
         pipe = RecognitionPipeline(
             matching_fn=mock_match,
@@ -174,8 +175,8 @@ class TestPipelineFullFlow:
     def test_metrics_populated(self):
         mock_match = MagicMock(return_value=_make_match())
         mock_mem = MagicMock(return_value={"visit_count": 1, "is_known": True, "confidence_boost": 0})
-        mock_recog = MagicMock(return_value={"status": "known", "confidence": 70, "similarity": 0.65})
-        mock_decide = MagicMock(return_value=DecisionResult(status="verified", alert_level="low"))
+        mock_recog = MagicMock(return_value={"status": Status.KNOWN, "confidence": 70, "similarity": 0.65})
+        mock_decide = MagicMock(return_value=DecisionResult(status=Status.VERIFIED, alert_level="low"))
 
         pipe = RecognitionPipeline(
             matching_fn=mock_match,

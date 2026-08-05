@@ -1,55 +1,13 @@
 import os
 import json
 import logging
-import logging.handlers
 import structlog
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
-
-
-# ── ANSI Colors ─────────────────────────────────────────────────
-class Colors:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    RED = "\033[31m"
-    BLUE = "\033[34m"
-    CYAN = "\033[36m"
-    MAGENTA = "\033[35m"
-    WHITE = "\033[37m"
-
-    # Event prefix colors
-    PREFIX = {
-        "CAM": CYAN,
-        "MATCH": BLUE,
-        "MEMORY": MAGENTA,
-        "RECOG": CYAN,
-        "POLICY": GREEN,
-        "VISIT": MAGENTA,
-        "FINAL": GREEN,
-        "FACE": YELLOW,
-        "ALERT": RED,
-        "SHUTDOWN": DIM,
-    }
-
-    # Status colors
-    STATUS = {
-        "KNOWN": GREEN,
-        "VERIFIED": GREEN,
-        "AUTHORIZED": GREEN,
-        "KNOWN_VISITOR": GREEN,
-        "UNCERTAIN": YELLOW,
-        "UNKNOWN": RED,
-        "BLACKLIST": RED,
-        "MASKED_UNKNOWN": RED,
-        "INTENTIONALLY_HIDDEN": RED,
-    }
+from config.logging_setup import setup_logging, TERMINAL_ALLOWLIST  # noqa: E402, F401
 
 
 # ── JSONC Loader ────────────────────────────────────────────────
@@ -122,274 +80,6 @@ def _get(env_key: str, config_key: str, default, cast=str):
     return cast(_config.get(config_key, default))
 
 
-# ── Terminal allowlist ──
-TERMINAL_ALLOWLIST = frozenset({
-    "startup_complete", "camera_started", "camera_stopped", "camera_reconnected",
-    "track_finalized",
-    "recognition_decision",
-    "match_found",
-    "memory_lookup",
-    "visit_recorded", "visit_suppressed_duplicate",
-    "alert", "alert_dispatched", "alert_broadcast_sent", "progressive_critical_alert",
-    "policy_decision",
-    "duplicate_suppressed",
-    "face_crop_saved",
-    "pipeline_stats",
-    "no_embedding_after_retries",
-    "llm_connect_failed", "llm_unavailable",
-    "shutdown",
-})
-
-
-def _fmt_opt(v):
-    """Format optional float for terminal display."""
-    return "---" if v is None else f"{v:.3f}"
-
-
-class CompactTerminalRenderer:
-    """Operator-friendly one-line renderer with ANSI colors."""
-
-    # Map event names to prefix labels
-    PREFIX_MAP = {
-        "camera_started": "CAM", "camera_stopped": "CAM", "camera_reconnected": "CAM",
-        "recognition_decision": "RECOG", "match_found": "MATCH", "memory_lookup": "MEMORY",
-        "policy_decision": "POLICY", "visit_recorded": "VISIT", "track_finalized": "FINAL",
-        "face_crop_saved": "FACE",         "no_embedding_after_retries": "FACE",
-        "pipeline_stats": "PERF",
-        "progressive_critical_alert": "ALERT", "alert": "ALERT", "alert_dispatched": "ALERT",
-        "llm_connect_failed": "LLM", "llm_unavailable": "LLM",
-        "shutdown": "SHUTDOWN",
-    }
-
-    FORMATS = {
-        "camera_started": "{_pfx} source={source} backend={backend} res={resolution} yolo={yolo_model} device={yolo_device} face={face_model}",
-        "camera_stopped": "{_pfx} stopped",
-        "camera_reconnected": "{_pfx} reconnected res={resolution}",
-        "recognition_decision": (
-            "{_pfx} {_trk} {name:<10} {_status} "
-            "sim={_sim} top2={_top2} gap={_gap} q={_quality} dur={_duration}s conf={confidence}"
-        ),
-        "match_found": "{_pfx} {_trk} {name:<10} sim={_sim} top2={_top2} gap={_gap} verified={verified} tags={tags}",
-        "memory_lookup": "{_pfx} {_trk} {person_id:<12} visits={visit_count} known={is_known} boost={confidence_boost}",
-        "policy_decision": "{_pfx} {_trk} {_status} alert={alert_level} {_alert_flag} vis={visit_count}",
-        "visit_recorded": "{_pfx} {display_id} {visit_action} total={visit_count}",
-        "track_finalized": (
-            "{_pfx} {_trk} {name:<10} {_status} "
-            "sim={_sim} top2={_top2} gap={_gap} conf={confidence} "
-            "frames={total_frames_seen} face={frames_with_detectable_face} vis={visit_count}"
-        ),
-        "face_crop_saved": "{_pfx} saved track={track_id} path={path}",
-        "no_embedding_after_retries": "{_pfx} no_embedding track={track_id} vis={visibility} frames={frames_seen}",
-        "progressive_critical_alert": "{_pfx} CRITICAL {name} reason={reason}",
-        "alert": "{_pfx} {_status} track={track_id} name={name} level={alert_level} summary={summary}",
-        "alert_dispatched": "{_pfx} {_status} name={name} level={alert_level}",
-        "llm_connect_failed": "{_pfx} unavailable model={model} url={url}",
-        "llm_unavailable": "{_pfx} unavailable model={model} url={url}",
-        "pipeline_stats": "{_pfx} FPS: {fps} | tracker(avg): {tracker_avg} ms | tracker(max): {tracker_max} ms | bt={n_bt} drawn={n_drawn}",
-        "shutdown": "{_pfx} {reason}",
-    }
-
-    def __call__(self, logger, method_name, event_dict):
-        event = event_dict.get("event", "")
-        show = event in TERMINAL_ALLOWLIST
-        if method_name in ("warning", "error", "critical"):
-            show = True
-        if not show:
-            return ""
-        return self._format(event_dict)
-
-    def _format(self, event_dict):
-        d = dict(event_dict)
-        ts = d.get("timestamp", "")[:19]
-        d["ts"] = ts
-
-        event = d.get("event", "")
-
-        # Build colored prefix
-        prefix = self.PREFIX_MAP.get(event, event[:5].upper())
-        pfx_color = Colors.PREFIX.get(prefix, Colors.WHITE)
-        d["_pfx"] = f"{ts} {pfx_color}{prefix:<7}{Colors.RESET}"
-
-        d["_trk"] = f"trk={d['byte_track_id']}" if "byte_track_id" in d else "trk=---"
-
-        # Build colored status
-        status = d.get("status")
-        if isinstance(status, str):
-            status = status.upper()
-            d["status"] = status
-            status_color = Colors.STATUS.get(status, Colors.WHITE)
-            d["_status"] = f"{status_color}{status:<12}{Colors.RESET}"
-        else:
-            d["_status"] = ""
-
-        # Format float fields
-        d["_sim"] = _fmt_opt(d.get("similarity"))
-        d["_top2"] = _fmt_opt(d.get("top2"))
-        d["_gap"] = _fmt_opt(d.get("margin"))
-
-        # Format face quality (default: ---)
-        quality = d.get("face_quality") or d.get("quality")
-        d["_quality"] = f"{quality:.2f}" if quality is not None and quality > 0 else "---"
-
-        # Format duration (default: ---)
-        duration = d.get("track_duration") or d.get("duration")
-        d["_duration"] = f"{duration:.0f}" if duration is not None else "---"
-
-        # Format visit_action (default: skipped)
-        d["visit_action"] = d.get("visit_action") or "skipped"
-
-        # Format alert flag for policy_decision
-        alert_flag = "ALERT" if d.get("should_alert") else "ok"
-        flag_color = Colors.RED if d.get("should_alert") else Colors.GREEN
-        d["_alert_flag"] = f"{flag_color}{alert_flag}{Colors.RESET}"
-
-        # Format display_id for visit_recorded (prefer name, fallback to short person_id)
-        d["display_id"] = d.get("name") or (d.get("person_id") or "???")[:12]
-
-        # Format visit_count (default: 0)
-        d["visit_count"] = d.get("visit_count", 0)
-
-        # Name fallback for identity events
-        if event in ("track_finalized", "recognition_decision"):
-            name = d.get("name")
-            if not name:
-                status_val = d.get("status", "")
-                name = "unknown" if isinstance(status_val, str) and status_val.upper() == "UNKNOWN" else (d.get("person_id") or "???")[:8]
-            d["name"] = name
-
-        fmt = self.FORMATS.get(event)
-        if fmt:
-            try:
-                return fmt.format(**d)
-            except (KeyError, IndexError):
-                pass
-
-        # Default compact fallback
-        keys = [k for k in ("status", "similarity", "top2", "margin",
-                            "person_id", "error", "reason", "count", "total",
-                            "track_id", "confidence", "action")
-                if k in d and k != "event"]
-        kv = " ".join(f"{k}={d[k]!r}" for k in keys)
-        return f"{ts} {event:<14} {kv}" if kv else f"{ts} {event}"
-
-
-class JSONFileRenderer:
-    """Full structured JSON for forensic log file."""
-    def __call__(self, logger, method_name, event_dict):
-        return json.dumps(event_dict, default=str)
-
-
-class _BlankFilter(logging.Filter):
-    """Drop blank log records and events not in terminal allowlist."""
-    def filter(self, record):
-        # Get event name from structlog record (msg is a dict for structlog)
-        msg = getattr(record, 'msg', None)
-        event = msg.get('event', '') if isinstance(msg, dict) else None
-        # If event is not in allowlist and not a warning/error/critical, suppress
-        if event and event not in TERMINAL_ALLOWLIST and record.levelno < logging.WARNING:
-            return False
-        # Check if message is blank after rendering
-        msg_str = record.getMessage()
-        return bool(msg_str and msg_str.strip())
-
-
-def setup_logging():
-    """Configure 3-tier logging: compact terminal, JSON forensic file, verbose debug file.
-    Idempotent — safe to call multiple times."""
-    if getattr(logging.root, '_surveillance_logging_configured', False):
-        return
-    logging.root._surveillance_logging_configured = True
-
-    LOG_DIR.mkdir(exist_ok=True)
-
-    # ── Console handler — INFO+, compact terminal output ──
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    console.addFilter(_BlankFilter())
-    console.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            CompactTerminalRenderer(),
-        ],
-    ))
-    logging.root.addHandler(console)
-
-    # ── JSON file handler — DEBUG+, full structured JSON ──
-    json_handler = logging.handlers.RotatingFileHandler(
-        LOG_DIR / "surveillance.jsonl",
-        maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    json_handler.setLevel(logging.DEBUG)
-    json_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            JSONFileRenderer(),
-        ],
-    ))
-    logging.root.addHandler(json_handler)
-
-    # ── Debug verbose file — DEBUG+, full context ──
-    debug_handler = logging.handlers.RotatingFileHandler(
-        LOG_DIR / "surveillance.debug.log",
-        maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8",
-    )
-    debug_handler.setLevel(logging.DEBUG)
-    debug_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.dev.ConsoleRenderer(),
-        ],
-    ))
-    logging.root.addHandler(debug_handler)
-
-    # Silence noisy PyMongo/Motor driver logs
-    for name in ("pymongo", "pymongo.topology", "pymongo.pool",
-                 "pymongo.command", "pymongo.server"):
-        logging.getLogger(name).setLevel(logging.WARNING)
-
-    # Silence InsightFace model loading spam (keep warnings)
-    for name in ("insightface", "insightface.utils", "insightface.utils.face_align"):
-        logging.getLogger(name).setLevel(logging.WARNING)
-
-    # Silence Cloudinary connection pool warning
-    logging.getLogger("cloudinary").setLevel(logging.WARNING)
-
-    logging.root.setLevel(logging.DEBUG)
-
-    def add_byte_track_id(logger, method_name, event_dict):
-        track_id = event_dict.get("track_id")
-        if isinstance(track_id, str):
-            try:
-                parts = track_id.split("_")
-                if len(parts) >= 4:
-                    # New format: {camera}_{epoch}_{bt_id}_{generation}
-                    event_dict["byte_track_id"] = str(int(parts[-2]))
-                elif len(parts) >= 3:
-                    # Old format: {camera}_{epoch}_{bt_id}
-                    event_dict["byte_track_id"] = str(int(parts[-1]))
-                else:
-                    event_dict["byte_track_id"] = track_id
-            except (ValueError, IndexError):
-                event_dict["byte_track_id"] = "?"
-        return event_dict
-
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            add_byte_track_id,
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-
 setup_logging()
 
 logger = structlog.get_logger("config")
@@ -428,12 +118,7 @@ _log_effective_settings()
 
 
 def _warn_duplicate_config_keys():
-    """Warn when a setting exists in BOTH .env and config.jsonc.
-
-    .env wins silently, so a duplicate means edits to config.jsonc are
-    ignored. Catch it at startup instead of debugging why a change
-    had no effect.
-    """
+    """Warn when a setting exists in BOTH .env and config.jsonc."""
     for key in sorted(_config.keys()):
         if os.getenv(key) is not None:
             logger.warning("config_duplicate_key",
@@ -527,23 +212,11 @@ TWILIO_FROM = os.getenv("TWILIO_FROM", "")
 ALERT_SMS_TO = os.getenv("ALERT_SMS_TO", "")
 
 # ── Model / Pipeline ───────────────────────────────────────────
-# YOLO_MODEL: PyTorch (.pt) or OpenVINO IR (_openvino_model/) path.
-# YOLO_DEVICE: Device string passed to Ultralytics model.track().
-#   For PyTorch models: "cpu" or CUDA device (e.g. "0").
-#   For OpenVINO IR models: must be "cpu" (Ultralytics requirement).
-#   The actual OpenVINO accelerator is controlled by OPENVINO_DEVICE below.
-# Export:  yolo export model=models/yolov8s.pt format=openvino half=True
-# Override via env:  $env:YOLO_MODEL="models/yolov8s.pt"; $env:YOLO_DEVICE="cpu"
 YOLO_MODEL = _get("YOLO_MODEL", "YOLO_MODEL", "models/yolov8s_openvino_model/")
 YOLO_DEVICE = _get("YOLO_DEVICE", "YOLO_DEVICE", "cpu")
 INSIGHTFACE_MODEL = _get("INSIGHTFACE_MODEL", "INSIGHTFACE_MODEL", "buffalo_l")
 INSIGHTFACE_DET_SIZE = _get("INSIGHTFACE_DET_SIZE", "INSIGHTFACE_DET_SIZE", 640, int)
 INSIGHTFACE_PROVIDER = _get("INSIGHTFACE_PROVIDER", "INSIGHTFACE_PROVIDER", "CPUExecutionProvider")
-
-# OPENVINO_DEVICE: OpenVINO accelerator when using an OpenVINO IR model.
-#   Valid values: "CPU", "GPU", "NPU", "AUTO" (let OpenVINO decide).
-#   Only applies when YOLO_MODEL points to an OpenVINO export.
-#   Override via env var or .env:  OPENVINO_DEVICE=GPU
 OPENVINO_DEVICE = _get("OPENVINO_DEVICE", "OPENVINO_DEVICE", "GPU")
 
 # ── Detection / Tracking ───────────────────────────────────────
@@ -657,17 +330,16 @@ ALERT_CHANNELS = _get("ALERT_CHANNELS", "ALERT_CHANNELS", ["console", "webhook"]
 ALERT_COOLDOWN_SECS = _get("ALERT_COOLDOWN_SECS", "ALERT_COOLDOWN_SECS", 60, float)
 
 # ── Camera ─────────────────────────────────────────────────────
-# CAMERA_SOURCE: RTSP URL string (e.g. "rtsp://192.168.1.10:554/stream")
-#   OR integer device index (e.g. 0 for local webcam).
-#   Takes precedence over CAMERA_INDEX if set.
 CAMERA_SOURCE = _get("CAMERA_SOURCE", "CAMERA_SOURCE", "")
 CAMERA_INDEX = _get("CAMERA_INDEX", "CAMERA_INDEX", 0, int)
 FRAME_WIDTH = _get("FRAME_WIDTH", "FRAME_WIDTH", 1280, int)
 FRAME_HEIGHT = _get("FRAME_HEIGHT", "FRAME_HEIGHT", 720, int)
 FRAME_SKIP = _get("FRAME_SKIP", "FRAME_SKIP", 2, int)
+BROADCAST_WIDTH = _get("BROADCAST_WIDTH", "BROADCAST_WIDTH", 640, int)
+BROADCAST_HEIGHT = _get("BROADCAST_HEIGHT", "BROADCAST_HEIGHT", 360, int)
+ALLOWED_ORIGINS = _get("ALLOWED_ORIGINS", "ALLOWED_ORIGINS",
+                        ["http://localhost:5173", "http://localhost:3000"], list)
 CAMERA_ID = _get("CAMERA_ID", "CAMERA_ID", "cam_01")
-# CAMERA_BACKEND: Video capture backend — "dshow" (DirectShow), "msmf", or "" (auto).
-# Use "dshow" on Windows if MSMF drops frames (error -1072875772).
 CAMERA_BACKEND = _get("CAMERA_BACKEND", "CAMERA_BACKEND", "")
 
 # ── LLM (Ollama) ──────────────────────────────────────────────

@@ -5,12 +5,12 @@ import threading
 import concurrent.futures
 import numpy as np
 from config import settings
+from config.status import Status, RESOLVED_STATUSES
 from pipeline.tracker import track_persons
 from pipeline.track_state import TrackState
 from pipeline.models import Track
 from pipeline.recognition_pipeline import RecognitionPipeline
 from utils.image_utils import draw_annotations, save_image, resolve_track_image_url, compute_iou
-from agents.policy import RESOLVED_STATUSES
 from agents.timing import TimingCollector
 
 logger = structlog.get_logger(__name__)
@@ -205,7 +205,7 @@ class CameraAgent:
                     should_skip = False
                     if already_resolved or high_confidence:
                         should_skip = True
-                    elif track.last_recognition_status in ("unknown", "uncertain"):
+                    elif track.last_recognition_status in (Status.UNKNOWN, Status.UNCERTAIN):
                         has_similarity = (
                             track.pending_match_result
                             and track.pending_match_result.similarity_score > 0
@@ -217,11 +217,15 @@ class CameraAgent:
                             else:
                                 should_skip = True
                         else:
-                            quality_improved = track.best_face_score > (
-                                track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT
-                            )
-                            if not quality_improved:
-                                should_skip = True
+                            # Only throttle if we've actually detected a face before.
+                            # If best_face_score is 0, no face was ever found —
+                            # always re-run recognition to attempt detection.
+                            if track.best_face_score > 0:
+                                quality_improved = track.best_face_score > (
+                                    track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT
+                                )
+                                if not quality_improved:
+                                    should_skip = True
 
                     if should_skip:
                         if settings.DEBUG_RECOGNITION:

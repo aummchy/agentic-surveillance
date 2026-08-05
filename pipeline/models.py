@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from config.status import Status
+
 
 class DedupStatus(Enum):
     MERGED = "merged"
@@ -37,7 +39,7 @@ class Track:
     is_masked: bool = False
     embedding: Optional[list] = None
     embedding_det_score: float = 0.0  # Detection score for quality-gated updates
-    decision: Optional[str] = None
+    decision: Optional[int] = None
     confidence: int = 0  # Highest confidence seen — only upgrades, never downgrades
     person_name: Optional[str] = None  # Name from match result
     person_name_similarity: float = 0.0  # Highest sim for name — only upgrades, never downgrades
@@ -45,7 +47,7 @@ class Track:
     last_alert_time: float = 0.0  # Timestamp of last alert dispatch (for per-track cooldown)
     image_url: Optional[str] = None  # Cloudinary URL (set after upload)
     last_recognition_quality: float = 0.0     # face quality at last recognition
-    last_recognition_status: str = ""         # "known" / "unknown" / "uncertain"
+    last_recognition_status: int = Status.UNKNOWN  # Status enum value
     last_recognition_time: float = 0.0        # timestamp of last recognition (for time-based rescan)
     rescan_attempts: int = 0                  # how many re-scan attempts used
     expired_reported: bool = False
@@ -153,13 +155,13 @@ class TrackSnapshot:
     is_masked: bool = False
     embedding: Optional[list] = None
     embedding_det_score: float = 0.0
-    decision: Optional[str] = None
+    decision: Optional[int] = None
     confidence: int = 0
     person_name: Optional[str] = None
     alerted: bool = False
     image_url: Optional[str] = None
     last_recognition_quality: float = 0.0
-    last_recognition_status: str = ""
+    last_recognition_status: int = Status.UNKNOWN
     last_recognition_time: float = 0.0
     rescan_attempts: int = 0
     expired_reported: bool = False
@@ -213,7 +215,7 @@ class MatchResult:
 
 @dataclass
 class DecisionResult:
-    status: str = "unknown"
+    status: int = Status.UNKNOWN
     alert_level: str = "none"
     person_id: Optional[str] = None
     name: Optional[str] = None
@@ -230,7 +232,7 @@ class RecognitionResult:
     Instead of a simple if/else on similarity, the agent considers
     multiple factors to make a structured decision.
     """
-    status: str = "unknown"           # "known" | "unknown" | "uncertain"
+    status: int = Status.UNKNOWN        # Status enum value
     confidence: float = 0.0           # 0-100, how confident in the decision
     similarity: float = 0.0           # raw cosine similarity from ArcFace
     face_quality: float = 0.0         # quality score (0-1)

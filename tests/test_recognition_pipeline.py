@@ -4,8 +4,9 @@ from unittest.mock import patch, MagicMock
 from agents.matching_agent import run_matching_from_embedding, MatchResult
 from agents.memory import MemoryAgent
 from agents.recognition import RecognitionAgent
-from agents.decision_agent import decide
+from agents.policy import decide
 from conftest import make_match_result
+from config.status import Status
 
 
 class TestMatchingAgentIntegration:
@@ -74,7 +75,7 @@ class TestMemoryAgentIntegration:
             "person_id": None,
             "camera_id": "cam_01",
             "similarity": 0.0,
-            "status": "unknown",
+            "status": Status.UNKNOWN,
         })
         assert result["visit_count"] == 0
         assert mock_get_or_create_memory.called is False
@@ -87,14 +88,14 @@ class TestMemoryAgentIntegration:
             "avg_similarity": 0.82,
             "typical_hours": [9, 10, 14],
             "typical_cameras": ["cam_01"],
-            "last_status": "known",
+            "last_status": Status.KNOWN,
         }
         agent = MemoryAgent()
         result = agent.run({
             "person_id": "p1",
             "camera_id": "cam_01",
             "similarity": 0.80,
-            "status": "known",
+            "status": Status.KNOWN,
         })
         assert result["visit_count"] == 15
         assert result["is_known"] is True
@@ -108,14 +109,14 @@ class TestMemoryAgentIntegration:
             "avg_similarity": 0.85,
             "typical_hours": [10, 11],
             "typical_cameras": ["cam_01"],
-            "last_status": "known",
+            "last_status": Status.KNOWN,
         }
         agent = MemoryAgent()
         result = agent.run({
             "person_id": "p1",
             "camera_id": "cam_01",
             "similarity": 0.80,
-            "status": "known",
+            "status": Status.KNOWN,
         })
         assert result["confidence_boost"] >= 5
 
@@ -136,7 +137,7 @@ class TestFullPipelineIntegration:
             "visit_count": 50, "last_seen": time.time() - 1800,
             "first_seen": time.time() - 31536000,
             "avg_similarity": 0.88, "typical_hours": [9, 10, 14],
-            "typical_cameras": ["cam_01"], "last_status": "authorized",
+            "typical_cameras": ["cam_01"], "last_status": Status.AUTHORIZED,
         }
 
         from pipeline.models import Track
@@ -149,7 +150,7 @@ class TestFullPipelineIntegration:
         memory = MemoryAgent().run({
             "person_id": match.person_id, "camera_id": "cam_01",
             "similarity": match.similarity_score,
-            "status": "known" if match.matched else "unknown",
+            "status": Status.KNOWN if match.matched else Status.UNKNOWN,
         })
         recog = RecognitionAgent().run({
             "similarity": match.similarity_score,
@@ -163,7 +164,7 @@ class TestFullPipelineIntegration:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "authorized"
+        assert decision.status == Status.AUTHORIZED
         assert decision.should_alert is False
 
     def test_unknown_person_triggers_alert(self, mock_vector_search, mock_get_or_create_memory):
@@ -185,7 +186,7 @@ class TestFullPipelineIntegration:
         match = run_matching_from_embedding([0.1] * 512)
         memory = MemoryAgent().run({
             "person_id": None, "camera_id": "cam_01",
-            "similarity": 0.0, "status": "unknown",
+            "similarity": 0.0,             "status": Status.UNKNOWN,
         })
         recog = RecognitionAgent().run({
             "similarity": 0.0, "is_masked": False,
@@ -196,7 +197,7 @@ class TestFullPipelineIntegration:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "unknown"
+        assert decision.status == Status.UNKNOWN
         assert decision.should_alert is True
         assert decision.should_register is True
 
@@ -213,7 +214,7 @@ class TestFullPipelineIntegration:
             "visit_count": 1, "last_seen": time.time() - 86400,
             "first_seen": time.time() - 86400,
             "avg_similarity": 0.75, "typical_hours": [2],
-            "typical_cameras": ["cam_01"], "last_status": "blacklist",
+            "typical_cameras": ["cam_01"], "last_status": Status.BLACKLIST,
         }
 
         from pipeline.models import Track
@@ -226,7 +227,7 @@ class TestFullPipelineIntegration:
         memory = MemoryAgent().run({
             "person_id": match.person_id, "camera_id": "cam_01",
             "similarity": match.similarity_score,
-            "status": "known",
+            "status": Status.KNOWN,
         })
         recog = RecognitionAgent().run({
             "similarity": match.similarity_score,
@@ -239,7 +240,7 @@ class TestFullPipelineIntegration:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "blacklist"
+        assert decision.status == Status.BLACKLIST
         assert decision.should_alert is True
         assert decision.alert_level == "critical"
 
@@ -262,7 +263,7 @@ class TestFullPipelineIntegration:
         match = run_matching_from_embedding([0.1] * 512)
         memory = MemoryAgent().run({
             "person_id": None, "camera_id": "cam_01",
-            "similarity": 0.0, "status": "unknown",
+            "similarity": 0.0,             "status": Status.UNKNOWN,
         })
         recog = RecognitionAgent().run({
             "similarity": 0.0, "is_masked": True,
@@ -273,7 +274,7 @@ class TestFullPipelineIntegration:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "masked_unknown"
+        assert decision.status == Status.MASKED_UNKNOWN
         assert decision.should_alert is True
         assert decision.should_register is True
 
@@ -290,7 +291,7 @@ class TestFullPipelineIntegration:
             "visit_count": 8, "last_seen": time.time() - 86400,
             "first_seen": time.time() - 2592000,
             "avg_similarity": 0.70, "typical_hours": [14, 15],
-            "typical_cameras": ["cam_01"], "last_status": "known",
+            "typical_cameras": ["cam_01"], "last_status": Status.KNOWN,
         }
 
         from pipeline.models import Track
@@ -303,7 +304,7 @@ class TestFullPipelineIntegration:
         memory = MemoryAgent().run({
             "person_id": match.person_id, "camera_id": "cam_01",
             "similarity": match.similarity_score,
-            "status": "known",
+            "status": Status.KNOWN,
         })
         recog = RecognitionAgent().run({
             "similarity": match.similarity_score,
@@ -316,7 +317,7 @@ class TestFullPipelineIntegration:
         })
         decision = decide(track, match, recog, memory)
 
-        assert decision.status == "known_visitor"
+        assert decision.status == Status.KNOWN_VISITOR
         assert decision.should_alert is False
 
 
@@ -331,7 +332,7 @@ class TestConfidenceScoringIntegration:
             "margin": 0.25, "name": "Alice",
             "track_id": "test_high_conf",
         })
-        assert conf["status"] == "known"
+        assert conf["status"] == Status.KNOWN
         assert conf["confidence"] >= 85
 
     def test_low_similarity_produces_low_confidence(self):
@@ -341,7 +342,7 @@ class TestConfidenceScoringIntegration:
             "memory_context": {},
             "track_id": "test_low_conf",
         })
-        assert conf["status"] == "unknown"
+        assert conf["status"] == Status.UNKNOWN
         assert conf["confidence"] < 40
 
     def test_confidence_in_range(self):
