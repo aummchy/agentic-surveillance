@@ -233,6 +233,7 @@ class MemoryAgent(BaseAgent):
             "is_typical_time": False,
             "is_typical_camera": False,
             "last_status": None,
+            "best_status": None,
             "confidence_boost": 0,
             "reason": reason,
         }

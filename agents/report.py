@@ -25,7 +25,8 @@ Output:
 """
 
 import structlog
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 from agents.base import BaseAgent
 from config.status import Status, STATUS_LABELS
 from utils.db_utils import (
@@ -273,7 +274,9 @@ class ReportAgent(BaseAgent):
         parts.append(f"at camera {camera_id}")
 
         if isinstance(last_seen, datetime):
-            days_ago = (datetime.utcnow() - last_seen).days
+            # last_seen is naive (from MongoDB). Use naive UTC for comparison.
+            now_utc = datetime.utcnow()
+            days_ago = (now_utc - last_seen).days
             if days_ago == 0:
                 parts.append(f"(previously seen today, visit #{visit_count + 1})")
             elif days_ago == 1:
