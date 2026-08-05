@@ -341,6 +341,8 @@ ALLOWED_ORIGINS = _get("ALLOWED_ORIGINS", "ALLOWED_ORIGINS",
                         ["http://localhost:5173", "http://localhost:3000"], list)
 CAMERA_ID = _get("CAMERA_ID", "CAMERA_ID", "cam_01")
 CAMERA_BACKEND = _get("CAMERA_BACKEND", "CAMERA_BACKEND", "")
+FACE_SCORE_IMPROVEMENT_MIN = _get("FACE_SCORE_IMPROVEMENT_MIN", "FACE_SCORE_IMPROVEMENT_MIN", 0.03, float)
+EMBEDDING_DET_SCORE_IMPROVEMENT_MIN = _get("EMBEDDING_DET_SCORE_IMPROVEMENT_MIN", "EMBEDDING_DET_SCORE_IMPROVEMENT_MIN", 0.05, float)
 
 # ── LLM (Ollama) ──────────────────────────────────────────────
 LLM_ENABLED = _get("LLM_ENABLED", "LLM_ENABLED", True, bool)

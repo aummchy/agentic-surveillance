@@ -204,6 +204,12 @@
   // ALLOWED_ORIGINS: CORS and WebSocket origin whitelist.
   "ALLOWED_ORIGINS": ["http://localhost:5173", "http://localhost:3000"],
 
+  // ── Track State ─────────────────────────────────────────────
+  // FACE_SCORE_IMPROVEMENT_MIN: Min face score improvement to re-encode JPEG.
+  "FACE_SCORE_IMPROVEMENT_MIN": 0.03,
+  // EMBEDDING_DET_SCORE_IMPROVEMENT_MIN: Min det score improvement to overwrite embedding.
+  "EMBEDDING_DET_SCORE_IMPROVEMENT_MIN": 0.05,
+
   // ── Debug Flags ──────────────────────────────────────────────
   // DEBUG_RECOGNITION: Enable diagnostic logging for recognition pipeline investigation.
   // Logs in logs/surveillance.debug.log only (not terminal).

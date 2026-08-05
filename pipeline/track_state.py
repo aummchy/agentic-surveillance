@@ -239,7 +239,7 @@ class TrackState:
         """
         composite_id = track.track_id
         with track._lock:
-            if face_score <= track.best_face_score + 0.03:
+            if face_score <= track.best_face_score + settings.FACE_SCORE_IMPROVEMENT_MIN:
                 return
 
         # Encode JPEGs outside the lock (expensive operations) — only if score improved significantly
@@ -293,7 +293,7 @@ class TrackState:
             track = self._tracks.get(composite_id)
             if track:
                 with track._lock:
-                    if track.embedding is None or det_score > track.embedding_det_score + 0.05:
+                    if track.embedding is None or det_score > track.embedding_det_score + settings.EMBEDDING_DET_SCORE_IMPROVEMENT_MIN:
                         track.embedding = embedding
                         track.is_masked = is_masked
                         track.embedding_det_score = det_score
