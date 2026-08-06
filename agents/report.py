@@ -265,7 +265,7 @@ class ReportAgent(BaseAgent):
         return status_titles.get(status, f"Incident at {camera_id}")
 
     def _build_summary(self, status: int, name: str, camera_id: str,
-                       timestamp: str, visit_count: int, last_seen) -> str:
+                       timestamp: str, visit_count: int, last_seen: datetime) -> str:
         """Build incident report summary."""
         parts = []
 

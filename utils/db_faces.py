@@ -63,7 +63,7 @@ def store_face(person_id: str, name: str, role: str, embedding: list,
 def update_face(person_id: str, image_url: str = None, embedding: list = None,
                 name: str = None, tags: list = None, verified: bool = None,
                 alert_level: str = None, verified_by: str = None,
-                quality_score: float = None):
+                quality_score: float = None) -> bool:
     collection = get_faces_collection()
 
     update_ops = {"$set": {"updated_at": datetime.utcnow()}}

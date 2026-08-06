@@ -4,7 +4,7 @@ import time
 import numpy as np
 import structlog
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config import settings
 from config.status import Status
@@ -52,17 +52,17 @@ class PipelineResult:
     skip_reason: str = ""
 
 
-def _embedding_to_list(embedding):
+def _embedding_to_list(embedding: Any) -> list:
     if hasattr(embedding, "tolist"):
         return embedding.tolist()
     return list(embedding)
 
 
 class RecognitionPipeline:
-    def __init__(self, matching_fn: Callable = None,
-                 recognition_agent=None,
-                 memory_agent=None,
-                 decide_fn: Callable = None):
+    def __init__(self, matching_fn: Optional[Callable] = None,
+                 recognition_agent: Optional[Any] = None,
+                 memory_agent: Optional[Any] = None,
+                 decide_fn: Optional[Callable] = None) -> None:
         from agents.matching_agent import run_matching_from_embedding
         from agents.recognition import RecognitionAgent
         from agents.memory import MemoryAgent
@@ -148,7 +148,7 @@ class RecognitionPipeline:
             skip_reason="success",
         )
 
-    def _detect_face(self, frame: np.ndarray, track: Track):
+    def _detect_face(self, frame: np.ndarray, track: Track) -> Optional["_FaceResult"]:
         """Detect the best face in the track's person box.
 
         Tries crop detection first, then optional full-frame fallback.
@@ -224,7 +224,7 @@ class RecognitionPipeline:
             metrics=metrics,
         )
 
-    def _expand_person_box(self, box, frame_shape):
+    def _expand_person_box(self, box: tuple, frame_shape: tuple) -> tuple:
         """Expand person box by configured ratio to ensure face is within crop."""
         bx1, by1, bx2, by2 = map(int, box)
         w, h = bx2 - bx1, by2 - by1
@@ -232,7 +232,7 @@ class RecognitionPipeline:
         return (max(0, bx1 - ex), max(0, by1 - ey),
                 min(frame_shape[1], bx2 + ex), min(frame_shape[0], by2 + ey))
 
-    def _select_best_face(self, crop_faces, frame_faces, track):
+    def _select_best_face(self, crop_faces: List[dict], frame_faces: List[dict], track: Track) -> Tuple[Optional[dict], bool]:
         """Select best face detection, preferring crop over full-frame.
 
         Returns (best_detection_dict, detected_in_person_crop) or (None, False).
@@ -248,7 +248,7 @@ class RecognitionPipeline:
         logger.debug("no_face_anywhere", track_id=track.track_id)
         return None, False
 
-    def _compute_frame_bbox(self, best, crop_box, detected_in_person_crop):
+    def _compute_frame_bbox(self, best: dict, crop_box: tuple, detected_in_person_crop: bool) -> Optional[tuple]:
         """Convert face bbox from detection-local to full-frame coordinates."""
         if not best.get("bbox"):
             return None
@@ -258,7 +258,7 @@ class RecognitionPipeline:
                     fx2 + crop_box[0], fy2 + crop_box[1])
         return (fx1, fy1, fx2, fy2)
 
-    def _extract_face_crop(self, frame, person_crop, frame_bbox):
+    def _extract_face_crop(self, frame: np.ndarray, person_crop: np.ndarray, frame_bbox: Optional[tuple]) -> np.ndarray:
         """Extract face crop from frame using computed bounding box."""
         if frame_bbox:
             fx1, fy1, fx2, fy2 = frame_bbox
@@ -278,7 +278,7 @@ class RecognitionPipeline:
             quality = QualityResult.invalid()
         return quality
 
-    def _build_embedding(self, face_det: "_FaceResult", track: Track):
+    def _build_embedding(self, face_det: "_FaceResult", track: Track) -> Optional["_EmbedResult"]:
         t_embed = time.perf_counter()
         embedding_list = _embedding_to_list(face_det.best["embedding"])
         embed_ms = round((time.perf_counter() - t_embed) * 1000, 1)
@@ -339,8 +339,9 @@ class _FaceResult:
     __slots__ = ("best", "face_crop", "person_crop", "frame_bbox", "face_ratio",
                  "detected_in_person_crop", "metrics")
 
-    def __init__(self, best, face_crop, person_crop, frame_bbox, face_ratio,
-                 detected_in_person_crop, metrics):
+    def __init__(self, best: dict, face_crop: np.ndarray, person_crop: np.ndarray,
+                 frame_bbox: Optional[tuple], face_ratio: float,
+                 detected_in_person_crop: bool, metrics: RecognitionMetrics) -> None:
         self.best = best
         self.face_crop = face_crop
         self.person_crop = person_crop
@@ -353,7 +354,7 @@ class _FaceResult:
 class _EmbedResult:
     __slots__ = ("embedding", "match_or_none", "metrics")
 
-    def __init__(self, embedding, match, metrics):
+    def __init__(self, embedding: list, match: Optional[MatchResult], metrics: RecognitionMetrics) -> None:
         self.embedding = embedding
         self.match_or_none = match
         self.metrics = metrics

@@ -3,7 +3,7 @@ import time
 import cv2
 import numpy as np
 import structlog
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple, Any
 from config import settings
 from pipeline.models import Track
 from config.status import Visibility
@@ -13,7 +13,7 @@ logger = structlog.get_logger(__name__)
 
 
 class TrackState:
-    def __init__(self):
+    def __init__(self) -> None:
         self._tracks: Dict[str, Track] = {}
         self._lock = threading.Lock()
         self._session_epoch = int(time.time())
@@ -35,7 +35,7 @@ class TrackState:
         self._bt_active[bt_id] = gen
         return gen
 
-    def release_generation(self, bt_id: int):
+    def release_generation(self, bt_id: int) -> None:
         """Release the generation for a removed track.
 
         Increments the next generation for this bt_id.
@@ -111,11 +111,11 @@ class TrackState:
         with self._lock:
             return self._tracks.get(composite_id)
 
-    def get_all(self) -> list:
+    def get_all(self) -> List[Track]:
         with self._lock:
             return list(self._tracks.values())
 
-    def debug_snapshot(self) -> list[dict]:
+    def debug_snapshot(self) -> List[dict]:
         with self._lock:
             return [
                 {"id": t.track_id,
@@ -138,7 +138,7 @@ class TrackState:
                 self.release_generation(track.byte_track_id)
             return track
 
-    def get_expired_tracks(self) -> list:
+    def get_expired_tracks(self) -> List[Track]:
         expired = []
         with self._lock:
             to_remove = []
@@ -169,7 +169,7 @@ class TrackState:
                 del self._tracks[cid]
         return expired
 
-    def _classify_visibility_inplace(self, track: Track):
+    def _classify_visibility_inplace(self, track: Track) -> None:
         """Classify visibility directly on the track object (no dict lookup)."""
         if track.max_face_ratio >= settings.VISIBLE_FACE_RATIO:
             track.visibility = Visibility.VISIBLE
@@ -182,7 +182,7 @@ class TrackState:
         else:
             track.visibility = Visibility.UNKNOWN
 
-    def update_face_visibility(self, composite_id: str, face_detected: bool, face_ratio: float):
+    def update_face_visibility(self, composite_id: str, face_detected: bool, face_ratio: float) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -192,12 +192,12 @@ class TrackState:
                 if face_ratio > track.max_face_ratio:
                     track.max_face_ratio = face_ratio
 
-    def begin_recognition(self, composite_id: str):
+    def begin_recognition(self, composite_id: str) -> None:
         """Mark a track as having an in-flight recognition task."""
         with self._lock:
             self._in_flight[composite_id] = self._in_flight.get(composite_id, 0) + 1
 
-    def end_recognition(self, composite_id: str):
+    def end_recognition(self, composite_id: str) -> None:
         """Clear one in-flight recognition reference for a track.
 
         If the track has expired and no other recognition threads hold a
@@ -231,7 +231,7 @@ class TrackState:
 
     def set_best_face(self, track: 'Track', face_crop: np.ndarray,
                       face_score: float, full_frame: np.ndarray, face_ratio: float,
-                      person_crop: np.ndarray = None):
+                      person_crop: np.ndarray = None) -> None:
         """Update the best face data for a track.
 
         Accepts the Track object directly (not composite_id lookup) so that
@@ -266,7 +266,7 @@ class TrackState:
                 if person_crop_jpeg is not None:
                     track.best_person_crop_jpeg = person_crop_jpeg
 
-    def ensure_fallback_frame(self, track: 'Track', frame: np.ndarray):
+    def ensure_fallback_frame(self, track: 'Track', frame: np.ndarray) -> None:
         """Guarantee every track gets at least one photo, independent of face quality.
 
         Called unconditionally on the first recognition pass. Uses double-checked
@@ -302,7 +302,7 @@ class TrackState:
                     return (False, "rejected_quality")
             return (False, "track_removed")
 
-    def set_decision(self, composite_id: str, decision: int):
+    def set_decision(self, composite_id: str, decision: int) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -310,7 +310,7 @@ class TrackState:
                     track.decision = decision
                     # Never overwrite alerted=True — mark_alerted_once() is the sole writer
 
-    def set_person_name(self, composite_id: str, name: str, similarity: float = 0.0):
+    def set_person_name(self, composite_id: str, name: str, similarity: float = 0.0) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -320,7 +320,7 @@ class TrackState:
                         track.person_name = name
                         track.person_name_similarity = similarity
 
-    def set_face_crop_path(self, track: 'Track', path: str):
+    def set_face_crop_path(self, track: 'Track', path: str) -> None:
         """Set the face crop path on the track directly.
 
         Accepts the Track object so that the path is written even if
@@ -329,7 +329,7 @@ class TrackState:
         with track._lock:
             track.best_face_crop_path = path
 
-    def get_active_track_ids_and_boxes(self) -> dict:
+    def get_active_track_ids_and_boxes(self) -> Dict[str, Tuple[int, tuple]]:
         """Return a snapshot of active tracks for IoU dedup (lock-safe).
 
         Returns dict mapping composite_id -> (byte_track_id, person_box).
@@ -337,7 +337,7 @@ class TrackState:
         with self._lock:
             return {cid: (t.track_id, t.person_box) for cid, t in self._tracks.items()}
 
-    def set_pending_match_result(self, composite_id: str, match_result):
+    def set_pending_match_result(self, composite_id: str, match_result: Any) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -347,7 +347,7 @@ class TrackState:
                 if existing is None or match_result.similarity_score >= existing.similarity_score:
                     track.pending_match_result = match_result
 
-    def set_pending_memory_context(self, composite_id: str, memory_context: dict):
+    def set_pending_memory_context(self, composite_id: str, memory_context: dict) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -363,7 +363,7 @@ class TrackState:
                     else:
                         track.pending_memory_context = memory_context
 
-    def set_pending_recognition_data(self, composite_id: str, recognition_result: dict):
+    def set_pending_recognition_data(self, composite_id: str, recognition_result: dict) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -374,7 +374,7 @@ class TrackState:
                 if new_conf > existing_conf:
                     track.pending_recognition = recognition_result
 
-    def set_recognition_snapshot(self, composite_id: str, quality: float, status: int):
+    def set_recognition_snapshot(self, composite_id: str, quality: float, status: int) -> None:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:

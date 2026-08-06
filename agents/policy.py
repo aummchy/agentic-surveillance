@@ -19,7 +19,7 @@ Output: DecisionResult
 
 import structlog
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from agents.base import BaseAgent
 from pipeline.models import Track, MatchResult, DecisionResult
 from config import settings
@@ -152,8 +152,9 @@ class PolicyAgent(BaseAgent):
 
     # ── Context extraction ──────────────────────────────────────
 
-    def _build_decision_context(self, recognition, memory, match_data,
-                                track, current_hour, is_office_hours, is_weekday):
+    def _build_decision_context(self, recognition: Dict[str, Any], memory: Dict[str, Any],
+                                match_data: Dict[str, Any], track: Track,
+                                current_hour: int, is_office_hours: bool, is_weekday: bool) -> dict:
         """Extract all decision signals into a single dict for rule methods."""
         rec_status = recognition.get("status", Status.UNKNOWN)
         if isinstance(rec_status, str):
@@ -180,7 +181,7 @@ class PolicyAgent(BaseAgent):
 
     # ── Rules (priority order) ─────────────────────────────────
 
-    def _rule_blacklist(self, ctx: dict):
+    def _rule_blacklist(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 1: Blacklisted person (highest priority, critical alert)."""
         if "blacklist" not in ctx["tags"]:
             return None
@@ -194,7 +195,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_authorized(self, ctx: dict):
+    def _rule_authorized(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 2: Authorized person (no alert)."""
         if "authorized" not in ctx["tags"]:
             return None
@@ -208,7 +209,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_verified(self, ctx: dict):
+    def _rule_verified(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 3: Verified visitor (no alert)."""
         if not ctx["verified"]:
             return None
@@ -224,7 +225,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_auto_registered(self, ctx: dict):
+    def _rule_auto_registered(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 4a: Auto-registered self-match (similarity > threshold)."""
         if "auto_registered" not in ctx["tags"]:
             return None
@@ -240,7 +241,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_known_visitor_memory(self, ctx: dict):
+    def _rule_known_visitor_memory(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 4b: Known visitor (matched + memory confirms)."""
         if not ctx["matched"] or not ctx["is_known_from_memory"]:
             return None
@@ -254,7 +255,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_matched(self, ctx: dict):
+    def _rule_matched(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 5: Matched but not memory-confirmed (new or uncertain)."""
         if not ctx["matched"]:
             return None
@@ -315,7 +316,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_hidden(self, ctx: dict):
+    def _rule_hidden(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 6: Intentionally hidden (avoiding detection)."""
         if ctx["visibility"] != Visibility.HIDDEN:
             return None
@@ -328,7 +329,7 @@ class PolicyAgent(BaseAgent):
             should_register=False,
         )
 
-    def _rule_masked(self, ctx: dict):
+    def _rule_masked(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 7: Masked or partial visibility unknown."""
         if not ctx["is_masked"] and ctx["visibility"] != Visibility.PARTIAL:
             return None
@@ -350,7 +351,7 @@ class PolicyAgent(BaseAgent):
             should_register=True,
         )
 
-    def _rule_after_hours(self, ctx: dict):
+    def _rule_after_hours(self, ctx: dict) -> Optional[DecisionResult]:
         """RULE 8: After-hours unknown (higher alert)."""
         if ctx["is_office_hours"] and ctx["is_weekday"]:
             return None
@@ -363,7 +364,7 @@ class PolicyAgent(BaseAgent):
             should_register=True,
         )
 
-    def _rule_unknown_default(self, ctx: dict):
+    def _rule_unknown_default(self, ctx: dict) -> DecisionResult:
         """RULE 9: Unknown during office hours (default)."""
         return DecisionResult(
             status=Status.UNKNOWN,

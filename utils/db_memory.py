@@ -3,6 +3,8 @@
 import structlog
 from datetime import datetime, timedelta
 from pymongo import ReturnDocument
+from typing import Optional
+from pymongo.collection import Collection
 from utils.db_client import get_memory_collection
 from config import settings
 from config.status import Status, LABEL_TO_STATUS
@@ -127,7 +129,8 @@ def update_visit_memory(person_id: str, camera_id: str, status: int,
 # ── Helpers ───────────────────────────────────────────────────
 
 
-def _check_visit_gap(collection, person_id, camera_id, status, similarity, now):
+def _check_visit_gap(collection: Collection, person_id: str, camera_id: str, status: int,
+                     similarity: float, now: datetime) -> Optional[dict]:
     """Return suppressed result if visit is within gap window, else None."""
     gap = settings.MIN_VISIT_GAP_SECS
     if gap <= 0:
@@ -162,7 +165,7 @@ def _check_visit_gap(collection, person_id, camera_id, status, similarity, now):
         now=now, suppressed=True)
 
 
-def _compute_best_status(collection, person_id, new_status):
+def _compute_best_status(collection: Collection, person_id: str, new_status: int) -> int:
     """Return the higher-trust status between new_status and existing best."""
     current_best = collection.find_one(
         {"person_id": person_id},
@@ -177,11 +180,13 @@ def _compute_best_status(collection, person_id, new_status):
     return new_status if new_rank > prev_rank else (prev_best or new_status)
 
 
-def _build_visit_result(person_id, visit_count, last_seen, camera_id, status,
-                        best_status, similarity, now, suppressed,
-                        status_entry=None, hour=None, similarity_history=None,
-                        status_history=None, typical_hours=None, typical_cameras=None,
-                        fallback=False):
+def _build_visit_result(person_id: str, visit_count: int, last_seen: datetime,
+                        camera_id: str, status: int, best_status: Optional[int],
+                        similarity: float, now: datetime, suppressed: bool,
+                        status_entry: Optional[dict] = None, hour: Optional[int] = None,
+                        similarity_history: Optional[list] = None, status_history: Optional[list] = None,
+                        typical_hours: Optional[list] = None, typical_cameras: Optional[list] = None,
+                        fallback: bool = False) -> dict:
     """Build a normalized visit result dict."""
     return {
         "person_id": person_id,

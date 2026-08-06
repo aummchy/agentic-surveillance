@@ -4,12 +4,13 @@ import structlog
 import threading
 import concurrent.futures
 import numpy as np
+from typing import Callable, List, Optional, Set, Tuple, Any
 from config import settings
 from config.status import Status, RESOLVED_STATUSES, SkipReason, AlertLevel
 from pipeline.tracker import track_persons
 from pipeline.track_state import TrackState
 from pipeline.models import Track
-from pipeline.recognition_pipeline import RecognitionPipeline
+from pipeline.recognition_pipeline import RecognitionPipeline, PipelineResult
 from utils.image_utils import draw_annotations, save_image, resolve_track_image_url, compute_iou
 from agents.timing import TimingCollector
 from agents.alert_agent import dispatch as alert_dispatch
@@ -19,8 +20,9 @@ logger = structlog.get_logger(__name__)
 
 
 class CameraAgent:
-    def __init__(self, on_track_finalized=None, on_frame_annotated=None,
-                 recognition_pipeline=None):
+    def __init__(self, on_track_finalized: Optional[Callable[[Track], None]] = None,
+                 on_frame_annotated: Optional[Callable[[np.ndarray], None]] = None,
+                 recognition_pipeline: Optional[RecognitionPipeline] = None) -> None:
         self.track_state = TrackState()
         self.on_track_finalized = on_track_finalized
         self.on_frame_annotated = on_frame_annotated
@@ -47,7 +49,7 @@ class CameraAgent:
         self._fps_tracker_ms_max = 0.0
 
     @staticmethod
-    def _camera_source():
+    def _camera_source() -> str | int:
         """Return RTSP URL string if CAMERA_SOURCE is set, else CAMERA_INDEX int."""
         src = getattr(settings, "CAMERA_SOURCE", "")
         if src:
@@ -55,7 +57,7 @@ class CameraAgent:
         return settings.CAMERA_INDEX
 
     @staticmethod
-    def _open_capture():
+    def _open_capture() -> cv2.VideoCapture:
         """Open VideoCapture with configured backend (dshow/msmf/auto)."""
         source = CameraAgent._camera_source()
         backend = getattr(settings, "CAMERA_BACKEND", "")
@@ -78,7 +80,7 @@ class CameraAgent:
                         pass
         return cap
 
-    def _apply_frame_props(self):
+    def _apply_frame_props(self) -> str:
         """Set frame dimensions on the current capture and return actual resolution."""
         if self._cap and self._cap.isOpened():
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.FRAME_WIDTH)
@@ -88,7 +90,7 @@ class CameraAgent:
             return f"{actual_w}x{actual_h}"
         return "unknown"
 
-    def start(self):
+    def start(self) -> None:
         self._running = True
 
         source = CameraAgent._camera_source()
@@ -112,7 +114,7 @@ class CameraAgent:
         finally:
             self.stop()
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
         self._stop_event.set()
         self._recognition_executor.shutdown(wait=True)
@@ -120,7 +122,7 @@ class CameraAgent:
             self._cap.release()
         logger.info("camera_stopped")
 
-    def _loop(self):
+    def _loop(self) -> None:
         consecutive_failures = 0
         source = CameraAgent._camera_source()
         is_file_source = isinstance(source, str) and "://" not in source
@@ -176,7 +178,7 @@ class CameraAgent:
             if settings.PERFORMANCE_STATS:
                 self._update_fps_stats(_tracker_ms, len(tracks), len(all_tracks))
 
-    def _process_tracks(self, frame, tracks):
+    def _process_tracks(self, frame: np.ndarray, tracks: List[dict]) -> None:
         """Update tracks, dedup overlaps, and schedule recognition."""
         active_ids = set()
         skipped_overlap = set()
@@ -208,7 +210,7 @@ class CameraAgent:
             if track and self._frame_count % settings.RECOGNITION_INTERVAL_FRAMES == 0:
                 self._maybe_schedule_recognition(frame, track)
 
-    def _maybe_schedule_recognition(self, frame, track):
+    def _maybe_schedule_recognition(self, frame: np.ndarray, track: Track) -> None:
         """Schedule recognition for a track if it should be processed."""
         if settings.DEBUG_RECOGNITION:
             logger.debug("recognition_tick",
@@ -253,7 +255,7 @@ class CameraAgent:
                 self._progressive_recognition, frame.copy(), track
             )
 
-    def _should_skip_recognition(self, track):
+    def _should_skip_recognition(self, track: Track) -> Tuple[bool, str]:
         """Determine if recognition should be skipped for this track.
 
         Returns (should_skip: bool, reason: str).
@@ -288,7 +290,7 @@ class CameraAgent:
 
         return False, ""
 
-    def _finalize_expired_tracks(self, expired):
+    def _finalize_expired_tracks(self, expired: List[Track]) -> None:
         """Submit expired tracks for finalization if not already processing."""
         for track in expired:
             with self._track_sets_lock:
@@ -296,7 +298,7 @@ class CameraAgent:
                     self._finalized_track_ids.add(track.track_id)
                     self._recognition_executor.submit(self._finalize_track, track)
 
-    def _log_duplicate_diagnostics(self, raw_tracks, all_tracks):
+    def _log_duplicate_diagnostics(self, raw_tracks: List[dict], all_tracks: List[Track]) -> None:
         """Log duplicate box diagnostics when debug is enabled."""
         if not getattr(settings, "DEBUG_DUPLICATE_BOXES", False):
             return
@@ -321,7 +323,7 @@ class CameraAgent:
                          pairs=high_iou_pairs,
                          frame=self._frame_count)
 
-    def _update_fps_stats(self, tracker_ms, track_count, drawn_count):
+    def _update_fps_stats(self, tracker_ms: float, track_count: int, drawn_count: int) -> None:
         """Update and log FPS performance stats."""
         self._fps_frame_count += 1
         self._fps_tracker_ms_total += tracker_ms
@@ -347,7 +349,7 @@ class CameraAgent:
             self._fps_tracker_ms_total = 0.0
             self._fps_tracker_ms_max = 0.0
 
-    def _progressive_recognition(self, frame: np.ndarray, track: Track):
+    def _progressive_recognition(self, frame: np.ndarray, track: Track) -> None:
         """Run recognition pipeline for a single track in a worker thread."""
         worker_start = time.perf_counter()
 
@@ -381,7 +383,7 @@ class CameraAgent:
         finally:
             self._cleanup_recognition_track(track)
 
-    def _handle_pipeline_result(self, result, track, frame):
+    def _handle_pipeline_result(self, result: PipelineResult, track: Track, frame: np.ndarray) -> None:
         """Process recognition pipeline results and update track state."""
         # Handle skip results (early return)
         if result.skip_reason == SkipReason.HIGH_CONFIDENCE:
@@ -451,7 +453,7 @@ class CameraAgent:
                          recog_policy_ms=result.metrics.recog_policy_ms,
                          total_ms=result.metrics.total_ms)
 
-    def _handle_decision_and_alert(self, result, track):
+    def _handle_decision_and_alert(self, result: PipelineResult, track: Track) -> None:
         """Process decision result: upgrade confidence, dispatch alerts."""
         new_confidence = int(result.recognition.get("confidence", 0))
 
@@ -502,7 +504,7 @@ class CameraAgent:
         self.track_state.set_recognition_snapshot(
             track.track_id, track.best_face_score, result.decision.status)
 
-    def _cleanup_recognition_track(self, track):
+    def _cleanup_recognition_track(self, track: Track) -> None:
         """Final cleanup after recognition: end recognition, schedule finalization."""
         if settings.DEBUG_RECOGNITION:
             duration_ms = self._timing.get_duration_ms(track.track_id)
@@ -526,7 +528,7 @@ class CameraAgent:
                 except RuntimeError:
                     logger.debug("finalize_submit_after_shutdown", track_id=track.track_id)
 
-    def _finalize_track(self, track: Track):
+    def _finalize_track(self, track: Track) -> None:
         if not track.mark_finalized_once():
             logger.debug("finalize_skipped_duplicate", track_id=track.track_id)
             return
