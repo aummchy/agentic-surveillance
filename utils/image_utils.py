@@ -21,7 +21,8 @@ def _init_cloudinary():
         cloudinary.config(
             cloud_name=settings.CLOUDINARY_CLOUD_NAME,
             api_key=settings.CLOUDINARY_API_KEY,
-            api_secret=settings.CLOUDINARY_API_SECRET
+            api_secret=settings.CLOUDINARY_API_SECRET,
+            connection_pool_maxsize=10
         )
         _cloudinary_configured = True
         return True
