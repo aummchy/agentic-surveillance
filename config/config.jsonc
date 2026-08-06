@@ -233,5 +233,67 @@
   //   for mobile phone cameras. Empty string = use CAMERA_INDEX instead.
   "CAMERA_SOURCE": "videos/low_4.mp4",
   "CAMERA_INDEX": 0,
-  "CAMERA_ID": "cam_01"
+  "CAMERA_ID": "cam_01",
+
+  // ── Camera Thread Pool ──────────────────────────────────────
+  // RECOGNITION_MAX_WORKERS: Thread pool size for recognition workers.
+  // More = faster recognition, more CPU/memory usage.
+  "RECOGNITION_MAX_WORKERS": 4,
+  // CAMERA_READ_TIMEOUT_MS: Timeout for camera frame read (ms).
+  // Lower = faster failure detection, higher = more tolerance for slow cameras.
+  "CAMERA_READ_TIMEOUT_MS": 1000,
+  // CAMERA_MAX_FAILURES: Consecutive read failures before camera reconnect.
+  "CAMERA_MAX_FAILURES": 10,
+  // CAMERA_RECONNECT_DELAY_SECS: Delay between reconnect attempts (seconds).
+  "CAMERA_RECONNECT_DELAY_SECS": 1.0,
+
+  // ── YOLO Detection ──────────────────────────────────────────
+  // PERSON_CLASS_ID: COCO class ID for person detection (0 = person).
+  "PERSON_CLASS_ID": 0,
+  // YOLO_NMS_IOU: IoU threshold for non-max suppression in YOLO.
+  // Lower = more aggressive deduplication of overlapping boxes.
+  "YOLO_NMS_IOU": 0.45,
+
+  // ── Person Box Expansion ────────────────────────────────────
+  // PERSON_BOX_EXPANSION_RATIO: Expand person box by this ratio (0.2 = 20%)
+  // to ensure face is fully within crop for face detection.
+  "PERSON_BOX_EXPANSION_RATIO": 0.20,
+
+  // ── CLAHE Skip Threshold ────────────────────────────────────
+  // CLAHE_SKIP_CONTRAST_THRESHOLD: Skip CLAHE if L-channel std >= this value.
+  // Higher = skip CLAHE less often (apply more), lower = skip more (apply less).
+  "CLAHE_SKIP_CONTRAST_THRESHOLD": 40.0,
+
+  // ── LLM Retry ───────────────────────────────────────────────
+  // LLM_MAX_RETRIES: Max retry attempts for Ollama API calls.
+  "LLM_MAX_RETRIES": 3,
+  // OLLAMA_CONNECT_TIMEOUT: Ollama connection timeout (seconds).
+  "OLLAMA_CONNECT_TIMEOUT": 5.0,
+
+  // ── Memory Heuristics ───────────────────────────────────────
+  // Confidence boost from visit history (capped at MEMORY_VISIT_BOOST_MAX).
+  "MEMORY_VISIT_BOOST_MAX": 10,
+  "MEMORY_VISIT_BOOST_PER_VISIT": 2,
+  // Recent visit boost (within MEMORY_RECENT_DAYS days).
+  "MEMORY_RECENT_DAYS": 7,
+  "MEMORY_RECENT_BOOST": 5,
+  // Somewhat recent boost (within MEMORY_SOMewhat_RECENT_DAYS days).
+  "MEMORY_SOMewhat_RECENT_DAYS": 30,
+  "MEMORY_SOMewhat_RECENT_BOOST": 2,
+  // Consistency thresholds (similarity-based confidence adjustment).
+  "MEMORY_CONSISTENCY_HIGH_SIM": 0.8,
+  "MEMORY_CONSISTENCY_LOW_SIM": 0.6,
+  // Similarity drop detection (penalizes inconsistent embeddings).
+  "MEMORY_SIMILARITY_DROP_RATIO": 0.7,
+  "MEMORY_SIMILARITY_DROP_PENALTY": 5,
+  // Boost range clamping.
+  "MEMORY_BOOST_MIN": -10,
+  "MEMORY_BOOST_MAX": 20,
+  // Typical hours proximity (boosts confidence for visits at similar hours).
+  "MEMORY_TYPICAL_HOUR_PROXIMITY": 2,
+  "MEMORY_TYPICAL_HOURS_MAX": 10,
+
+  // ── Display ──────────────────────────────────────────────────
+  // DISPLAY_NAME_TRUNCATE_LEN: Truncate person names to this length in UI.
+  "DISPLAY_NAME_TRUNCATE_LEN": 8
 }
