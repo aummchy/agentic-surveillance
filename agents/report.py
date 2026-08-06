@@ -28,7 +28,7 @@ import structlog
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from agents.base import BaseAgent
-from config.status import Status, STATUS_LABELS
+from config.status import Status, STATUS_LABELS, AlertLevel
 from utils.db_utils import (
     get_events_with_faces, get_stats, get_visit_history
 )
@@ -77,9 +77,9 @@ class ReportAgent(BaseAgent):
         track_id = data.get("track_id", "unknown")
         camera_id = data.get("camera_id", "unknown")
         status = data.get("status", Status.UNKNOWN)
-        alert_level = data.get("alert_level", "medium")
+        alert_level = data.get("alert_level", AlertLevel.MEDIUM)
         reason = data.get("reason", "")
-        timestamp = data.get("timestamp", datetime.utcnow().isoformat())
+        timestamp = data.get("timestamp", datetime.now(timezone.utc).isoformat())
         image_url = data.get("image_url")
         person_id = data.get("person_id")
         name = data.get("name", "Unknown")
@@ -142,18 +142,19 @@ class ReportAgent(BaseAgent):
     def _summary_report(self, data: Dict) -> Dict:
         """Generate a daily/weekly summary."""
         period = data.get("period", "daily")
-        hours = 24 if period == "daily" else 168  # 7 days
 
         try:
             stats = get_stats()
-        except Exception:
+        except Exception as e:
+            logger.warning("stats_query_failed", error=str(e))
             stats = {"total_unknown": 0, "total_verified": 0, "events_today": 0, "unknown_today": 0}
 
         # Get recent events
         try:
             events_data = get_events_with_faces(limit=20)
             events = events_data.get("events", [])
-        except Exception:
+        except Exception as e:
+            logger.warning("events_query_failed", error=str(e))
             events = []
 
         # Analyze events
@@ -205,7 +206,8 @@ class ReportAgent(BaseAgent):
 
         try:
             memory = get_visit_history(person_id)
-        except Exception:
+        except Exception as e:
+            logger.warning("visit_history_query_failed", person_id=person_id, error=str(e))
             memory = {}
 
         visit_count = memory.get("visit_count", 0)
@@ -243,7 +245,8 @@ class ReportAgent(BaseAgent):
         """Generate dashboard statistics."""
         try:
             stats = get_stats()
-        except Exception:
+        except Exception as e:
+            logger.warning("stats_query_failed", error=str(e))
             stats = {"total_unknown": 0, "total_verified": 0, "events_today": 0, "unknown_today": 0}
 
         return {
@@ -275,7 +278,7 @@ class ReportAgent(BaseAgent):
 
         if isinstance(last_seen, datetime):
             # last_seen is naive (from MongoDB). Use naive UTC for comparison.
-            now_utc = datetime.utcnow()
+            now_utc = datetime.now(timezone.utc)
             days_ago = (now_utc - last_seen).days
             if days_ago == 0:
                 parts.append(f"(previously seen today, visit #{visit_count + 1})")

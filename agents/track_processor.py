@@ -13,6 +13,7 @@ from agents.policy import decide
 from agents.alert_agent import dispatch
 from agents.memory import MemoryAgent
 from agents.recognition import RecognitionAgent
+from agents.matching_agent import run_matching_from_embedding
 from utils.db_utils import store_face, log_event, deduplicate_identity
 from utils.image_utils import resolve_track_image_url, resolve_track_person_crop_url
 from dashboard.backend.routes.live import broadcast_frame, broadcast_alert, broadcast_event
@@ -167,7 +168,6 @@ class TrackProcessor:
         """Run vector search matching if no pending result exists."""
         match_result = snap.pending_match_result
         if match_result is None:
-            from agents.matching_agent import run_matching_from_embedding
             match_result = run_matching_from_embedding(snap.embedding)
         return match_result
 
@@ -310,8 +310,6 @@ class TrackProcessor:
     def _broadcast_event(self, snap, decision, match_result, image_url,
                          person_crop_url, memory_context):
         """Broadcast event payload via WebSocket."""
-        with snap._lock if hasattr(snap, '_lock') else threading.Lock():
-            pass
         # Read from track snapshot (already captured)
         alerted_final = snap.alerted if hasattr(snap, 'alerted') else False
         person_name_final = getattr(snap, 'person_name', None)

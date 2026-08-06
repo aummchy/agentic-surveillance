@@ -149,19 +149,18 @@ class RecognitionPipeline:
         )
 
     def _detect_face(self, frame: np.ndarray, track: Track):
+        """Detect the best face in the track's person box.
+
+        Tries crop detection first, then optional full-frame fallback.
+        Returns _FaceResult or None if no usable face found.
+        """
         with track._lock:
             box = track.person_box
         if box is None or len(box) != 4:
             logger.debug("no_person_box", track_id=track.track_id)
             return None
 
-        # Expand person box 20% to ensure face is fully within crop
-        bx1, by1, bx2, by2 = map(int, box)
-        w, h = bx2 - bx1, by2 - by1
-        ex, ey = int(w * 0.2), int(h * 0.2)
-        crop_box = (max(0, bx1 - ex), max(0, by1 - ey),
-                    min(frame.shape[1], bx2 + ex), min(frame.shape[0], by2 + ey))
-
+        crop_box = self._expand_person_box(box, frame.shape)
         person_crop = crop_person(frame, crop_box)
         if person_crop.size == 0:
             logger.debug("empty_person_crop", track_id=track.track_id)
@@ -186,29 +185,12 @@ class RecognitionPipeline:
         person_crop_shape = f"{person_crop.shape[1]}x{person_crop.shape[0]}" if person_crop.size > 0 else "empty"
         faces_on_crop = len(crop_faces)
 
-        best = None
-        detected_in_person_crop = False
-        if crop_faces:
-            best = crop_faces[0]
-            detected_in_person_crop = True
-            logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
-        elif frame_faces:
-            best = frame_faces[0]
-            logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
+        best, detected_in_person_crop = self._select_best_face(crop_faces, frame_faces, track)
 
-        if not best:
-            logger.debug("no_face_anywhere", track_id=track.track_id)
+        if best is None:
             return None
 
-        frame_bbox = None
-        if best["bbox"]:
-            fx1, fy1, fx2, fy2 = best["bbox"]
-            if detected_in_person_crop:
-                # Offset from expanded crop coords to full-frame coords
-                frame_bbox = (fx1 + crop_box[0], fy1 + crop_box[1],
-                              fx2 + crop_box[0], fy2 + crop_box[1])
-            else:
-                frame_bbox = (fx1, fy1, fx2, fy2)
+        frame_bbox = self._compute_frame_bbox(best, crop_box, detected_in_person_crop)
 
         face_ratio = 0.0
         if frame_bbox:
@@ -221,11 +203,7 @@ class RecognitionPipeline:
                          threshold=settings.EMBEDDING_DET_SCORE_MIN)
             return None
 
-        if frame_bbox:
-            fx1, fy1, fx2, fy2 = frame_bbox
-            face_crop = frame[fy1:fy2, fx1:fx2]
-        else:
-            face_crop = person_crop
+        face_crop = self._extract_face_crop(frame, person_crop, frame_bbox)
 
         metrics = RecognitionMetrics(
             crop_detect_ms=crop_detect_ms,
@@ -245,6 +223,47 @@ class RecognitionPipeline:
             detected_in_person_crop=detected_in_person_crop,
             metrics=metrics,
         )
+
+    def _expand_person_box(self, box, frame_shape):
+        """Expand person box by configured ratio to ensure face is within crop."""
+        bx1, by1, bx2, by2 = map(int, box)
+        w, h = bx2 - bx1, by2 - by1
+        ex, ey = int(w * settings.PERSON_BOX_EXPANSION_RATIO), int(h * settings.PERSON_BOX_EXPANSION_RATIO)
+        return (max(0, bx1 - ex), max(0, by1 - ey),
+                min(frame_shape[1], bx2 + ex), min(frame_shape[0], by2 + ey))
+
+    def _select_best_face(self, crop_faces, frame_faces, track):
+        """Select best face detection, preferring crop over full-frame.
+
+        Returns (best_detection_dict, detected_in_person_crop) or (None, False).
+        """
+        if crop_faces:
+            best = crop_faces[0]
+            logger.debug("face_found_crop", track_id=track.track_id, score=best["det_score"])
+            return best, True
+        if frame_faces:
+            best = frame_faces[0]
+            logger.debug("face_found_in_full_frame", track_id=track.track_id, score=best["det_score"])
+            return best, False
+        logger.debug("no_face_anywhere", track_id=track.track_id)
+        return None, False
+
+    def _compute_frame_bbox(self, best, crop_box, detected_in_person_crop):
+        """Convert face bbox from detection-local to full-frame coordinates."""
+        if not best.get("bbox"):
+            return None
+        fx1, fy1, fx2, fy2 = best["bbox"]
+        if detected_in_person_crop:
+            return (fx1 + crop_box[0], fy1 + crop_box[1],
+                    fx2 + crop_box[0], fy2 + crop_box[1])
+        return (fx1, fy1, fx2, fy2)
+
+    def _extract_face_crop(self, frame, person_crop, frame_bbox):
+        """Extract face crop from frame using computed bounding box."""
+        if frame_bbox:
+            fx1, fy1, fx2, fy2 = frame_bbox
+            return frame[fy1:fy2, fx1:fx2]
+        return person_crop
 
     def _assess_quality(self, face_crop: np.ndarray) -> QualityResult:
         if face_crop.size > 0:

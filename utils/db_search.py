@@ -1,6 +1,7 @@
 """Vector search (Atlas + Python fallback) and index maintenance."""
 
 import structlog
+import numpy as np
 from utils.db_client import get_faces_collection
 from utils.embedding_utils import compare_similarity, atlas_score_to_cosine
 from config import settings
@@ -94,7 +95,6 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> d
 
 
 def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5) -> list:
-    import numpy as np
     collection = get_faces_collection()
 
     query = {}
@@ -160,7 +160,6 @@ def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
     if threshold is None:
         threshold = settings.DEDUP_SIMILARITY_THRESHOLD
 
-    import numpy as np
     collection = get_faces_collection()
 
     unknowns = list(collection.find(

@@ -6,6 +6,7 @@ import structlog
 from typing import Dict, Optional
 from config import settings
 from pipeline.models import Track
+from config.status import Visibility
 from utils.image_utils import compute_iou
 
 logger = structlog.get_logger(__name__)
@@ -171,15 +172,15 @@ class TrackState:
     def _classify_visibility_inplace(self, track: Track):
         """Classify visibility directly on the track object (no dict lookup)."""
         if track.max_face_ratio >= settings.VISIBLE_FACE_RATIO:
-            track.visibility = "visible"
+            track.visibility = Visibility.VISIBLE
         elif track.max_face_ratio >= settings.PARTIAL_FACE_RATIO:
-            track.visibility = "partial"
+            track.visibility = Visibility.PARTIAL
         elif track.is_masked or track.face_detected_once:
-            track.visibility = "partial"
+            track.visibility = Visibility.PARTIAL
         elif not track.face_detected_once and track.total_frames_seen >= settings.MIN_TRACK_FRAMES:
-            track.visibility = "hidden"
+            track.visibility = Visibility.HIDDEN
         else:
-            track.visibility = "unknown"
+            track.visibility = Visibility.UNKNOWN
 
     def update_face_visibility(self, composite_id: str, face_detected: bool, face_ratio: float):
         with self._lock:
@@ -313,10 +314,11 @@ class TrackState:
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
-                existing_sim = track.person_name_similarity
-                if existing_sim == 0.0 or similarity >= existing_sim:
-                    track.person_name = name
-                    track.person_name_similarity = similarity
+                with track._lock:
+                    existing_sim = track.person_name_similarity
+                    if existing_sim == 0.0 or similarity >= existing_sim:
+                        track.person_name = name
+                        track.person_name_similarity = similarity
 
     def set_face_crop_path(self, track: 'Track', path: str):
         """Set the face crop path on the track directly.
@@ -326,6 +328,14 @@ class TrackState:
         """
         with track._lock:
             track.best_face_crop_path = path
+
+    def get_active_track_ids_and_boxes(self) -> dict:
+        """Return a snapshot of active tracks for IoU dedup (lock-safe).
+
+        Returns dict mapping composite_id -> (byte_track_id, person_box).
+        """
+        with self._lock:
+            return {cid: (t.track_id, t.person_box) for cid, t in self._tracks.items()}
 
     def set_pending_match_result(self, composite_id: str, match_result):
         with self._lock:

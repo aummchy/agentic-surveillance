@@ -47,7 +47,7 @@ class Colors:
         Status.UNKNOWN: RED,
         Status.BLACKLIST: RED,
         Status.MASKED_UNKNOWN: RED,
-        9: RED,  # HIDDEN
+        Status.HIDDEN: RED,
     }
 
 

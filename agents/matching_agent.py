@@ -1,6 +1,7 @@
 import numpy as np
 import structlog
 from pipeline.models import MatchResult
+from config.status import AlertLevel
 from utils.db_utils import vector_search
 
 logger = structlog.get_logger(__name__)
@@ -44,7 +45,7 @@ def run_matching_from_embedding(embedding: list, track_id: str = "unknown") -> M
                 top2=round(top2, 4) if top2 is not None else None,
                 margin=round(margin, 4) if margin is not None else None,
                 verified=best.get("verified", False),
-                alert_level=best.get("alert_level", "low"))
+                alert_level=best.get("alert_level", AlertLevel.LOW))
     return MatchResult(
         person_id=best.get("person_id"),
         name=best.get("name"),
@@ -54,7 +55,7 @@ def run_matching_from_embedding(embedding: list, track_id: str = "unknown") -> M
         image_url=best.get("image_url"),
         matched=True,
         verified=best.get("verified", False),
-        alert_level=best.get("alert_level", "low"),
+        alert_level=best.get("alert_level", AlertLevel.LOW),
         second_best_similarity=top2,
         margin=margin,
         candidate_count=len(matches),

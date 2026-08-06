@@ -30,6 +30,7 @@ import structlog
 from datetime import datetime
 from typing import Any, Dict, Optional
 from agents.base import BaseAgent
+from config import settings
 from config.status import Status, IS_KNOWN_THRESHOLD, LABEL_TO_STATUS
 from utils.db_utils import get_or_create_memory, update_visit_memory
 
@@ -157,24 +158,25 @@ class MemoryAgent(BaseAgent):
                                     is_typical_camera: bool, current_similarity: float) -> float:
         """Calculate how much memory should boost recognition confidence.
 
-        Returns a value between -10 and +20.
+        Returns a value between MEMORY_BOOST_MIN and MEMORY_BOOST_MAX.
         """
         boost = 0.0
 
         # Boost for returning visitors
         if visit_count > 0:
-            boost += min(10, visit_count * 2)  # +2 per visit, max +10
+            boost += min(settings.MEMORY_VISIT_BOOST_MAX,
+                         visit_count * settings.MEMORY_VISIT_BOOST_PER_VISIT)
 
-        # Boost for recent visits (within 7 days)
-        if days_since_last is not None and days_since_last <= 7:
-            boost += 5
-        elif days_since_last is not None and days_since_last <= 30:
-            boost += 2
+        # Boost for recent visits
+        if days_since_last is not None and days_since_last <= settings.MEMORY_RECENT_DAYS:
+            boost += settings.MEMORY_RECENT_BOOST
+        elif days_since_last is not None and days_since_last <= settings.MEMORY_SOMewhat_RECENT_DAYS:
+            boost += settings.MEMORY_SOMewhat_RECENT_BOOST
 
         # Boost for consistent similarity
-        if avg_similarity > 0.8:
+        if avg_similarity > settings.MEMORY_CONSISTENCY_HIGH_SIM:
             boost += 3
-        elif avg_similarity > 0.6:
+        elif avg_similarity > settings.MEMORY_CONSISTENCY_LOW_SIM:
             boost += 1
 
         # Boost for typical visit patterns
@@ -184,10 +186,10 @@ class MemoryAgent(BaseAgent):
             boost += 1
 
         # Penalty if current similarity is much lower than average
-        if avg_similarity > 0 and current_similarity < avg_similarity * 0.7:
-            boost -= 5
+        if avg_similarity > 0 and current_similarity < avg_similarity * settings.MEMORY_SIMILARITY_DROP_RATIO:
+            boost -= settings.MEMORY_SIMILARITY_DROP_PENALTY
 
-        return max(-10, min(20, boost))
+        return max(settings.MEMORY_BOOST_MIN, min(settings.MEMORY_BOOST_MAX, boost))
 
     def _build_reason(self, visit_count: int, days_since_last: int,
                       is_typical_time: bool, is_known: bool) -> str:

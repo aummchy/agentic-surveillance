@@ -53,9 +53,9 @@ def track_persons(frame: np.ndarray, persist: bool = True) -> list:
         frame,
         persist=persist,
         tracker=_TRACKER_CONFIG,
-        classes=[0],
+        classes=[settings.PERSON_CLASS_ID],
         conf=settings.PERSON_CONF_THRESHOLD,
-        iou=0.45,
+        iou=settings.YOLO_NMS_IOU,
         device=settings.YOLO_DEVICE,
         verbose=False
     )

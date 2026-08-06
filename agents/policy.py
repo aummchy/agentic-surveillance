@@ -23,7 +23,7 @@ from typing import Any, Dict
 from agents.base import BaseAgent
 from pipeline.models import Track, MatchResult, DecisionResult
 from config import settings
-from config.status import Status, STATUS_LABELS, LABEL_TO_STATUS
+from config.status import Status, STATUS_LABELS, LABEL_TO_STATUS, AlertLevel, Visibility
 
 logger = structlog.get_logger(__name__)
 
@@ -123,216 +123,255 @@ class PolicyAgent(BaseAgent):
     def _decide(self, recognition: Dict, memory: Dict, match_data: Dict,
                 track: Track, camera_id: str,
                 current_hour: int, is_office_hours: bool, is_weekday: bool) -> DecisionResult:
-        """Core decision logic with all rules centralized."""
+        """Core decision logic — evaluates rules in priority order.
 
-        # Extract recognition info
+        Each rule method returns DecisionResult if it matches, or None to
+        let the next rule evaluate.  First match wins.
+        """
+        ctx = self._build_decision_context(
+            recognition, memory, match_data, track, current_hour, is_office_hours, is_weekday)
+
+        rules = [
+            self._rule_blacklist,
+            self._rule_authorized,
+            self._rule_verified,
+            self._rule_auto_registered,
+            self._rule_known_visitor_memory,
+            self._rule_matched,
+            self._rule_hidden,
+            self._rule_masked,
+            self._rule_after_hours,
+        ]
+
+        for rule in rules:
+            result = rule(ctx)
+            if result is not None:
+                return result
+
+        return self._rule_unknown_default(ctx)
+
+    # ── Context extraction ──────────────────────────────────────
+
+    def _build_decision_context(self, recognition, memory, match_data,
+                                track, current_hour, is_office_hours, is_weekday):
+        """Extract all decision signals into a single dict for rule methods."""
         rec_status = recognition.get("status", Status.UNKNOWN)
         if isinstance(rec_status, str):
             rec_status = LABEL_TO_STATUS.get(rec_status, Status.UNKNOWN)
-        confidence = recognition.get("confidence", 0)
-        is_masked = recognition.get("is_masked", False)
 
-        # Extract match info
-        matched = match_data.get("matched", False)
-        person_id = match_data.get("person_id")
-        name = match_data.get("name")
-        tags = match_data.get("tags", [])
-        verified = match_data.get("verified", False)
-        # Use match_data similarity_score as the authoritative source (not recognition.similarity
-        # which can be 0 when recognition_result is None or stale during finalization)
-        similarity = match_data.get("similarity_score", 0)
+        return {
+            "rec_status": rec_status,
+            "confidence": recognition.get("confidence", 0),
+            "is_masked": recognition.get("is_masked", False),
+            "matched": match_data.get("matched", False),
+            "person_id": match_data.get("person_id"),
+            "name": match_data.get("name"),
+            "tags": match_data.get("tags", []),
+            "verified": match_data.get("verified", False),
+            "similarity": match_data.get("similarity_score", 0),
+            "visit_count": memory.get("visit_count", 0),
+            "is_known_from_memory": memory.get("is_known", False),
+            "visibility": track.visibility,
+            "track_lifetime": datetime.now().timestamp() - track.first_seen,
+            "display_name": match_data.get("name") or "Unknown",
+            "is_office_hours": is_office_hours,
+            "is_weekday": is_weekday,
+        }
 
-        # Extract memory info
-        visit_count = memory.get("visit_count", 0)
-        is_known_from_memory = memory.get("is_known", False)
+    # ── Rules (priority order) ─────────────────────────────────
 
-        # Extract track info
-        visibility = track.visibility
-        track_lifetime = datetime.now().timestamp() - track.first_seen
+    def _rule_blacklist(self, ctx: dict):
+        """RULE 1: Blacklisted person (highest priority, critical alert)."""
+        if "blacklist" not in ctx["tags"]:
+            return None
+        return DecisionResult(
+            status=Status.BLACKLIST,
+            alert_level=AlertLevel.CRITICAL,
+            person_id=ctx["person_id"],
+            name=ctx["name"],
+            reason=f"Blacklisted person detected: {ctx['display_name']}",
+            should_alert=True,
+            should_register=False,
+        )
 
-        display_name = name or "Unknown"
+    def _rule_authorized(self, ctx: dict):
+        """RULE 2: Authorized person (no alert)."""
+        if "authorized" not in ctx["tags"]:
+            return None
+        return DecisionResult(
+            status=Status.AUTHORIZED,
+            alert_level=AlertLevel.NONE,
+            person_id=ctx["person_id"],
+            name=ctx["name"],
+            reason=f"Authorized person: {ctx['display_name']}",
+            should_alert=False,
+            should_register=False,
+        )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 1: Blacklist (highest priority)
-        # ═══════════════════════════════════════════════════════
-        if "blacklist" in tags:
-            return DecisionResult(
-                status=Status.BLACKLIST,
-                alert_level="critical",
-                person_id=person_id,
-                name=name,
-                reason=f"Blacklisted person detected: {display_name}",
-                should_alert=True,
-                should_register=False
-            )
+    def _rule_verified(self, ctx: dict):
+        """RULE 3: Verified visitor (no alert)."""
+        if not ctx["verified"]:
+            return None
+        if ctx["rec_status"] < Status.KNOWN and ctx["similarity"] <= settings.VERIFIED_SIMILARITY_THRESHOLD:
+            return None
+        return DecisionResult(
+            status=Status.VERIFIED,
+            alert_level=AlertLevel.NONE,
+            person_id=ctx["person_id"],
+            name=ctx["name"],
+            reason=f"Verified visitor: {ctx['display_name']}",
+            should_alert=False,
+            should_register=False,
+        )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 2: Authorized
-        # ═══════════════════════════════════════════════════════
-        if "authorized" in tags:
-            return DecisionResult(
-                status=Status.AUTHORIZED,
-                alert_level="none",
-                person_id=person_id,
-                name=name,
-                reason=f"Authorized person: {display_name}",
-                should_alert=False,
-                should_register=False
-            )
+    def _rule_auto_registered(self, ctx: dict):
+        """RULE 4a: Auto-registered self-match (similarity > threshold)."""
+        if "auto_registered" not in ctx["tags"]:
+            return None
+        if ctx["similarity"] <= settings.AUTO_REGISTERED_SIMILARITY:
+            return None
+        return DecisionResult(
+            status=Status.KNOWN_VISITOR,
+            alert_level=AlertLevel.LOW,
+            person_id=ctx["person_id"],
+            name=ctx["name"],
+            reason=f"Auto-registered visitor: {ctx['display_name']} (similarity={ctx['similarity']:.2%}).",
+            should_alert=False,
+            should_register=False,
+        )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 3: Verified
-        # ═══════════════════════════════════════════════════════
-        if verified and (rec_status >= Status.KNOWN or similarity > settings.VERIFIED_SIMILARITY_THRESHOLD):
-            return DecisionResult(
-                status=Status.VERIFIED,
-                alert_level="none",
-                person_id=person_id,
-                name=name,
-                reason=f"Verified visitor: {display_name}",
-                should_alert=False,
-                should_register=False
-            )
+    def _rule_known_visitor_memory(self, ctx: dict):
+        """RULE 4b: Known visitor (matched + memory confirms)."""
+        if not ctx["matched"] or not ctx["is_known_from_memory"]:
+            return None
+        return DecisionResult(
+            status=Status.KNOWN_VISITOR,
+            alert_level=AlertLevel.LOW,
+            person_id=ctx["person_id"],
+            name=ctx["name"],
+            reason=f"Known visitor: {ctx['display_name']}. {ctx['visit_count']} previous visits.",
+            should_alert=False,
+            should_register=False,
+        )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 4a: Auto-registered self-match (similarity > 0.65)
-        # ═══════════════════════════════════════════════════════
-        if "auto_registered" in tags and similarity > settings.AUTO_REGISTERED_SIMILARITY:
+    def _rule_matched(self, ctx: dict):
+        """RULE 5: Matched but not memory-confirmed (new or uncertain)."""
+        if not ctx["matched"]:
+            return None
+
+        display_name = ctx["display_name"]
+        person_id = ctx["person_id"]
+        name = ctx["name"]
+        similarity = ctx["similarity"]
+        confidence = ctx["confidence"]
+
+        # If recognition already classified as "known", respect that
+        if ctx["rec_status"] >= Status.KNOWN:
             return DecisionResult(
                 status=Status.KNOWN_VISITOR,
-                alert_level="low",
+                alert_level=AlertLevel.LOW,
                 person_id=person_id,
                 name=name,
-                reason=f"Auto-registered visitor: {display_name} (similarity={similarity:.2%}).",
-                should_alert=False,
-                should_register=False
-            )
-
-        # ═══════════════════════════════════════════════════════
-        # RULE 4b: Known visitor (matched + memory confirms)
-        # ═══════════════════════════════════════════════════════
-        if matched and is_known_from_memory:
-            return DecisionResult(
-                status=Status.KNOWN_VISITOR,
-                alert_level="low",
-                person_id=person_id,
-                name=name,
-                reason=f"Known visitor: {display_name}. {visit_count} previous visits.",
-                should_alert=False,
-                should_register=False
-            )
-
-        # ═══════════════════════════════════════════════════════
-        # RULE 5: Matched but not verified (new or uncertain)
-        # ═══════════════════════════════════════════════════════
-        if matched:
-            # If recognition agent already classified as "known", respect that
-            # — it considered multi-signal scoring (quality, track duration, memory).
-            # This prevents RECOG=KNOWN but POLICY=UNKNOWN divergence.
-            if rec_status >= Status.KNOWN:
-                return DecisionResult(
-                    status=Status.KNOWN_VISITOR,
-                    alert_level="low",
-                    person_id=person_id,
-                    name=name,
-                    reason=f"Known visitor: {display_name}. Recognition confidence {confidence}%",
-                    should_alert=False,
-                    should_register=False
-                )
-            # Check similarity or confidence — high similarity alone is sufficient
-            if similarity >= settings.KNOWN_VISITOR_SIMILARITY or confidence >= settings.KNOWN_VISITOR_CONFIDENCE:
-                return DecisionResult(
-                    status=Status.KNOWN_VISITOR,
-                    alert_level="low",
-                    person_id=person_id,
-                    name=name,
-                    reason=f"Known visitor: {display_name}. High confidence match (similarity={similarity:.2%}).",
-                    should_alert=False,
-                    should_register=False
-                )
-            if similarity >= settings.MATCH_THRESHOLD:
-                # Matched an existing identity but not memory-confirmed as known
-                return DecisionResult(
-                    status=Status.UNKNOWN,
-                    alert_level="low",
-                    person_id=person_id,
-                    name=name,
-                    reason=f"Matched identity but not confirmed known (similarity={similarity:.2%}).",
-                    should_alert=False,
-                    should_register=False   # already linked to existing record
-                )
-            # Unreachable: vector_search filters by MATCH_THRESHOLD,
-            # so matched=True implies similarity >= MATCH_THRESHOLD.
-            logger.error("unreachable_policy_branch",
-                         similarity=similarity,
-                         threshold=settings.MATCH_THRESHOLD,
-                         person_id=person_id)
-            return DecisionResult(
-                status=Status.UNKNOWN,
-                alert_level="low",
-                person_id=person_id,
-                name=name,
-                reason="Internal policy invariant violated (similarity below MATCH_THRESHOLD).",
+                reason=f"Known visitor: {display_name}. Recognition confidence {confidence}%",
                 should_alert=False,
                 should_register=False,
             )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 6: Intentionally hidden (avoiding detection)
-        # ═══════════════════════════════════════════════════════
-        if visibility == "hidden":
+        # High similarity or confidence is sufficient
+        if similarity >= settings.KNOWN_VISITOR_SIMILARITY or confidence >= settings.KNOWN_VISITOR_CONFIDENCE:
             return DecisionResult(
-                status=Status.HIDDEN,
-                alert_level="high",
-                name="Unidentified Person",
-                reason="Person avoided face detection during track",
-                should_alert=True,
-                should_register=False
+                status=Status.KNOWN_VISITOR,
+                alert_level=AlertLevel.LOW,
+                person_id=person_id,
+                name=name,
+                reason=f"Known visitor: {display_name}. High confidence match (similarity={similarity:.2%}).",
+                should_alert=False,
+                should_register=False,
             )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 7: Masked unknown
-        # ═══════════════════════════════════════════════════════
-        if is_masked or visibility == "partial":
-            if track_lifetime > settings.LOITER_SECS:
-                alert_level = "high"
-                reason = "Masked unknown person loitering"
-            else:
-                alert_level = "medium"
-                reason = "Unknown person with partial visibility or mask"
-
-            return DecisionResult(
-                status=Status.MASKED_UNKNOWN,
-                alert_level=alert_level,
-                name="Masked Person",
-                reason=reason,
-                should_alert=True,
-                should_register=True
-            )
-
-        # ═══════════════════════════════════════════════════════
-        # RULE 8: After-hours unknown (higher alert)
-        # ═══════════════════════════════════════════════════════
-        if not is_office_hours or not is_weekday:
+        if similarity >= settings.MATCH_THRESHOLD:
             return DecisionResult(
                 status=Status.UNKNOWN,
-                alert_level="high",
-                name="After-Hours Unknown",
-                reason="Unknown person detected after hours",
-                should_alert=True,
-                should_register=True
+                alert_level=AlertLevel.LOW,
+                person_id=person_id,
+                name=name,
+                reason=f"Matched identity but not confirmed known (similarity={similarity:.2%}).",
+                should_alert=False,
+                should_register=False,
             )
 
-        # ═══════════════════════════════════════════════════════
-        # RULE 9: Unknown during office hours (default)
-        # ═══════════════════════════════════════════════════════
+        # Unreachable: vector_search filters by MATCH_THRESHOLD
+        logger.error("unreachable_policy_branch",
+                     similarity=similarity,
+                     threshold=settings.MATCH_THRESHOLD,
+                     person_id=person_id)
         return DecisionResult(
             status=Status.UNKNOWN,
-            alert_level="medium",
+            alert_level=AlertLevel.LOW,
+            person_id=person_id,
+            name=name,
+            reason="Internal policy invariant violated (similarity below MATCH_THRESHOLD).",
+            should_alert=False,
+            should_register=False,
+        )
+
+    def _rule_hidden(self, ctx: dict):
+        """RULE 6: Intentionally hidden (avoiding detection)."""
+        if ctx["visibility"] != Visibility.HIDDEN:
+            return None
+        return DecisionResult(
+            status=Status.HIDDEN,
+            alert_level=AlertLevel.HIGH,
+            name="Unidentified Person",
+            reason="Person avoided face detection during track",
+            should_alert=True,
+            should_register=False,
+        )
+
+    def _rule_masked(self, ctx: dict):
+        """RULE 7: Masked or partial visibility unknown."""
+        if not ctx["is_masked"] and ctx["visibility"] != Visibility.PARTIAL:
+            return None
+        if ctx["track_lifetime"] > settings.LOITER_SECS:
+            return DecisionResult(
+                status=Status.MASKED_UNKNOWN,
+                alert_level=AlertLevel.HIGH,
+                name="Masked Person",
+                reason="Masked unknown person loitering",
+                should_alert=True,
+                should_register=True,
+            )
+        return DecisionResult(
+            status=Status.MASKED_UNKNOWN,
+            alert_level=AlertLevel.MEDIUM,
+            name="Masked Person",
+            reason="Unknown person with partial visibility or mask",
+            should_alert=True,
+            should_register=True,
+        )
+
+    def _rule_after_hours(self, ctx: dict):
+        """RULE 8: After-hours unknown (higher alert)."""
+        if ctx["is_office_hours"] and ctx["is_weekday"]:
+            return None
+        return DecisionResult(
+            status=Status.UNKNOWN,
+            alert_level=AlertLevel.HIGH,
+            name="After-Hours Unknown",
+            reason="Unknown person detected after hours",
+            should_alert=True,
+            should_register=True,
+        )
+
+    def _rule_unknown_default(self, ctx: dict):
+        """RULE 9: Unknown during office hours (default)."""
+        return DecisionResult(
+            status=Status.UNKNOWN,
+            alert_level=AlertLevel.MEDIUM,
             name="Unidentified Person",
             reason="Unknown person detected",
             should_alert=True,
-            should_register=True
+            should_register=True,
         )
 
 

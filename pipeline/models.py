@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from config.status import Status
+from config.status import Status, Visibility
 
 
 class DedupStatus(Enum):
@@ -66,7 +66,7 @@ class Track:
     best_face_ratio: float = 0.0
     best_face_crop_path: str = ""
     best_person_crop_jpeg: Optional[bytes] = None  # JPEG bytes of person crop (for display)
-    visibility: str = "unknown"
+    visibility: Visibility = Visibility.UNKNOWN
     max_track_secs: float = 300.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -175,7 +175,7 @@ class TrackSnapshot:
     best_face_ratio: float = 0.0
     best_face_crop_path: str = ""
     best_person_crop_jpeg: Optional[bytes] = None  # JPEG bytes of person crop (for display)
-    visibility: str = "unknown"
+    visibility: Visibility = Visibility.UNKNOWN
     max_track_secs: float = 300.0
 
 

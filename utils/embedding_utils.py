@@ -61,7 +61,7 @@ class InsightFaceSingleton:
             l_channel = lab[:, :, 0]
             # Skip CLAHE if contrast is already adequate (std >= 40 is well-lit, high-contrast)
             l_std = float(l_channel.std())
-            if l_std >= 40.0:
+            if l_std >= settings.CLAHE_SKIP_CONTRAST_THRESHOLD:
                 return image
             clahe = cv2.createCLAHE(clipLimit=settings.CLAHE_CLIP_LIMIT,
                                      tileGridSize=(settings.CLAHE_TILE_SIZE, settings.CLAHE_TILE_SIZE))
@@ -69,7 +69,7 @@ class InsightFaceSingleton:
             return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
         elif len(image.shape) == 2:
             std = float(image.std())
-            if std >= 40.0:
+            if std >= settings.CLAHE_SKIP_CONTRAST_THRESHOLD:
                 return image
             clahe = cv2.createCLAHE(clipLimit=settings.CLAHE_CLIP_LIMIT,
                                      tileGridSize=(settings.CLAHE_TILE_SIZE, settings.CLAHE_TILE_SIZE))

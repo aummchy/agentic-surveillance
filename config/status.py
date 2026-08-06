@@ -4,13 +4,15 @@ All status values are integers (IntEnum). Higher = more trusted.
 Maps to/from display strings for logs and API.
 
 Usage:
-    from config.status import Status, STATUS_LABELS
+    from config.status import Status, STATUS_LABELS, AlertLevel, Visibility
     if decision.status >= Status.KNOWN:
         ...
     print(STATUS_LABELS[decision.status])  # "known"
+    if alert_level >= AlertLevel.HIGH:
+        ...
 """
 
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 
 
 class Status(IntEnum):
@@ -24,6 +26,31 @@ class Status(IntEnum):
     BLACKLIST = 7         # Blacklisted person
     MASKED_UNKNOWN = 8    # Masked/partial visibility unknown
     HIDDEN = 9            # Intentionally hidden
+
+
+class AlertLevel(StrEnum):
+    """Alert severity levels. Used for dispatch decisions and event logging."""
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class Visibility(StrEnum):
+    """Track visibility classification based on face detection landmarks."""
+    UNKNOWN = "unknown"
+    VISIBLE = "visible"
+    PARTIAL = "partial"
+    HIDDEN = "hidden"
+
+
+class SkipReason(StrEnum):
+    """Reasons a recognition pass was skipped for a track."""
+    HIGH_CONFIDENCE = "high_confidence"
+    NO_FACE = "no_face"
+    LOW_QUALITY = "low_quality"
+    EMBEDDING_FAILED = "embedding_failed"
 
 
 # Display labels for logs, API, and frontend
@@ -43,12 +70,12 @@ STATUS_LABELS: dict[int, str] = {
 LABEL_TO_STATUS: dict[str, Status] = {v: k for k, v in STATUS_LABELS.items()}
 
 # Statuses that resolve a track — skip further recognition
-RESOLVED_STATUSES: frozenset[int] = frozenset({
+RESOLVED_STATUSES: frozenset[Status] = frozenset({
     Status.VERIFIED, Status.KNOWN_VISITOR, Status.AUTHORIZED,
 })
 
 # Statuses that trigger per-track alert dedup
-UNVERIFIED_STATUSES: frozenset[int] = frozenset({
+UNVERIFIED_STATUSES: frozenset[Status] = frozenset({
     Status.UNKNOWN, Status.MASKED_UNKNOWN, Status.UNCERTAIN, Status.HIDDEN,
 })
 

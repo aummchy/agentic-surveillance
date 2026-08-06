@@ -2,6 +2,7 @@
 
 import structlog
 import uuid
+import numpy as np
 from datetime import datetime
 from pipeline.models import DedupResult, DedupStatus
 from utils.db_client import get_faces_collection
@@ -15,7 +16,6 @@ def _compute_mean_embedding(embeddings: list) -> list:
     """Compute the mean of a list of embeddings (L2-normalized)."""
     if not embeddings:
         return []
-    import numpy as np
     arr = np.array(embeddings, dtype=np.float32)
     mean = arr.mean(axis=0)
     norm = np.linalg.norm(mean)

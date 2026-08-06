@@ -42,7 +42,7 @@ def _get_client() -> httpx.Client:
             if _client is None or _client.is_closed:
                 _client = httpx.Client(
                     base_url=settings.OLLAMA_URL,
-                    timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=5.0),
+                    timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT, connect=settings.OLLAMA_CONNECT_TIMEOUT),
                 )
     return _client
 
@@ -83,7 +83,7 @@ def generate(
     if system:
         payload["system"] = system
 
-    for attempt in range(3):
+    for attempt in range(settings.LLM_MAX_RETRIES):
         try:
             resp = client.post("/api/generate", json=payload)
             resp.raise_for_status()
@@ -142,7 +142,7 @@ def chat_completion(
         },
     }
 
-    for attempt in range(3):
+    for attempt in range(settings.LLM_MAX_RETRIES):
         try:
             resp = client.post("/api/chat", json=payload)
             resp.raise_for_status()
