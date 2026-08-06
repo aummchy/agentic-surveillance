@@ -59,7 +59,7 @@ Race Conditions
    Duplicate Code
 7. compute_iou is defined in both track_state.py:21 AND image_utils.py:186 — identical implementations, different imports
    Config Inconsistencies
-8. JPEG_QUALITY_BROADCAST = 85 in config.jsonc but default 65 in settings.py — AGENTS.md says "Fixed 50→65" but config.jsonc overrides to 85
+8. JPEG_QUALITY_BROADCAST = 90 in config.jsonc but default 65 in settings.py — AGENTS.md says "Fixed 50→90" but config.jsonc overrides to 90
 9. FRAME_WIDTH/HEIGHT = 1920×1080 in config.jsonc but 1280×720 in settings.py defaults — docs describe 1280×720
 10. DEBUG_RECOGNITION and DEBUG_DUPLICATE_BOXES are true in the committed config.jsonc — causes verbose debug logging on every frame, hurts performance
     Performance

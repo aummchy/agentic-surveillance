@@ -39,7 +39,7 @@ Called every frame. Returns tracks that have timed out.
 ```
 1. Under _lock:
    For each track:
-   - IF is_expired(TRACK_TIMEOUT_SECS=3.0) OR is_max_lifetime_exceeded(MAX_TRACK_SECS=300):
+   - IF is_expired(TRACK_TIMEOUT_SECS=15.0) OR is_max_lifetime_exceeded(MAX_TRACK_SECS=300):
      - IF already reported (expired_reported=True): skip
      - Classify visibility (before removal)
      - Mark as expired_reported=True

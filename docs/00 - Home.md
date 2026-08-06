@@ -88,7 +88,7 @@ pipeline/                        ← Computer vision (tracker, face, quality, mo
 utils/                           ← Shared utilities (DB, embedding, image, LLM)
 config/                          ← Settings loader + config.jsonc + ByteTrack YAML
 dashboard/                       ← FastAPI backend + React frontend
-tests/                           ← 76 pytest tests
+tests/                           ← 84 pytest tests
 ```
 
 ## Quick Navigation by Concept

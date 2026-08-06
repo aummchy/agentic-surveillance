@@ -91,7 +91,7 @@ main.py (entry point, wires everything)
 ## Critical patterns
 
 - **Load models once.** YOLO in `tracker.py`, InsightFace as singleton in `embedding_utils.py`. Never reload in per-frame loops.
-- **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (2 threads) run concurrently.
+- **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (4 threads) run concurrently.
 - **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
 - **Threshold conversion.** Atlas `vectorSearchScore = (1+cosine)/2`. Always convert back: `raw_cosine = (atlas_score * 2) - 1` before comparing against `MATCH_THRESHOLD`. Use `compare_similarity()` in `utils/embedding_utils.py`.
 - **Match threshold.** Keep `MATCH_THRESHOLD` ≤ 0.45. Default is 0.45. Higher rejects genuine same-person matches under indoor lighting.
@@ -116,7 +116,7 @@ Quality gates prevent low-quality embeddings from overwriting high-quality ones 
 
 ## Gotchas
 
-- `axios` pinned to `1.7.9` in `dashboard/frontend/` — versions ≥1.7.10 break Vite's esbuild
+- `axios` uses `^1.7.9` (compatible range) in `dashboard/frontend/` — versions ≥1.7.10 break Vite's esbuild
 - Console shows INFO+ only; full debug logs go to `logs/surveillance.jsonl` and `logs/surveillance.debug.log`
 - `FutureWarning` from insightface is harmless (deprecated `estimate` in 0.26)
 - Camera streams via WebSocket, not a local OpenCV window — open browser to see feed
@@ -141,7 +141,7 @@ class Status(IntEnum):
     AUTHORIZED = 6        # Employee / authorized person
     BLACKLIST = 7         # Blacklisted person (highest priority)
     MASKED_UNKNOWN = 8    # Masked / partial-visibility unknown
-    HIDDEN = 9            # Intentionally avoiding detection
+    HIDDEN = 9            # Intentionally hidden
 ```
 
 - **Higher number = more trusted.** `is_known` becomes `status >= 3`.
@@ -180,7 +180,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 - **2026-07-09**: Removed dead code (unused imports, dead fields, `get_embedding_for_track` method) and fixed `JPEG_QUALITY_BROADCAST` 50→90.
 - **2026-07-30**: Added quality-gated recognition skip — `else: return` in `camera_agent.py:321` prevents storing/searching embeddings from low-quality (blurry/dark/small) faces.
 - **2026-07-30**: Performance — unconditional `cv2.resize()` to 1280×720 before YOLO inference (`camera_agent.py:146`); `FRAME_SKIP` skips every other frame before JPEG encode (`track_processor.py:46`); WebSocket broadcast resized to 640×360 preview (`track_processor.py:52`).
-- **2026-08-04**: Updated documentation — refreshed AGENTS.md with current architecture, added base.py to architecture tree, updated test count to 76.
+- **2026-08-04**: Updated documentation — refreshed AGENTS.md with current architecture, added base.py to architecture tree, updated test count to 84.
 - **2026-08-05**: Refactored codebase — deleted `pipeline/face.py` (inlined `compute_face_ratio()` into `quality_agent.py`), deleted `agents/decision_agent.py` (replaced with `decide()` in `policy.py`), extracted `config/logging_setup.py` from `settings.py`, split `utils/db_utils.py` (879 lines) into 5 domain modules (`db_client.py`, `db_faces.py`, `db_events.py`, `db_memory.py`, `db_search.py`) + re-export facade. Updated test mocks to target domain modules directly.
 - **2026-08-05**: Status refactor — replaced all string statuses with centralized `Status(IntEnum)` enum in `config/status.py`. Updated 16 source files, 6 test files, and all MongoDB queries. Numeric everywhere (MongoDB, API, logs, frontend). Higher number = more trusted. Migration script: `scripts/migrate_status_ints.py`.
 
@@ -210,7 +210,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 ## Coding rules
 
 - **Load models once.** YOLO in `tracker.py`, InsightFace as singleton in `embedding_utils.py`. Never reload in per-frame loops.
-- **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (2 threads) run concurrently.
+- **Thread safety.** `TrackState` uses `threading.Lock`. Camera thread and worker pool (4 threads) run concurrently.
 - **I/O decoupled from camera.** MongoDB, Cloudinary, alerts run via `queue.Queue` + workers. Camera loop must never block.
 - **Quality gates before embedding storage.** Invalid faces (blur < 40, brightness outside 35-255, area < 1200px²) never get embeddings stored or searched.
 - **Confidence never downgrades.** Only upgrades across recognition passes. Critical alerts always update.

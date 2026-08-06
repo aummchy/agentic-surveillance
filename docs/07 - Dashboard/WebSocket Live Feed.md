@@ -12,7 +12,7 @@
 3. If counter % FRAME_SKIP (2) != 0 → skip (only every 2nd frame)
 4. Submit to JPEG encode executor:
    a. preview = cv2.resize(frame, (640, 360))
-   b. JPEG encode (quality=65)
+   b. JPEG encode (quality=90)
    c. broadcast_frame(jpeg_bytes) via asyncio coroutine
 ```
 
@@ -74,7 +74,7 @@ connected_clients: Set[WebSocket] = set()
 
 ## Performance
 
-- **Frame size**: ~50KB JPEG at quality 65
+- **Frame size**: ~50KB JPEG at quality 90
 - **Max frame size**: 1MB cap
 - **Broadcast rate**: Every 2nd frame (~15fps at 30fps camera)
 - **Resolution**: 640×360 (downscaled from 1280×720)

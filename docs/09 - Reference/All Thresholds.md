@@ -10,7 +10,7 @@
 | `DET_SCORE_MIN` | 0.40 | Standard face detection threshold | settings.py |
 | `DET_SCORE_RELAXED` | 0.20 | Relaxed face detection fallback (must be ≤ DET_SCORE_MIN) | settings.py |
 | `EMBEDDING_DET_SCORE_MIN` | 0.40 | Minimum det_score to generate embedding | settings.py |
-| `TRACK_TIMEOUT_SECS` | 3.0 | Person gone this long = track ends | settings.py |
+| `TRACK_TIMEOUT_SECS` | 15.0 | Person gone this long = track ends | settings.py |
 | `MAX_TRACK_SECS` | 300 | Force-finalize after this many seconds | settings.py |
 | `RECOGNITION_INTERVAL_FRAMES` | 20 | Run progressive recognition every N frames | settings.py |
 | `MIN_TRACK_FRAMES` | 15 | Min frames before "hidden" classification | settings.py |
@@ -21,13 +21,11 @@
 |-----------|---------|---------|------|
 | `MATCH_THRESHOLD` | 0.45 | Raw cosine for face match (max recommended) | settings.py |
 | `DEDUP_SIMILARITY_THRESHOLD` | 0.5 | Merge auto-registrations above this similarity | settings.py |
-| `EMBEDDING_CACHE_COSINE_THRESHOLD` | 0.005 | Skip Atlas if embedding nearly identical | recognition_pipeline.py |
 
 ## Recognition
 
 | Threshold | Default | Purpose | File |
 |-----------|---------|---------|------|
-| `VERY_HIGH_SIMILARITY` | 0.90 | Definite known (skip memory + recognition) | settings.py |
 | `HIGH_CONFIDENCE_SIMILARITY` | 0.85 | Skip re-recognition in camera loop | settings.py |
 | `KNOWN_VISITOR_SIMILARITY` | 0.85 | Policy auto-escalates to known_visitor | settings.py |
 | `KNOWN_VISITOR_CONFIDENCE` | 80 | Policy auto-escalates if confidence >= 80 | settings.py |
@@ -111,7 +109,6 @@
 | Threshold | Default | Purpose | File |
 |-----------|---------|---------|------|
 | `VECTOR_SEARCH_CANDIDATES` | 150 | Atlas HNSW candidate pool | settings.py |
-| `VECTOR_SEARCH_LIMIT` | 5 | Atlas top results returned | settings.py |
 | `SCAN_LIMIT` | 500 | Max docs for Python cosine fallback | settings.py |
 
 ## Embedding history

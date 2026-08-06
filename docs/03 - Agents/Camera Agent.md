@@ -28,7 +28,7 @@ Internal state:
 - `track_state: TrackState` — thread-safe track dictionary
 - `_recognizing_tracks: set` — tracks currently being recognized (prevents duplicates)
 - `_finalized_track_ids: set` — tracks already submitted for finalization
-- `_recognition_executor: ThreadPoolExecutor(max_workers=2)` — runs recognition off main thread
+- `_recognition_executor: ThreadPoolExecutor(max_workers=4)` — runs recognition off main thread
 - `_timing: TimingCollector` — performance metrics
 
 ### `start()` (line 86)
@@ -123,7 +123,7 @@ Every iteration:
 
 ## Key design decisions
 
-1. **Recognition runs off main thread** — `_recognition_executor` has 2 workers, so 2 tracks can be recognized concurrently
+1. **Recognition runs off main thread** — `_recognition_executor` has 4 workers, so 4 tracks can be recognized concurrently
 2. **Quality throttle** — skips recognition if face quality didn't improve by ≥0.10 (avoids wasted CPU)
 3. **Embedding cache** — if new embedding is nearly identical to last (cosine <0.005), skip Atlas search
 4. **Critical alerts fire early** — blacklist alerts dispatch during progressive recognition, not deferred to finalization

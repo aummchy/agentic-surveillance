@@ -37,7 +37,7 @@ Called by `CameraAgent.on_frame_annotated`. Handles WebSocket frame broadcasting
 2. If counter % FRAME_SKIP != 0 → return (skip this frame)
 3. Submit to executor:
    a. preview = cv2.resize(frame, (640, 360))
-   b. JPEG encode (quality=65)
+   b. JPEG encode (quality=90)
    c. broadcast_frame(jpeg_bytes) via WebSocket
 ```
 

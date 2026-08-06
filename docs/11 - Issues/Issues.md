@@ -106,7 +106,7 @@ Use the same CLAHE-enhanced crop for both quality and embedding, or extract qual
 
 ## ISSUE-4 — `active_ids` dead code in camera loop
 
-**Severity:** Cosmetic · **Status:** Open · **File:** `agents/camera_agent.py:165,169`
+**Severity:** Cosmetic · **Status:** Resolved · **File:** `agents/camera_agent.py:165,169`
 
 ### What's wrong
 
@@ -120,7 +120,7 @@ Remove the `active_ids` variable entirely (lines 165 and 169).
 
 ## ISSUE-5 — `EMBEDDING_CACHE_COSINE_THRESHOLD` in docs but not in code
 
-**Severity:** Cosmetic · **Status:** Open · **File:** `docs/09 - Reference/All Thresholds.md:24`
+**Severity:** Cosmetic · **Status:** Resolved · **File:** `docs/09 - Reference/All Thresholds.md:24`
 
 ### What's wrong
 
@@ -152,7 +152,7 @@ Store the face crop on low_quality path even when quality is invalid, but only i
 
 ## ISSUE-7 — `DEDUP_SIMILARITY_THRESHOLD` default mismatch
 
-**Severity:** Cosmetic · **Status:** Open · **Files:** `config/settings.py:410,592` vs `config/config.jsonc:15`
+**Severity:** Cosmetic · **Status:** Resolved · **Files:** `config/settings.py:410,592` vs `config/config.jsonc:15`
 
 ### What's wrong
 
@@ -166,7 +166,7 @@ Change settings.py default to `0.5` to match config.jsonc and docs.
 
 ## ISSUE-8 — `repomix-output.*` stale snapshot files
 
-**Severity:** Low · **Status:** Open · **Files:** `repomix-output.xml`, `repomix-output.json`
+**Severity:** Low · **Status:** Resolved · **Files:** `repomix-output.xml`, `repomix-output.json`
 
 ### What's wrong
 

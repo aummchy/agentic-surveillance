@@ -41,7 +41,7 @@ The system runs as **two concurrent halves** connected by a `queue.Queue`:
 | Half | Thread | What it does | Blocking? |
 |------|--------|-------------|-----------|
 | **Camera** | Main thread | Capture frames, detect, track, run progressive recognition | Yes (this IS the main loop) |
-| **Workers** | 2 background threads | Finalize tracks, match, decide, store, alert | No (queue + executor) |
+| **Workers** | 4 background threads | Finalize tracks, match, decide, store, alert | No (queue + executor) |
 
 This decoupling ensures the camera loop **never blocks** on slow I/O (MongoDB, Cloudinary, alerts).
 

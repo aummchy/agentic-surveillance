@@ -62,7 +62,7 @@ Priority: `.env` > `config.jsonc` > defaults
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `PERSON_CONF_THRESHOLD` | 0.40 | YOLO confidence |
-| `TRACK_TIMEOUT_SECS` | 3.0 | Track expiry |
+| `TRACK_TIMEOUT_SECS` | 15.0 | Track expiry |
 | `MAX_TRACK_SECS` | 300 | Max track lifetime |
 | `DET_SCORE_MIN` | 0.40 | Standard face detection |
 | `DET_SCORE_RELAXED` | 0.20 | Relaxed face detection |
@@ -127,12 +127,9 @@ Priority: `.env` > `config.jsonc` > defaults
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `VERY_HIGH_SIMILARITY` | 0.90 | Definite known |
 | `HIGH_CONFIDENCE_SIMILARITY` | 0.85 | Skip re-recognition |
 | `KNOWN_VISITOR_SIMILARITY` | 0.85 | Policy escalation |
 | `KNOWN_VISITOR_CONFIDENCE` | 80 | Policy escalation |
-| `BORDERLINE_FACE_QUALITY` | 0.8 | Borderline quality |
-| `MASK_CONFIDENCE_PENALTY` | 0.85 | Legacy mask penalty |
 
 ### Policy
 
@@ -169,7 +166,6 @@ Priority: `.env` > `config.jsonc` > defaults
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `VECTOR_SEARCH_CANDIDATES` | 150 | Atlas candidate pool |
-| `VECTOR_SEARCH_LIMIT` | 5 | Atlas results |
 | `SCAN_LIMIT` | 500 | Python fallback limit |
 | `EMBEDDING_HISTORY_CAP` | 25 | Embedding FIFO cap |
 

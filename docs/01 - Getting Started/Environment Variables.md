@@ -39,12 +39,12 @@ All set in `.env` file at project root. Loaded by `python-dotenv` in `config/set
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CAMERA_SOURCE` | `""` | RTSP URL or file path (overrides CAMERA_INDEX) |
+| `CAMERA_SOURCE` | `""` | RTSP URL or file path (overrides CAMERA_INDEX). Set in config.jsonc for test videos. |
 | `CAMERA_INDEX` | `0` | Webcam device index |
 | `CAMERA_ID` | `cam_01` | Camera identifier for composite track IDs |
 | `CAMERA_BACKEND` | `""` | Video backend (`dshow`, `msmf`, or auto) |
-| `FRAME_WIDTH` | `1280` | Capture width |
-| `FRAME_HEIGHT` | `720` | Capture height |
+| `FRAME_WIDTH` | `1920` | Capture width |
+| `FRAME_HEIGHT` | `1080` | Capture height |
 | `FRAME_SKIP` | `2` | Skip every Nth frame before JPEG encode |
 
 ## LLM

@@ -15,11 +15,11 @@ Main thread
 │   ├── draw_annotations()
 │   └── broadcast_frame() — JPEG encode + WebSocket
 │
-├── Recognition executor (2 threads)
+├── Recognition executor (4 threads)
 │   ├── _progressive_recognition() — face detect → quality → embed → match → decide
 │   └── _finalize_track() — final embedding retry
 │
-├── Track worker pool (2 threads)
+├── Track worker pool (4 threads)
 │   └── worker_process_tracks() — queue consumer: final match → decide → store → alert → broadcast
 │
 ├── JPEG encode executor (2 threads, inside TrackProcessor)
@@ -66,7 +66,7 @@ The recognition executor handles face detection, embedding, matching, and decisi
 ## Queue flow
 
 ```
-Camera thread                    Worker threads (×2)
+Camera thread                    Worker threads (×4)
      │                               │
      │  track_queue.put(track)  ──►  │  track_queue.get()
      │                               │  process(track)

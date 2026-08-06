@@ -33,7 +33,7 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
    - Quality didn't improve by ≥0.10?
    → If any: skip, continue to next track
 
-7. Submit to ThreadPoolExecutor(max_workers=2):
+7. Submit to ThreadPoolExecutor(max_workers=4):
    _progressive_recognition(frame.copy(), track)
 ```
 
@@ -96,7 +96,7 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
 
 ```
 15. Track expires when:
-    - No detection for >3 seconds (TRACK_TIMEOUT_SECS)
+    - No detection for >15 seconds (TRACK_TIMEOUT_SECS)
     - Or track alive >300 seconds (MAX_TRACK_SECS)
 
 16. Classify visibility BEFORE removal:
@@ -131,7 +131,7 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
 ```
 20. Every FRAME_SKIP (2) frames:
     a. Resize to 640×360
-    b. JPEG encode (quality=65)
+    b. JPEG encode (quality=90)
     c. Submit to executor → broadcast_frame() via WebSocket
 ```
 
