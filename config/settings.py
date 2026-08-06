@@ -388,3 +388,6 @@ MEMORY_TYPICAL_HOURS_MAX = _get("MEMORY_TYPICAL_HOURS_MAX", "MEMORY_TYPICAL_HOUR
 
 # ── Display ───────────────────────────────────────────────────
 DISPLAY_NAME_TRUNCATE_LEN = _get("DISPLAY_NAME_TRUNCATE_LEN", "DISPLAY_NAME_TRUNCATE_LEN", 8, int)
+
+# ── API ───────────────────────────────────────────────────────
+API_BASE_URL = _get("API_BASE_URL", "API_BASE_URL", "http://localhost:8000")

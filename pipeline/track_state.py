@@ -13,6 +13,13 @@ logger = structlog.get_logger(__name__)
 
 
 class TrackState:
+    """Thread-safe state manager for active person tracks.
+
+    Coordinates between the camera thread (update, get_expired_tracks) and
+    recognition workers (set_best_face, set_embedding, etc.) using per-track
+    locks and an in-flight reference counter to prevent premature removal.
+    """
+
     def __init__(self) -> None:
         self._tracks: Dict[str, Track] = {}
         self._lock = threading.Lock()
@@ -52,6 +59,14 @@ class TrackState:
 
     def update(self, camera_id: str, track_id: int, box: tuple,
                frame: np.ndarray = None) -> Optional[Track]:
+        """Update an existing track or create a new one.
+
+        If a track with the given byte_track_id already exists, update its
+        bounding box and last_seen time. Otherwise, allocate a new generation
+        and create a fresh Track object.
+
+        Returns the updated or newly created Track, or None if creation failed.
+        """
         with self._lock:
             # Check if this bt_id already has an active track
             for cid, existing in self._tracks.items():
@@ -108,14 +123,26 @@ class TrackState:
             return track
 
     def get(self, composite_id: str) -> Optional[Track]:
+        """Retrieve a track by its composite ID.
+
+        Returns the Track object if found, None otherwise.
+        """
         with self._lock:
             return self._tracks.get(composite_id)
 
     def get_all(self) -> List[Track]:
+        """Return a snapshot of all active tracks.
+
+        Returns a new list (safe to iterate while other threads modify _tracks).
+        """
         with self._lock:
             return list(self._tracks.values())
 
     def debug_snapshot(self) -> List[dict]:
+        """Return a debug-friendly snapshot of all tracks.
+
+        Each dict contains key track properties for logging and diagnostics.
+        """
         with self._lock:
             return [
                 {"id": t.track_id,
@@ -132,6 +159,11 @@ class TrackState:
             ]
 
     def remove(self, composite_id: str) -> Optional[Track]:
+        """Remove a track by its composite ID.
+
+        Releases the byte_track_id generation for reuse.
+        Returns the removed Track, or None if not found.
+        """
         with self._lock:
             track = self._tracks.pop(composite_id, None)
             if track:
@@ -139,6 +171,11 @@ class TrackState:
             return track
 
     def get_expired_tracks(self) -> List[Track]:
+        """Identify and return tracks that have exceeded their timeout.
+
+        Tracks with in-flight recognition tasks are reported but NOT removed
+        until end_recognition() clears the last reference.
+        """
         expired = []
         with self._lock:
             to_remove = []
@@ -183,6 +220,10 @@ class TrackState:
             track.visibility = Visibility.UNKNOWN
 
     def update_face_visibility(self, composite_id: str, face_detected: bool, face_ratio: float) -> None:
+        """Update face detection stats for a track.
+
+        Increments face detection count and updates max_face_ratio.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -290,6 +331,11 @@ class TrackState:
                 track.fallback_frame_jpeg = jpeg_bytes
 
     def set_embedding(self, composite_id: str, embedding: list, is_masked: bool = False, det_score: float = 0.0) -> tuple[bool, str]:
+        """Store an embedding for a track if quality is sufficient.
+
+        Only overwrites if det_score exceeds the existing score by the
+        configured improvement threshold. Returns (success, reason).
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -303,6 +349,10 @@ class TrackState:
             return (False, "track_removed")
 
     def set_decision(self, composite_id: str, decision: int) -> None:
+        """Set the decision status for a track.
+
+        Never overwrites alerted=True; use mark_alerted_once() for that.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -311,6 +361,10 @@ class TrackState:
                     # Never overwrite alerted=True — mark_alerted_once() is the sole writer
 
     def set_person_name(self, composite_id: str, name: str, similarity: float = 0.0) -> None:
+        """Set the identified person name for a track.
+
+        Only upgrades: new similarity must be >= existing similarity.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -338,6 +392,11 @@ class TrackState:
             return {cid: (t.track_id, t.person_box) for cid, t in self._tracks.items()}
 
     def set_pending_match_result(self, composite_id: str, match_result: Any) -> None:
+        """Store the matching agent result for a track.
+
+        Only upgrades: new similarity >= existing similarity.
+        Never lets a no-match (sim=0) clobber a real match.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -348,6 +407,10 @@ class TrackState:
                     track.pending_match_result = match_result
 
     def set_pending_memory_context(self, composite_id: str, memory_context: dict) -> None:
+        """Store the memory agent result for a track.
+
+        Only upgrades: is_known True > False; visit_count higher > lower.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -364,6 +427,10 @@ class TrackState:
                         track.pending_memory_context = memory_context
 
     def set_pending_recognition_data(self, composite_id: str, recognition_result: dict) -> None:
+        """Store the recognition agent result for a track.
+
+        Only upgrades: new confidence > existing confidence.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:
@@ -375,6 +442,10 @@ class TrackState:
                     track.pending_recognition = recognition_result
 
     def set_recognition_snapshot(self, composite_id: str, quality: float, status: int) -> None:
+        """Store a snapshot of recognition results for debugging.
+
+        Records the face quality, status, and timestamp of the last recognition pass.
+        """
         with self._lock:
             track = self._tracks.get(composite_id)
             if track:

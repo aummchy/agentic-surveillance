@@ -76,8 +76,8 @@ class CameraAgent:
                 if attr is not None:
                     try:
                         cap.set(attr, settings.CAMERA_READ_TIMEOUT_MS)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("camera_prop_set_failed", prop=prop, error=str(e))
         return cap
 
     def _apply_frame_props(self) -> str:
@@ -414,7 +414,7 @@ class CameraAgent:
                 save_image(result.face_crop, crop_path)
                 self.track_state.set_face_crop_path(track, crop_path)
                 logger.info("face_crop_saved", track_id=track.track_id, path=crop_path,
-                            url=f"http://localhost:8000/{crop_path.replace(chr(92), '/')}")
+                            url=f"{settings.API_BASE_URL}/{crop_path.replace(chr(92), '/')}")
 
         # Store embedding, match, recognition, and memory results
         if result.embedding is not None:

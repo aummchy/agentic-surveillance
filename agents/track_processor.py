@@ -161,8 +161,8 @@ class TrackProcessor:
             logger.error("track_processing_failed", track_id=track.track_id, error=str(e), exc_info=True)
             try:
                 self._log_event(track, Status.UNKNOWN, "none", False, 0.0, getattr(track, 'image_url', None))
-            except Exception:
-                logger.error("event_log_failed_after_error", track_id=track.track_id, exc_info=True)
+            except Exception as e2:
+                logger.error("event_log_failed_after_error", track_id=track.track_id, error=str(e2), exc_info=True)
 
     def _run_matching(self, snap) -> MatchResult:
         """Run vector search matching if no pending result exists."""
@@ -326,7 +326,7 @@ class TrackProcessor:
             "image_url": image_url,
             "person_crop_url": person_crop_url,
             "best_face_crop_url": (
-                f"http://localhost:8000/{snap.best_face_crop_path.replace(chr(92), '/')}"
+                f"{settings.API_BASE_URL}/{snap.best_face_crop_path.replace(chr(92), '/')}"
                 if snap.best_face_crop_path else None
             ),
             "reason": f"Track finalized: {STATUS_LABELS.get(decision.status, str(decision.status))}",

@@ -71,12 +71,18 @@ class Track:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def is_expired(self, timeout_secs: float) -> bool:
+        """Check if track has not been seen within the timeout window."""
         return (time.time() - self.last_seen) > timeout_secs
 
     def is_max_lifetime_exceeded(self) -> bool:
+        """Check if track has exceeded its maximum lifetime."""
         return (time.time() - self.first_seen) > self.max_track_secs
 
     def update_confidence_if_higher(self, new_confidence: int) -> bool:
+        """Update confidence if new value is higher.
+
+        Returns True if confidence was updated, False otherwise.
+        """
         with self._lock:
             if new_confidence > self.confidence:
                 self.confidence = new_confidence
@@ -84,6 +90,10 @@ class Track:
             return False
 
     def mark_alerted_once(self) -> bool:
+        """Mark track as alerted (one-shot).
+
+        Returns True if this is the first alert, False if already alerted.
+        """
         with self._lock:
             if not self.alerted:
                 self.alerted = True
@@ -91,6 +101,10 @@ class Track:
             return False
 
     def mark_finalized_once(self) -> bool:
+        """Mark track as finalized (one-shot).
+
+        Returns True if this is the first finalization, False if already finalized.
+        """
         with self._lock:
             if not self._finalized:
                 self._finalized = True
@@ -98,6 +112,10 @@ class Track:
             return False
 
     def snapshot(self) -> TrackSnapshot:
+        """Create an immutable snapshot of the track state.
+
+        Used for thread-safe reads during finalization and event logging.
+        """
         with self._lock:
             return TrackSnapshot(
                 track_id=self.track_id,

@@ -56,8 +56,8 @@ def log_event(track_id: str, camera_id: str, status: int, alert_level: str,
 
     try:
         collection.insert_one(doc)
-    except Exception:
-        logger.warning("event_insert_failed", track_id=track_id, camera_id=camera_id)
+    except Exception as e:
+        logger.warning("event_insert_failed", track_id=track_id, camera_id=camera_id, error=str(e))
 
 
 def get_events_with_faces(limit: int = 50, offset: int = 0,

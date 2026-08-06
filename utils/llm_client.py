@@ -256,7 +256,8 @@ def is_available() -> bool:
         client = _get_client()
         resp = client.get("/api/tags", timeout=3.0)
         _avail_cache_val = resp.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.debug("llm_availability_check_failed", error=str(e))
         _avail_cache_val = False
     _avail_cache_ts = now
     return _avail_cache_val

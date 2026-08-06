@@ -59,6 +59,13 @@ def _embedding_to_list(embedding: Any) -> list:
 
 
 class RecognitionPipeline:
+    """Orchestrates the full recognition pipeline: detect → quality → embed → match → decide.
+
+    Coordinates face detection, quality assessment, embedding generation,
+    vector search matching, memory lookup, and policy decision into a
+    single PipelineResult.
+    """
+
     def __init__(self, matching_fn: Optional[Callable] = None,
                  recognition_agent: Optional[Any] = None,
                  memory_agent: Optional[Any] = None,
@@ -74,6 +81,11 @@ class RecognitionPipeline:
         self._decide_fn = decide_fn or decide
 
     def run(self, frame: np.ndarray, track: Track) -> PipelineResult:
+        """Execute the full recognition pipeline for a single track.
+
+        Returns a PipelineResult containing decision, match, recognition,
+        memory, embedding, quality, and timing metrics.
+        """
         t_total = time.perf_counter()
 
         with track._lock:
@@ -266,6 +278,10 @@ class RecognitionPipeline:
         return person_crop
 
     def _assess_quality(self, face_crop: np.ndarray) -> QualityResult:
+        """Assess face quality (blur, brightness, area) for a face crop.
+
+        Returns a QualityResult with is_valid flag and quality scores.
+        """
         if face_crop.size > 0:
             quality = compute_quality(face_crop)
             logger.debug("face_quality",
@@ -279,6 +295,10 @@ class RecognitionPipeline:
         return quality
 
     def _build_embedding(self, face_det: "_FaceResult", track: Track) -> Optional["_EmbedResult"]:
+        """Generate embedding from face crop and run vector search matching.
+
+        Returns an _EmbedResult with embedding, match, and timing metrics.
+        """
         t_embed = time.perf_counter()
         embedding_list = _embedding_to_list(face_det.best["embedding"])
         embed_ms = round((time.perf_counter() - t_embed) * 1000, 1)
@@ -295,6 +315,10 @@ class RecognitionPipeline:
         return _EmbedResult(embedding=embedding_list, match=match, metrics=metrics)
 
     def _lookup_memory(self, track: Track, match: Optional[MatchResult]) -> Dict[str, Any]:
+        """Look up visit history and memory context for a matched person.
+
+        Returns empty dict if no match or person_id is available.
+        """
         if not match or not match.matched or not match.person_id:
             return {}
 
@@ -315,6 +339,10 @@ class RecognitionPipeline:
                          quality: QualityResult,
                          memory: Dict[str, Any],
                          face_det: "_FaceResult") -> Dict[str, Any]:
+        """Run the recognition agent to classify identity and confidence.
+
+        Returns a dict with status, confidence, is_masked, and other fields.
+        """
         track_duration = time.time() - track.first_seen
         face_quality = quality.overall_score if quality and quality.overall_score > 0 else None
         return self._recognition_agent.run({
@@ -332,6 +360,10 @@ class RecognitionPipeline:
     def _run_policy(self, track: Track, match: Optional[MatchResult],
                     recognition: Dict[str, Any],
                     memory: Dict[str, Any]) -> DecisionResult:
+        """Run the policy agent to make a final decision.
+
+        Returns a DecisionResult with status, alert_level, and action flags.
+        """
         return self._decide_fn(track, match, recognition, memory)
 
 
