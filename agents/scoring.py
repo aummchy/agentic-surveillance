@@ -152,6 +152,7 @@ def _log_calculation(b: ScoreBreakdown):
 
 
 def clip(x: float, lo: float, hi: float) -> float:
+    """Clamp a value to [lo, hi] range."""
     return max(lo, min(hi, x))
 
 
@@ -202,6 +203,11 @@ def compute_confidence(
     track_id: str = "unknown"
 ) -> int:
     """Compute confidence score 1-100 from normalized components."""
+    if not (-1.0 <= raw_cosine <= 1.0):
+        logger.warning("confidence_raw_cosine_out_of_range",
+                       raw_cosine=raw_cosine, track_id=track_id)
+        raw_cosine = max(-1.0, min(1.0, raw_cosine))
+
     sim_norm = normalize_cosine(raw_cosine)
     quality_norm = normalize_quality(face_quality)
     track_norm = normalize_track_duration(track_seconds)

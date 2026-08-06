@@ -10,6 +10,17 @@ logger = structlog.get_logger(__name__)
 
 
 def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> dict:
+    """Perform vector search using Atlas vector search.
+
+    Falls back to Python cosine scan if Atlas is unavailable.
+    Returns dict with keys: matches, top2, margin, source.
+    """
+    if not embedding or not isinstance(embedding, list):
+        logger.warning("vector_search_invalid_embedding",
+                       embedding_type=type(embedding).__name__,
+                       embedding_len=len(embedding) if hasattr(embedding, '__len__') else None)
+        return {"matches": [], "top2": None, "margin": None, "all_candidates": []}
+
     collection = get_faces_collection()
 
     logger.debug("vector_search_started", embedding_len=len(embedding), filter_role=filter_role)
@@ -52,49 +63,53 @@ def vector_search(embedding: list, filter_role: str = None, limit: int = 5) -> d
                 "alert_level": r.get("alert_level", "low")
             })
 
-        top2 = None
-        margin = None
-        if len(all_results) >= 2:
-            top2 = all_results[1]["similarity_score"]
-            margin = all_results[0]["similarity_score"] - top2
-
-        matches = [r for r in all_results if compare_similarity(r["similarity_score"])]
-
-        logger.debug("atlas_search_result", match_count=len(matches), total_count=len(all_results),
-                     scores=[round(m["similarity_score"], 4) for m in matches])
-        return {
-            "matches": matches,
-            "top2": top2,
-            "margin": margin,
-            "all_candidates": [
-                {"name": r.get("name", "?"), "similarity": round(r["similarity_score"], 4)}
-                for r in all_results
-            ]
-        }
+        result = _build_search_result(all_results)
+        logger.debug("atlas_search_result", match_count=len(result["matches"]),
+                     total_count=len(all_results),
+                     scores=[round(m["similarity_score"], 4) for m in result["matches"]])
+        return result
 
     except Exception as e:
         logger.warning("atlas_vector_search_failed", error=str(e))
         all_results = _python_cosine_scan(embedding, filter_role, limit)
-        top2 = None
-        margin = None
-        if len(all_results) >= 2:
-            top2 = all_results[1]["similarity_score"]
-            margin = all_results[0]["similarity_score"] - top2
-        matches = [r for r in all_results if compare_similarity(r["similarity_score"])]
-        logger.info("python_scan_fallback_result", match_count=len(matches), total_count=len(all_results),
-                     scores=[round(m["similarity_score"], 4) for m in matches])
-        return {
-            "matches": matches,
-            "top2": top2,
-            "margin": margin,
-            "all_candidates": [
-                {"name": r.get("name", "?"), "similarity": round(r["similarity_score"], 4)}
-                for r in all_results
-            ]
-        }
+        result = _build_search_result(all_results)
+        logger.info("python_scan_fallback_result", match_count=len(result["matches"]),
+                     total_count=len(all_results),
+                     scores=[round(m["similarity_score"], 4) for m in result["matches"]])
+        return result
+
+
+def _build_search_result(all_results: list) -> dict:
+    """Build search result dict from scored candidates.
+
+    Computes top-2 similarity, margin, threshold-filtered matches,
+    and all_candidates list for downstream decision logic.
+    """
+    top2 = None
+    margin = None
+    if len(all_results) >= 2:
+        top2 = all_results[1]["similarity_score"]
+        margin = all_results[0]["similarity_score"] - top2
+
+    matches = [r for r in all_results if compare_similarity(r["similarity_score"])]
+
+    return {
+        "matches": matches,
+        "top2": top2,
+        "margin": margin,
+        "all_candidates": [
+            {"name": r.get("name", "?"), "similarity": round(r["similarity_score"], 4)}
+            for r in all_results
+        ]
+    }
 
 
 def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5) -> list:
+    """Fallback cosine similarity scan when Atlas is unavailable.
+
+    Scans up to SCAN_LIMIT documents and computes cosine similarity.
+    Returns sorted list of matches.
+    """
     collection = get_faces_collection()
 
     query = {}
@@ -157,6 +172,10 @@ def _python_cosine_scan(embedding: list, filter_role: str = None, limit: int = 5
 
 
 def find_similar_unknowns(embedding: list, threshold: float = None) -> list:
+    """Find similar unknown faces for deduplication.
+
+    Scans recent unknowns and returns those above the similarity threshold.
+    """
     if threshold is None:
         threshold = settings.DEDUP_SIMILARITY_THRESHOLD
 

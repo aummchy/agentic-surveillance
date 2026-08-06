@@ -22,6 +22,10 @@ _collection_locks = {
 
 
 def get_client() -> MongoClient:
+    """Get or create the MongoDB client singleton.
+
+    Thread-safe via double-checked locking.
+    """
     global _client
     if _client is None:
         with _client_lock:
@@ -40,6 +44,7 @@ def close_client():
 
 
 def get_faces_collection() -> Collection:
+    """Get the faces collection for person identity storage."""
     global _faces_collection
     if _faces_collection is None:
         with _collection_locks["faces"]:
@@ -50,6 +55,7 @@ def get_faces_collection() -> Collection:
 
 
 def get_events_collection() -> Collection:
+    """Get the events collection for alert and event logging."""
     global _events_collection
     if _events_collection is None:
         with _collection_locks["events"]:

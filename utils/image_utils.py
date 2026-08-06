@@ -31,6 +31,10 @@ def _init_cloudinary():
 
 
 def upload_to_cloudinary(image: np.ndarray, folder: str = "surveillance") -> str | None:
+    """Upload a numpy image to Cloudinary.
+
+    Returns the secure URL, or None on failure.
+    """
     if not _init_cloudinary():
         return None
     try:
@@ -65,16 +69,28 @@ def upload_jpeg_to_cloudinary(jpeg_bytes: bytes, folder: str = "surveillance") -
 
 
 def compute_blur_score(image: np.ndarray) -> float:
+    """Compute blur score using Laplacian variance.
+
+    Higher score = sharper image.
+    """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
 def compute_brightness(image: np.ndarray) -> float:
+    """Compute brightness using HSV V-channel mean.
+
+    Returns value in range [0, 255].
+    """
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV) if len(image.shape) == 3 else image
     return float(np.mean(hsv[:, :, 2] if len(hsv.shape) == 3 else hsv))
 
 
 def crop_person(frame: np.ndarray, box: tuple) -> np.ndarray:
+    """Crop a person region from the frame using the bounding box.
+
+    Coordinates are clipped to frame boundaries.
+    """
     x1, y1, x2, y2 = map(int, box)
     x1 = max(0, x1)
     y1 = max(0, y1)
@@ -84,6 +100,10 @@ def crop_person(frame: np.ndarray, box: tuple) -> np.ndarray:
 
 
 def save_image(image: np.ndarray, path: str) -> bool:
+    """Save a numpy image to disk.
+
+    Creates parent directories if needed. Returns True on success.
+    """
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(path, image)

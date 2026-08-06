@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import api, { getImageUrl } from '../utils/api'
+import { Status } from '../constants/status'
 
 function EventLog({ refreshKey, onRegisterPrepend }) {
   const [events, setEvents] = useState([])
@@ -88,53 +89,53 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
 
   const getStatusClass = (status) => {
     switch (status) {
-      case 'unknown': return 'status-unverified'
-      case 'verified': return 'status-verified'
-      case 'authorized': return 'status-authorized'
-      case 'known_visitor': return 'status-known_visitor'
-      case 'masked_unknown': return 'status-masked'
-      case 'blacklist': return 'status-blacklist'
-      case 'intentionally_hidden': return 'status-hidden'
+      case Status.UNKNOWN: return 'status-unverified'
+      case Status.VERIFIED: return 'status-verified'
+      case Status.AUTHORIZED: return 'status-authorized'
+      case Status.KNOWN_VISITOR: return 'status-known_visitor'
+      case Status.MASKED_UNKNOWN: return 'status-masked'
+      case Status.BLACKLIST: return 'status-blacklist'
+      case Status.HIDDEN: return 'status-hidden'
       default: return 'status-unverified'
     }
   }
 
   const getStatusLabel = (status) => {
     switch (status) {
-      case 'unknown': return 'Unverified'
-      case 'verified': return 'Verified'
-      case 'authorized': return 'Authorized'
-      case 'known_visitor': return 'Known Visitor'
-      case 'masked_unknown': return 'Masked Unknown'
-      case 'blacklist': return 'Blacklist'
-      case 'intentionally_hidden': return 'Hidden'
+      case Status.UNKNOWN: return 'Unverified'
+      case Status.VERIFIED: return 'Verified'
+      case Status.AUTHORIZED: return 'Authorized'
+      case Status.KNOWN_VISITOR: return 'Known Visitor'
+      case Status.MASKED_UNKNOWN: return 'Masked Unknown'
+      case Status.BLACKLIST: return 'Blacklist'
+      case Status.HIDDEN: return 'Hidden'
       default: return status
     }
   }
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'verified': return '\u2713'
-      case 'authorized': return '\u2713'
-      case 'known_visitor': return '\u2605'
-      case 'blacklist': return '\u2716'
+      case Status.VERIFIED: return '\u2713'
+      case Status.AUTHORIZED: return '\u2713'
+      case Status.KNOWN_VISITOR: return '\u2605'
+      case Status.BLACKLIST: return '\u2716'
       default: return '\u26A0'
     }
   }
 
   const getEventItemClass = (status) => {
     switch (status) {
-      case 'blacklist':
+      case Status.BLACKLIST:
         return 'event-item-alert event-item-critical'
-      case 'unknown':
-      case 'masked_unknown':
-      case 'intentionally_hidden':
+      case Status.UNKNOWN:
+      case Status.MASKED_UNKNOWN:
+      case Status.HIDDEN:
         return 'event-item-alert'
-      case 'uncertain':
+      case Status.UNCERTAIN:
         return 'event-item-uncertain'
-      case 'verified':
-      case 'authorized':
-      case 'known_visitor':
+      case Status.VERIFIED:
+      case Status.AUTHORIZED:
+      case Status.KNOWN_VISITOR:
         return 'event-item-verified'
       default:
         return ''
@@ -158,26 +159,26 @@ function EventLog({ refreshKey, onRegisterPrepend }) {
           All
         </button>
         <button
-          className={`tab ${activeTab === 'unknown' ? 'active' : ''}`}
-          onClick={() => setActiveTab('unknown')}
+          className={`tab ${activeTab === Status.UNKNOWN ? 'active' : ''}`}
+          onClick={() => setActiveTab(Status.UNKNOWN)}
         >
           Unknown
         </button>
         <button
-          className={`tab ${activeTab === 'masked_unknown' ? 'active' : ''}`}
-          onClick={() => setActiveTab('masked_unknown')}
+          className={`tab ${activeTab === Status.MASKED_UNKNOWN ? 'active' : ''}`}
+          onClick={() => setActiveTab(Status.MASKED_UNKNOWN)}
         >
           Masked
         </button>
         <button
-          className={`tab ${activeTab === 'blacklist' ? 'active' : ''}`}
-          onClick={() => setActiveTab('blacklist')}
+          className={`tab ${activeTab === Status.BLACKLIST ? 'active' : ''}`}
+          onClick={() => setActiveTab(Status.BLACKLIST)}
         >
           Blacklist
         </button>
         <button
-          className={`tab ${activeTab === 'verified' ? 'active' : ''}`}
-          onClick={() => setActiveTab('verified')}
+          className={`tab ${activeTab === Status.VERIFIED ? 'active' : ''}`}
+          onClick={() => setActiveTab(Status.VERIFIED)}
         >
           Verified
         </button>

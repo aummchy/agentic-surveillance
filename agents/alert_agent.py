@@ -38,6 +38,10 @@ def _prune_stale_alerts():
 
 
 def should_send_alert(track_id: str, alert_level: str, status: int = None) -> bool:
+    """Check if an alert should be sent based on cooldown and dedup rules.
+
+    Returns True if the alert is allowed, False if suppressed by cooldown.
+    """
     now = time.time()
     with _alert_lock:
         _prune_stale_alerts()
@@ -56,11 +60,21 @@ def should_send_alert(track_id: str, alert_level: str, status: int = None) -> bo
 
 
 def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> bool:
+    """Dispatch an alert to all configured channels.
+
+    Checks dedup rules, builds payload, and submits to alert executor.
+    Returns True if alert was dispatched.
+    """
     if not decision.should_alert:
         return False
 
     if track.alerted:
         return False
+
+    if decision.alert_level not in AlertLevel:
+        logger.warning("dispatch_invalid_alert_level",
+                       track_id=track.track_id,
+                       alert_level=decision.alert_level)
 
     if not should_send_alert(track.track_id, decision.alert_level, decision.status):
         return False

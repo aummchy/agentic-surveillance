@@ -68,6 +68,10 @@ class PolicyAgent(BaseAgent):
         Preferred entry point over run() — returns structured DecisionResult
         without dict round-trip.
         """
+        if track is None:
+            logger.warning("decide_called_without_track")
+            return DecisionResult(status=Status.UNKNOWN, alert_level=AlertLevel.LOW)
+
         return self._decide_from_input({
             "recognition_result": recognition_result or {},
             "memory_context": memory_context or {},

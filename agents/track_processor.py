@@ -205,6 +205,12 @@ class TrackProcessor:
                 "memory_context": memory_context or {},
             })
 
+        if recognition_result is None:
+            logger.warning("recognition_result_none",
+                           track_id=snap.track_id,
+                           note="Recognition agent returned None, using empty dict")
+            recognition_result = {}
+
         return recognition_result, memory_context
 
     def _handle_registration(self, snap, decision, match_result, image_url, person_crop_url):
@@ -241,8 +247,12 @@ class TrackProcessor:
                            track_id=snap.track_id,
                            reason=dedup.reason if dedup else "exception",
                            note="Registration aborted to avoid duplicate")
-        else:
+        elif dedup.status == DedupStatus.NEW:
             self._store_new_face(snap, name, role, tags, image_url, person_crop_url)
+        else:
+            logger.warning("dedup_unexpected_status",
+                           track_id=snap.track_id,
+                           status=dedup.status)
 
     def _store_new_face(self, snap, name, role, tags, image_url, person_crop_url):
         """Store a new face record in MongoDB."""

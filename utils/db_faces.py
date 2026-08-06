@@ -64,6 +64,11 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
                 name: str = None, tags: list = None, verified: bool = None,
                 alert_level: str = None, verified_by: str = None,
                 quality_score: float = None) -> bool:
+    """Update a face record with new data.
+
+    Only updates non-None fields. Embedding history is capped at EMBEDDING_HISTORY_CAP.
+    Returns True if the document was modified.
+    """
     collection = get_faces_collection()
 
     update_ops = {"$set": {"updated_at": datetime.utcnow()}}
@@ -127,6 +132,11 @@ def update_face(person_id: str, image_url: str = None, embedding: list = None,
 
 def verify_person(person_id: str, name: str, alert_level: str = "low",
                   verified_by: str = "operator") -> bool:
+    """Verify a person identity and update their record.
+
+    Adds 'verified' tag, sets name, role, and alert_level.
+    Returns True if the document was modified.
+    """
     collection = get_faces_collection()
 
     existing = collection.find_one({"person_id": person_id})
@@ -155,6 +165,10 @@ def verify_person(person_id: str, name: str, alert_level: str = "low",
 
 
 def get_unknown_faces(limit: int = 50, offset: int = 0) -> list:
+    """Get unverified unknown face records.
+
+    Returns dict with keys: faces, total, limit, offset.
+    """
     collection = get_faces_collection()
 
     query = {"role": "unknown", "verified": {"$ne": True}}
@@ -173,6 +187,10 @@ def get_unknown_faces(limit: int = 50, offset: int = 0) -> list:
 
 
 def get_face_by_id(person_id: str) -> dict:
+    """Get a face record by person_id.
+
+    Returns the document dict, or empty dict if not found.
+    """
     collection = get_faces_collection()
     face = collection.find_one({"person_id": person_id})
     if face:
@@ -181,6 +199,10 @@ def get_face_by_id(person_id: str) -> dict:
 
 
 def delete_face(person_id: str) -> bool:
+    """Delete a face record by person_id.
+
+    Returns True if the document was deleted.
+    """
     collection = get_faces_collection()
     result = collection.delete_one({"person_id": person_id})
     return result.deleted_count > 0

@@ -8,6 +8,10 @@ logger = structlog.get_logger(__name__)
 
 
 def run_matching_from_embedding(embedding: list, track_id: str = "unknown") -> MatchResult:
+    """Run vector search matching from an embedding.
+
+    Returns a MatchResult with best match, similarity scores, and candidate list.
+    """
     if embedding is None:
         return MatchResult(matched=False)
     arr = np.asarray(embedding, dtype=np.float32)

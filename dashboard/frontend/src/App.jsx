@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import api, { getImageUrl } from './utils/api'
+import { Status } from './constants/status'
 import LiveFeed from './components/LiveFeed'
 import UnknownPersons from './components/UnknownPersons'
 import VerifiedPersons from './components/VerifiedPersons'
@@ -177,7 +178,7 @@ function App() {
             <span className="notification-title">
               {activeAlert.alert_level === 'critical' ? 'CRITICAL Alert' :
                activeAlert.alert_level === 'high' ? 'High Alert' :
-               activeAlert.status === 'masked_unknown' ? 'Masked Unknown Detected' : 'Unknown Person Detected'}
+               activeAlert.status === Status.MASKED_UNKNOWN ? 'Masked Unknown Detected' : 'Unknown Person Detected'}
             </span>
             <button className="notification-close" onClick={() => setActiveAlert(null)}>&times;</button>
           </div>
@@ -262,7 +263,7 @@ function App() {
               </div>
               <div className="notif-info">
                 <div className="notif-label">
-                  {n.status === 'masked_unknown' ? 'Masked Unknown' :
+                  {n.status === Status.MASKED_UNKNOWN ? 'Masked Unknown' :
                    n.alert_level === 'critical' ? 'CRITICAL' :
                    n.alert_level === 'high' ? 'High Alert' : 'Unknown'}
                 </div>

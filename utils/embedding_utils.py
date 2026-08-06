@@ -122,14 +122,23 @@ class InsightFaceSingleton:
 
 
 def get_insightface() -> InsightFaceSingleton:
+    """Get the InsightFace singleton instance."""
     return InsightFaceSingleton()
 
 
 def compare_similarity(raw_cosine: float, threshold: float = None) -> bool:
+    """Compare raw cosine similarity against the match threshold.
+
+    Returns True if similarity >= threshold.
+    """
     if threshold is None:
         threshold = settings.MATCH_THRESHOLD
     return raw_cosine >= threshold
 
 
 def atlas_score_to_cosine(atlas_score: float) -> float:
+    """Convert Atlas vector search score to raw cosine similarity.
+
+    Atlas score = (1 + cosine) / 2, so cosine = (atlas_score * 2) - 1.
+    """
     return (atlas_score * 2) - 1
