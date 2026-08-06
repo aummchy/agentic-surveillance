@@ -12,13 +12,15 @@ from config.status import Status, LABEL_TO_STATUS
 logger = structlog.get_logger(__name__)
 
 # Status hierarchy for best-status comparison (higher = better)
-_STATUS_RANK = {
-    Status.AUTHORIZED: 6, Status.VERIFIED: 5, Status.KNOWN: 4,
-    Status.KNOWN_VISITOR: 3, Status.UNCERTAIN: 2, Status.UNKNOWN: 1,
+# Uses Status enum values directly (IntEnum provides numeric ranking).
+# String keys are kept for backward compatibility with old MongoDB documents.
+_STATUS_RANK: dict = {s: s.value for s in Status}
+_STATUS_RANK.update({
     # Backward compatibility with old string data in MongoDB
-    "authorized": 6, "verified": 5, "known": 4,
-    "known_visitor": 3, "uncertain": 2, "unknown": 0,
-}
+    "authorized": Status.AUTHORIZED.value, "verified": Status.VERIFIED.value,
+    "known": Status.KNOWN.value, "known_visitor": Status.KNOWN_VISITOR.value,
+    "uncertain": Status.UNCERTAIN.value, "unknown": Status.UNKNOWN.value,
+})
 
 
 def get_or_create_memory(person_id: str) -> dict:
