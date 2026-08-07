@@ -217,7 +217,7 @@ class PolicyAgent(BaseAgent):
         """RULE 3: Verified visitor (no alert)."""
         if not ctx["verified"]:
             return None
-        if ctx["rec_status"] < Status.KNOWN and ctx["similarity"] <= settings.VERIFIED_SIMILARITY_THRESHOLD:
+        if ctx["similarity"] < settings.MATCH_THRESHOLD:
             return None
         return DecisionResult(
             status=Status.VERIFIED,
@@ -296,11 +296,11 @@ class PolicyAgent(BaseAgent):
 
         if similarity >= settings.MATCH_THRESHOLD:
             return DecisionResult(
-                status=Status.UNKNOWN,
+                status=Status.KNOWN,
                 alert_level=AlertLevel.LOW,
                 person_id=person_id,
                 name=name,
-                reason=f"Matched identity but not confirmed known (similarity={similarity:.2%}).",
+                reason=f"Matched identity (similarity={similarity:.2%}).",
                 should_alert=False,
                 should_register=False,
             )

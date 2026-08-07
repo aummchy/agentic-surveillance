@@ -12,7 +12,7 @@
   // Higher = stricter (fewer false positives), lower = more matches (more false positives).
   // ArcFace optimal range: 0.40–0.60. Max recommended: 0.45.
   "MATCH_THRESHOLD": 0.45,
-  "DEDUP_SIMILARITY_THRESHOLD": 0.5,
+  "DEDUP_SIMILARITY_THRESHOLD": 0.45,
 
   // ── Model / Pipeline ─────────────────────────────────────────
   // YOLO_MODEL: PyTorch (.pt) or OpenVINO IR (_openvino_model/) path.
@@ -117,7 +117,7 @@
 
   // REGISTRATION_QUALITY_MIN: Minimum face quality (0-1) to auto-register a new unknown identity.
   // Prevents low-quality embeddings from polluting the database and causing false matches.
-  "REGISTRATION_QUALITY_MIN": 0.6,
+  "REGISTRATION_QUALITY_MIN": 0.4,
 
   // ── Vector Search ────────────────────────────────────────────
   // CANDIDATES: HNSW candidate pool size (higher = better recall, slower).

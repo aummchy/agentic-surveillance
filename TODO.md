@@ -49,3 +49,47 @@ Both paths call the same helper.
 ---
 
 *Created: 2026-08-06*
+
+---
+
+## Item 4: MERGED path should update existing record with better embedding
+
+**Status:** TODO — deferred for now.
+
+**File:** `agents/track_processor.py:_handle_registration()`
+
+**Problem:** When `deduplicate_identity()` returns MERGED (existing person found),
+the new (potentially better quality) embedding is completely discarded.
+The person's record keeps the old, poor embedding forever.
+
+**Impact:** Vicious cycle — poor initial embedding → low similarity on subsequent
+encounters → shows as UNKNOWN → no embedding update → stuck forever.
+
+**Proposed change:** In the MERGED path (line 240-244), call `update_face()` to
+update the existing record's embedding if the new one has higher quality.
+
+**Risk:** Medium — changes auto-registration behavior. Needs testing with real data.
+
+**Verification:** `python -m pytest tests/ -v --tb=short`
+
+---
+
+## Item 5: Add embedding update for matched persons
+
+**Status:** TODO — deferred for now.
+
+**File:** `agents/track_processor.py:process()`
+
+**Problem:** Once a person is registered, their `latest_embedding` in MongoDB is
+never refreshed through normal operation. Embeddings become stale over time
+(appearance changes, aging, lighting).
+
+**Impact:** Progressive degradation of matching accuracy over weeks/months.
+
+**Proposed change:** In `process()`, after `match_result.matched=True`, call
+`update_face()` to update MongoDB with the new embedding (quality-gated).
+
+**Risk:** Medium — changes normal pipeline flow. Needs testing to ensure no
+regression in matching accuracy.
+
+**Verification:** `python -m pytest tests/ -v --tb=short`
