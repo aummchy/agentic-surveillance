@@ -166,6 +166,5 @@ DecisionResult(
 
 ## See also
 - [[Policy Rules]] — visual rule priority diagram
-- [[Decision Agent]] — thin wrapper that calls PolicyAgent
 - [[Alert Agent]] — dispatches based on should_alert + alert_level
 - [[All Thresholds]] — all policy-related thresholds

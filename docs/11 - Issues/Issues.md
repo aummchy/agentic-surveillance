@@ -1,6 +1,6 @@
 # Issues
 
-> Pipeline logic issues found during 2026-08-04 codebase review. Each has severity, reproduction conditions, and proposed fix.
+> Single tracker for pipeline logic issues. Originally from the 2026-08-04 codebase review; absorbs `BUG_REPORT.md` (2026-08-01), all items re-verified against code 2026-10-01. Each has severity, reproduction conditions, and proposed fix.
 
 ---
 
@@ -193,6 +193,112 @@ Dashboard shows "Unknown: John Smith" — contradictory. Not a security bug (no 
 ### Proposed fix
 
 Change RULE 5 matched-but-unconfirmed return to `status="uncertain"` instead of `status="unknown"` to stay consistent with the recognition classification.
+
+---
+
+## Verified Fixed (absorbed from BUG_REPORT.md)
+
+Re-verified against code 2026-10-01 — no action needed, history kept here so `BUG_REPORT.md` can be deleted:
+
+| Old # | Problem | Verified at |
+|-------|---------|-------------|
+| 2 | `result.quality` unguarded on success path | pipeline guarantees `quality` on success; guarded branch `camera_agent.py:392` |
+| 3 | `_policy_agent` singleton race | lock present, `policy.py:383-391` |
+| 5 | `dispatch()` wrong return values | `alert_agent.py:57-131` returns False/True correctly |
+| 7 | Stale `pmr` via embedding cache | embedding cache removed entirely |
+| 8 | `set_best_face` TOCTOU | design confirmed correct (docs-only fix) |
+| 9 | LLM async client leak | now sync `httpx.Client` + `client.close()`, `llm_client.py:269-280` |
+| 10 | Misleading mean-embedding comment | comment removed, `db_faces.py:95-105` |
+| 13 | `FRAME_SKIP = 2` hardcoded in `live.py` | constant gone; skip handled in `track_processor.py` |
+| 14 | f-string loggers in `live.py` | structured kwargs everywhere |
+| 17 | `_finalized_track_ids` per-frame prune | prune removed; `discard()` after finalization, `camera_agent.py:545` |
+| 19 | Recognition pool too small | now `settings.RECOGNITION_MAX_WORKERS`, `camera_agent.py:41` |
+| 20 | ByteTrack ID reuse collision | discard after finalization verified |
+| 21 | No per-track HIGH alert cooldown | `last_alert_time` + `ALERT_COOLDOWN_SECS`, `camera_agent.py:472-482` |
+
+---
+
+## Open Issues (absorbed from BUG_REPORT.md, re-verified 2026-10-01)
+
+---
+
+### ISSUE-10 — `submit_time` dead write in camera loop
+
+**Severity:** 🟢 Low · **Status:** Open · **File:** `agents/camera_agent.py:249`
+
+In `_loop()`, `submit_time = self._timing.record_submit(...)` is assigned but never read (the real read is `pop_submit()` in the worker at line 366). Wastes a dict slot; return value unused.
+
+**Fix:** drop the assignment: `self._timing.record_submit(track.track_id)`.
+
+---
+
+### ISSUE-11 — `datetime.utcnow()` deprecated (Python 3.12+)
+
+**Severity:** 🟡 Medium · **Status:** Open · **Files:** `utils/db_faces.py` (~10 sites: 45, 47, 54, 55, 74, 83, 91, 154, 159), `utils/db_memory.py:29,77`, `tests/test_thread_safety.py:157`
+
+Naïve datetime, `DeprecationWarning` now, `AttributeError` in a future Python.
+
+**Fix:** replace with `datetime.now(tz=timezone.utc)`.
+
+---
+
+### ISSUE-12 — String `last_seen` silently skips memory boost
+
+**Severity:** 🟡 Medium · **Status:** Open · **File:** `agents/memory.py:101-103`
+
+Only `isinstance(last_seen, datetime)` is handled; if MongoDB returns an ISO string, `days_since_last` stays `None` and all time-based confidence boosts are skipped.
+
+**Fix:** add a `str` branch parsing with `datetime.fromisoformat()`.
+
+---
+
+### ISSUE-13 — `resolve_track_image_url` reads/writes `track.image_url` without lock
+
+**Severity:** 🟡 Medium · **Status:** Open · **File:** `utils/image_utils.py:122-148`
+
+Worker threads write `track.image_url` while the camera loop reads it in `draw_annotations` — data race.
+
+**Fix:** double-checked locking with `track._lock`: fast-path read under lock, upload outside lock, write under lock only if still unset.
+
+---
+
+### ISSUE-14 — `_get()` returns raw strings when `default=[]`
+
+**Severity:** 🟡 Medium · **Status:** Open · **File:** `config/settings.py:71-76`
+
+Element-type casting only happens when `default` is non-empty; any list setting with an empty default gets strings from `.env`.
+
+**Fix:** accept an explicit `elem_type` param (or fall back to `str`), instead of gating on `default`.
+
+---
+
+### ISSUE-15 — Mixed datetime APIs in policy track lifetime
+
+**Severity:** 🟢 Low · **Status:** Open · **File:** `agents/policy.py:180`
+
+`datetime.now().timestamp() - track.first_seen` mixes two APIs that both yield UTC epoch today, but breaks silently if either side changes (e.g. `utcnow()`).
+
+**Fix:** `time.time() - track.first_seen`.
+
+---
+
+### ISSUE-16 — `os.environ` written every frame in hot path
+
+**Severity:** 🟢 Low · **Status:** Open · **File:** `pipeline/tracker.py:51`
+
+`os.environ["OPENVINO_DEVICE"] = ...` runs ~30×/s inside `track_persons()`; global mutation from the camera thread.
+
+**Fix:** move into `get_model()` (runs once).
+
+---
+
+### ISSUE-17 — Collection init uses unlocked outer check
+
+**Severity:** 🟢 Low · **Status:** Open · **File:** `utils/db_client.py:48-51` (+ same pattern for events/memory)
+
+Double-checked locking with an unguarded outer read — safe under the GIL, fragile on free-threaded Python 3.13+.
+
+**Fix:** drop the outer check; always take the (uncontended after first call) lock.
 
 ---
 

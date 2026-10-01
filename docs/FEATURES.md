@@ -246,4 +246,4 @@ Ordered rule chain (first match wins):
 - 11 session query tools (`query_*.py`) for local session-store introspection
 
 ### Docs — `docs/`
-- Home, Getting Started, Architecture, Agents (11), Pipeline (6), Utilities (4), Formulas (6), Dashboard (4), Logging (3), Reference (3), Problems (6)
+- Home, Getting Started, Architecture, Agents (10), Pipeline (6), Utilities (4), Formulas (6), Dashboard (4), Logging (3), Reference (3), Problems (6), Issues (1)

@@ -7,7 +7,7 @@
 | **Detection** | YOLOv8 (`yolov8s.pt` or OpenVINO IR) via Ultralytics | Singleton model in `pipeline/tracker.py:track_persons()`. OpenVINO IR export for GPU: `yolo export model=yolov8s.pt format=openvino half=True`, then set `YOLO_MODEL=yolov8s_openvino_model/`, `YOLO_DEVICE=intel:GPU`. ~8× speedup (128ms→16ms) on Arc iGPU. |
 | **Tracking** | ByteTrack (custom `config/bytetrack_surveillance.yaml`) | Cross-frame person ID 0,1,2... per session. Converted to composite IDs `{cam_id}_{epoch}_{track_id}_{generation}` in `pipeline/track_state.py`. Tuned for fixed-camera surveillance: `track_high_thresh=0.45`, `track_buffer=60`, `new_track_thresh=0.50`. |
 | **Face detection** | InsightFace SCRFD (`buffalo_l` in `.env`) | Loaded once as singleton in `utils/embedding_utils.py:InsightFaceSingleton`. Two-stage: crop person first, full frame fallback when crop has no faces ≥ `EMBEDDING_DET_SCORE_MIN`. CLAHE applied before detection. No redundant `DET_SCORE_MIN` tier. |
-| **Face embedding** | InsightFace ArcFace (512-d normed) | Generated from best face detected. Quality-gated: only overwrites `track.embedding` if `det_score` exceeds existing by ≥ 0.05. Used for vector search. Embedding cache skips Atlas search if cosine distance < 0.005 from last searched embedding. |
+| **Face embedding** | InsightFace ArcFace (512-d normed) | Generated from best face detected. Quality-gated: only overwrites `track.embedding` if `det_score` exceeds existing by ≥ 0.05. Used for vector search (fresh Atlas query every recognition pass — no embedding cache). |
 | **Face quality** | Two-tier quality system (`pipeline/quality_agent.py`) | Validity gates reject unusable faces (blur < 40, brightness outside 35-255, area < 1200px²). Weighted composite score [0,1] (50% blur, 25% brightness, 25% area). |
 | **Face ratio** | `pipeline/quality_agent.py:compute_face_ratio()` | Simple ratio: face_area / person_bbox_area. Used for visibility classification (visible/partial/hidden). |
 | **Mask detection** | Geometric heuristic (landmark nose/mouth ratio) | `InsightFaceSingleton._detect_mask_geometric()` in `utils/embedding_utils.py` — no classifier. Ratio < 0.3 = masked. |
@@ -49,8 +49,7 @@ main.py
 │   ├── Every 20 frames: ThreadPool → progressive_recognition()
 │   │   ├── InsightFace detection + embedding (quality-gated overwrite)
 │   │   ├── Quality gate: skip embedding if face invalid (blur/brightness/area)
-│   │   ├── Embedding cache check (cosine dist < 0.005 → skip Atlas)
-│   │   ├── MongoDB vector search (MatchingAgent) [if cache miss]
+│   │   ├── MongoDB vector search (MatchingAgent)
 │   │   ├── MemoryAgent lookup
 │   │   ├── RecognitionAgent (multi-factor)
 │   │   └── PolicyAgent (9 rules) → cache on Track
@@ -78,7 +77,6 @@ main.py
 - **Camera loop never blocks** — all I/O via `queue.Queue` + `ThreadPoolExecutor`
 - **Thread safety** — `TrackState._lock` for all track mutations; JPEG encoding done outside lock
 - **Progressive caching** — results from progressive recognition stored on `Track` object, reused at finalization to avoid redundant DB calls
-- **Embedding cache** — if new embedding's cosine distance from last searched < 0.005, skip Atlas round-trip and reuse prior `MatchResult`
 - **OpenVINO GPU** — YOLO OpenVINO IR models use `device=intel:GPU` format. Ultralytics' backend parses `intel:` prefix to extract the OpenVINO device while setting PyTorch device to `cpu`. InsightFace stays on CPU (OpenVINO EP not used due to DLL compatibility issues).
 - **Quality-gated embedding** — per-track: only overwrites if `det_score` exceeds existing by ≥ 0.05. Per-DB: only overwrites `latest_embedding` if new `quality_score` > stored quality (no backward-compat unconditional overwrite)
 - **Quality-gated recognition skip** — `camera_agent.py:291-296`: if face quality fails validity gates (blur < 40, brightness outside 35-255, area < 1200px²), `else: return` prevents embedding generation, MongoDB search, and identity assignment. Prevents blurry faces from being incorrectly matched to known persons.

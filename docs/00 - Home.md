@@ -25,7 +25,6 @@
 - [[Recognition Agent]]
 - [[Scoring Module]]
 - [[Policy Agent]]
-- [[Decision Agent]]
 - [[Memory Agent]]
 - [[Alert Agent]]
 - [[Finalizer]]
@@ -72,10 +71,17 @@
   - Pipeline → [[Recognition Bottleneck (26s Full-Frame Scan)]] · [[Identities Never Generated (No Embeddings)]] · [[Database Latency]]
   - Track → [[Duplicate Finalization (Visit Inflation)]] · [[Same Person Becomes Multiple Tracks]] · [[Fragmentation Detection is a No-op]]
 
+## Issues (open tracker)
+- [[Issues]] — pipeline logic issues + verified-fixed history (single tracker, re-verified 2026-10-01)
+
 ## Canonical References (root)
 | File | What it covers |
 |------|---------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Tech stack table, connection patterns, MongoDB collections, key thresholds |
+| [GOAL.md](GOAL.md) | Priority (pipeline first), use cases, commercial maturity, planned improvements |
+| [FEATURES.md](FEATURES.md) | Complete inventory of implemented features |
+| [REFERENCES.md](REFERENCES.md) | Open-source recognition pipelines to study (DeepFace, InsightFace, CompreFace, Frigate) |
+| [CODEREFERENCE.md](CODEREFERENCE.md) | File-by-file code map + metrics — dated refactoring snapshot, verify before relying on line numbers |
 
 ---
 

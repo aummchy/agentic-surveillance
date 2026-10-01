@@ -95,7 +95,6 @@ All setters follow the pattern: acquire `_lock`, find track, acquire `track._loc
 | `set_embedding()` | embedding, mask status, det score (quality-gated) |
 | `set_decision()` | decision status string |
 | `set_person_name()` | person name from match |
-| `set_cached_embedding()` | cached embedding for cache optimization |
 | `set_pending_match_result()` | match result from progressive recognition |
 | `set_pending_memory_context()` | memory context from progressive recognition |
 | `set_pending_recognition_data()` | recognition result |

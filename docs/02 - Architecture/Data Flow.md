@@ -60,12 +60,11 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
 
 10. EMBEDDING + MATCHING (_build_embedding):
     a. Extract 512-dim ArcFace embedding
-    b. Check embedding cache: if cosine distance from last < 0.005 → reuse match
-    c. Otherwise: MongoDB Atlas Vector Search
-    d. Atlas returns top-5 matches with vectorSearchScore
-    e. Convert: raw_cosine = (atlas_score × 2) - 1
-    f. Match if raw_cosine ≥ MATCH_THRESHOLD (0.45)
-    g. Compute margin = top1 - top2
+    b. MongoDB Atlas Vector Search (fresh query each pass — no embedding cache)
+    c. Atlas returns top-5 matches with vectorSearchScore
+    d. Convert: raw_cosine = (atlas_score × 2) - 1
+    e. Match if raw_cosine ≥ MATCH_THRESHOLD (0.45)
+    f. Compute margin = top1 - top2
 
 11. MEMORY LOOKUP (_lookup_memory):
     a. Query visit_memory collection for this person_id

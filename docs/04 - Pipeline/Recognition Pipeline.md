@@ -91,14 +91,11 @@ See [[Quality Assessment]] for full details.
 
 ```
 1. Extract 512-dim ArcFace embedding from best face
-2. Check embedding cache:
-   - If track has cached_embedding AND pending_match_result:
-     - Compute cosine distance between new and cached
-     - If distance < 0.005 → reuse previous match (skip Atlas query)
-3. If cache miss:
-   - matching_fn(embedding) → vector_search → MatchResult
-4. Update track.cached_embedding = new_embedding
+2. matching_fn(embedding) → vector_search → MatchResult
+   (Atlas $vectorSearch, Python cosine fallback if Atlas unavailable)
 ```
+
+> Note: the old embedding cache (skip Atlas if cosine distance < 0.005) was removed — every recognition pass runs a fresh vector search.
 
 ## Step 6: Memory Lookup (`_lookup_memory`)
 

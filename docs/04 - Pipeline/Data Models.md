@@ -36,7 +36,6 @@ class Track:
     pending_recognition: Optional[dict]
     pending_match_result: Optional[MatchResult]
     pending_memory_context: Optional[dict]
-    cached_embedding: Optional[list] # last embedding searched against Atlas
 
     # Track statistics
     total_frames_seen: int

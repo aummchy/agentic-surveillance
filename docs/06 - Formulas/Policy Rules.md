@@ -75,7 +75,6 @@ DecisionResult(
 | `critical` | Blacklisted person | All channels, immediate |
 
 ## See also
-- [[Policy Agent]] — implementation
-- [[Decision Agent]] — wrapper
+- [[Policy Agent]] — implementation (contains `decide()`)
 - [[Alert Agent]] — dispatches alerts based on decision
 - [[All Thresholds]] — policy-related thresholds

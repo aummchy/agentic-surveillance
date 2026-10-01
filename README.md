@@ -2,26 +2,55 @@
 
 AI-powered real-time surveillance: YOLOv8 person detection, ByteTrack tracking, InsightFace face recognition, autonomous decision engine, alerts, and local LLM for NL summaries.
 
-## Quick Start
+## How to Run
 
-```bash
-# Terminal 1 — surveillance pipeline
-python main.py
+### One-time setup
+
+```powershell
+# 1) Secrets — .env is gitignored, so it is NOT in the repo. Create it:
+copy .env.example .env
+#    then edit .env — at minimum MONGODB_URI (MongoDB Atlas connection string)
+
+# 2) Python environment (Python 3.11 venv, per Prerequisites)
+py -3.11 -m venv venv
+venv\Scripts\pip install -r requirements.txt
+#    (POSIX: python3.11 -m venv venv && venv/bin/pip install -r requirements.txt)
+
+# 3) Frontend deps
+cd dashboard\frontend
+npm install
+cd ..\..
+```
+
+> Note: this repo has **no committed `venv/`** — create it as above, or install
+> deps into a global Python. On Linux/macOS use `venv/bin/python` wherever
+> `venv\Scripts\python.exe` appears below.
+
+### Run
+
+```powershell
+# Terminal 1 — surveillance pipeline (+ FastAPI on :8000, starts automatically)
+venv\Scripts\python.exe main.py        # or: python main.py (global install)
 
 # Terminal 2 — dashboard
-cd dashboard/frontend
-npm install
+cd dashboard\frontend
 npm run dev
 ```
 
 Dashboard: http://localhost:5173 | API: http://localhost:8000
+
+### Verify install
+
+```powershell
+venv\Scripts\python.exe -m pytest tests/ -v
+```
 
 ## Prerequisites
 
 - Python 3.11 (InsightFace/onnxruntime wheels unreliable on other versions)
 - MongoDB Atlas cluster with `surveillance` database, `faces`/`events`/`visit_memory` collections
 - Atlas Vector Search index named `vector_index` on `faces.latest_embedding` (512 dims, cosine)
-- `.env` with at minimum `MONGODB_URI` (copy from `.env.example`)
+- `.env` with at minimum `MONGODB_URI` — **gitignored, never shipped in the repo**; create it from `.env.example` (see How to Run)
 - Camera device at `CAMERA_INDEX=0` or `CAMERA_SOURCE=http://<phone-ip>:8080/video` for mobile (adjust in `.env`)
 - For Intel Arc iGPU acceleration: `pip install openvino` and export YOLO (optional — CPU works too)
 
@@ -29,13 +58,14 @@ Dashboard: http://localhost:5173 | API: http://localhost:8000
 
 | Task | Command |
 |------|---------|
-| Run surveillance | `python main.py` |
+| Create Python 3.11 venv | `py -3.11 -m venv venv` |
+| Run surveillance | `venv\Scripts\python.exe main.py` (or `python main.py`) |
 | Run dashboard API | FastAPI starts automatically on port 8000 inside `main.py` |
 | Run dashboard frontend | `cd dashboard/frontend && npm run dev` |
-| Install Python deps | `pip install -r requirements.txt` |
+| Install Python deps | `venv\Scripts\pip install -r requirements.txt` (or `pip install -r requirements.txt`) |
 | Install frontend deps | `cd dashboard/frontend && npm install` |
 | Export YOLO to OpenVINO IR | `yolo export model=models/yolov8s.pt format=openvino half=True` |
-| Run tests | `python -m pytest tests/ -v` |
+| Run tests | `venv\Scripts\python.exe -m pytest tests/ -v` (or `python -m pytest tests/ -v`) |
 | Run specific test | `python -m pytest tests/test_recognition.py -v` |
 
 ## Documentation
@@ -62,7 +92,7 @@ config/                    # Settings loader + config.jsonc
 dashboard/
   backend/                 # FastAPI REST + WebSocket
   frontend/                # React + Vite SPA
-tests/                     # pytest test suite (76 tests)
+tests/                     # pytest test suite (84 tests)
 scripts/                   # Debug/dev utilities
 docs/                      # Documentation (ARCHITECTURE + structured vault: 00-Home → 10-Problems)
 models/                    # ML weights (gitignored)

@@ -89,7 +89,6 @@ Every iteration:
 6. Store results on track:
    - set_best_face() — face crop + quality
    - set_embedding() — embedding + mask status
-   - set_cached_embedding() — for cache optimization
    - set_pending_match_result() — match result
    - set_pending_recognition_data() — recognition result
    - set_pending_memory_context() — memory context
@@ -123,11 +122,10 @@ Every iteration:
 
 ## Key design decisions
 
-1. **Recognition runs off main thread** — `_recognition_executor` has 4 workers, so 4 tracks can be recognized concurrently
+1. **Recognition runs off main thread** — `_recognition_executor` sized by `RECOGNITION_MAX_WORKERS` (default 4), so up to 4 tracks are recognized concurrently
 2. **Quality throttle** — skips recognition if face quality didn't improve by ≥0.10 (avoids wasted CPU)
-3. **Embedding cache** — if new embedding is nearly identical to last (cosine <0.005), skip Atlas search
-4. **Critical alerts fire early** — blacklist alerts dispatch during progressive recognition, not deferred to finalization
-5. **Fallback frame** — every track gets at least one photo (even if face quality is bad)
+3. **Critical alerts fire early** — blacklist alerts dispatch during progressive recognition, not deferred to finalization
+4. **Fallback frame** — every track gets at least one photo (even if face quality is bad)
 
 ## See also
 - [[Recognition Pipeline]] — the pipeline that runs inside progressive recognition

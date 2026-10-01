@@ -66,20 +66,6 @@ ArcFace embeddings shift between frames due to:
 | Same person | 0.40 – 0.85 |
 | Different person | −0.20 – 0.25 |
 
-## Embedding cache optimization
-
-**File**: `pipeline/recognition_pipeline.py:253-274`
-
-```
-IF track has cached_embedding AND pending_match_result:
-    cos_distance = 1.0 - dot(cached, new) / (‖cached‖ × ‖new‖)
-    IF cos_distance < 0.005:
-        → reuse previous match_result (skip Atlas query)
-    ELSE:
-        → run fresh vector_search()
-        → update cached_embedding
-```
-
 ## Python cosine fallback
 
 When Atlas fails (index missing, timeout):
