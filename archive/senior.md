@@ -1,5 +1,20 @@
 # Senior Software Engineer Refactoring Prompt
 
+> **⚠️ ARCHIVED — NOT AN ACTIVE INSTRUCTION FILE**
+>
+> This document is a reusable refactoring/review prompt. It is **not authoritative**
+> for this project and is **not loaded automatically** by any agent.
+>
+> - The only auto-loaded instruction file is `AGENTS.md`.
+> - Do **not** act on the rules below during Phases 0–2 (readability + documentation).
+>   They describe refactoring goals and will encourage premature architecture changes.
+> - Use this file only when explicitly asked to perform a refactoring review.
+> - Its "Remove Magic Values" / "split large functions" style rules are Phase 4 material,
+>   gated behind a written proposal and explicit approval (see `AGENTS.md` → AI Development Workflow).
+>
+> Moved from the repo root to `archive/` on 2026-10-03. `TODO.md` was originally
+> extracted from these rules.
+
 You are acting as a Senior Software Engineer and Code Reviewer responsible for improving a production codebase.
 
 Your objective is **NOT** to change functionality. The goal is to improve:

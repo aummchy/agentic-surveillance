@@ -4,6 +4,84 @@
 
 AI-powered surveillance system: YOLOv8 person detection → ByteTrack tracking → InsightFace face recognition → autonomous decision engine → alerts + **local LLM** for NL summaries and conversational dashboard. Python 3.11, MongoDB Atlas vector search, FastAPI + React dashboard, Ollama (Gemma 3 4B / Qwen 3.5 4B).
 
+## AI Development Workflow
+
+This section is the operating contract for AI agents working in this repo.
+
+### 0. Source of truth
+
+When documentation conflicts with the current source code:
+
+1. Current source code is authoritative.
+2. Current tests are the second source of truth.
+3. `INTENTIONAL.md` documents deliberate design decisions.
+4. `docs/HISTORICAL_DEBUG_NOTES.md` (old `see.md`), old reviews, and historical analysis are **NOT** authoritative unless verified against current code.
+5. Never implement a fix solely because an old document says a bug exists.
+
+Before changing behavior, verify the relevant code path and tests. When a documented
+bug turns out to be already fixed, mark the documentation as historical instead of
+reimplementing the fix.
+
+`AGENTS.md` is the only auto-loaded instruction file. `archive/senior.md` and
+`docs/ARCHITECTURE_RULES.md` are reference material, not standing orders.
+
+### 1. Current phase: readability first
+
+The current objective is to make existing code easier for humans and AI to understand.
+The phased roadmap lives in `plan.md`. **No behavior changes outside Phase 4.**
+
+Allowed during a readability pass:
+
+- Add or improve module / function / class docstrings
+- Improve comments when they explain intent or invariants
+- Add type hints where they do not change runtime behavior
+- Improve names only when provably behavior-preserving (prefer deferring renames to Phase 4)
+- Add section comments to large files
+- Remove clearly unused imports; format code
+- Add documentation, diagrams, and tests that document *existing* behavior
+
+Not allowed during a readability pass:
+
+- Change business logic, thresholds, model/recognition/tracking/database/threading behavior
+- Move classes between modules, split `Track`, merge or delete pipelines
+- Rename public APIs, change configuration defaults
+- Remove code merely because it "looks unnecessary"
+- Fix bugs unless explicitly requested as a separate task
+
+If something appears to be a bug, document it — do not change it.
+
+### 2. Before editing any file
+
+Answer, from the code itself: what is this file responsible for? Who imports it?
+What does it import? What state does it own and mutate? Which thread(s) call it?
+What are its inputs, outputs, side effects? Which tests cover it?
+If these cannot be answered, inspect the code before proposing changes.
+
+### 3. One change at a time
+
+For every requested change: explain current behavior → identify exact files/functions →
+state the intended change → make the smallest safe change → run tests → report what
+changed → report what was intentionally NOT changed. Do not combine unrelated refactors.
+
+### 4. Architecture changes require approval
+
+Do not independently split `Track`, merge `RecognitionPipeline`, move code between
+`agents/` / `pipeline/` / `utils/`, remove a duplicate implementation, or redesign
+state management. First produce a proposal (`CURRENT: file → responsibility → caller → state`,
+`TARGET: file → responsibility → caller → state`) and wait for explicit approval.
+
+### 5. Preserve existing behavior
+
+Unless the task explicitly says otherwise: preserve outputs, configuration values,
+thresholds, database schemas, API contracts, status values, alert behavior, and
+thread-safety guarantees. A cleaner implementation is not automatically a correct one.
+
+### 6. Required response format
+
+Before a non-trivial change: **Current Understanding**, **Files Involved**,
+**Change**, **Invariants**, **Risks**, **Tests**.
+After the change: **Changed**, **Verified**, **Not Changed**.
+
 ## Quick start
 
 ```bash
@@ -241,4 +319,7 @@ Don't:
 
 ## Current priorities
 
-1. fix code issues and make the working correct.
+**Phase 0 of the roadmap in `plan.md`: instruction cleanup + documentation only.**
+No behavior changes, no refactors, no commits unless explicitly asked.
+Next phases (1–4) are described in `plan.md`; structural changes require an
+approved proposal per §4 above.

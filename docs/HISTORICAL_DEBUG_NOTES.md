@@ -1,3 +1,20 @@
+# Historical Debug Notes (formerly `see.md` at repo root)
+
+> **⚠️ NOT AUTHORITATIVE**
+>
+> This document contains observations from previous debugging sessions.
+> It is **NOT** authoritative for current behavior.
+>
+> Every issue described here must be verified against the current source code
+> before any implementation. When a documented bug turns out to be fixed, mark it
+> as historical — do **not** reimplement the fix.
+>
+> Verification status as of 2026-10-03: see
+> `docs/11 - Issues/Review 2026-10-03 - External AI.md`, which checks each claim
+> below against current code.
+
+---
+
 Analysis of the trk=2 log
 Why a single track gets recognized 4× (the reprocessing you're asking about)
 Progressive recognition is by design (every RECOGNITION_INTERVAL_FRAMES=20 + a rescan every RESCAN_INTERVAL_SECS=3s, up to MAX_RESCAN_ATTEMPTS=3). But the log shows passes pile up faster than they can resolve, because of a scheduling/completion race:

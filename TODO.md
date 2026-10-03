@@ -1,6 +1,6 @@
 # TODO.md — Code Quality Backlog
 
-Items extracted from `senior.md` rules. Each item is a small, low-risk change.
+Items extracted from `archive/senior.md` rules (archived — see header there). Each item is a small, low-risk change.
 All items must preserve behavior (rule 1) and pass all tests.
 
 ---
