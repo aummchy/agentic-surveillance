@@ -7,7 +7,7 @@ Status legend: ✅ done · 🔄 in progress · ⬜ not started
 | 0 | Instruction cleanup + verification (docs only) | ✅ 2026-10-03 |
 | 1 | Readability pass, zero behavior changes | ✅ 2026-10-03 |
 | 2 | Current-state documentation | ✅ 2026-10-03 |
-| 3 | Review-only, no code changes | ⬜ |
+| 3 | Review-only, no code changes | ✅ 2026-10-03 (list approved by user) |
 | 4 | Structural refactor (approval-gated) | ⬜ |
 
 **Standing invariants for Phases 0–3:** 84 tests green (`python -m pytest tests/ -q`) ·
@@ -239,6 +239,14 @@ file · function · problem · evidence (file:line) · impact · recommendation
 Must be triaged by me + you against the Phase 0 verification memo (so already-fixed
 issues are not re-litigated) and the Phase 2 docs. Result: an approved, prioritized
 list that becomes Phase 4 input. Anything not on the approved list stays parked.
+
+- [x] Review written: `docs/11 - Issues/Review 2026-10-03 - Phase 3 Architecture Review.md`
+      (2 CRITICAL, 7 HIGH, 13 MEDIUM, 20 LOW; Issues.md ISSUE-1…19 and all 7 Problems
+      notes re-verified; 5 candidate claims rejected as false/no-impact).
+- [x] Triage approved by user 2026-10-03: **Wave A** (1 alert-dispatch repair + tests ·
+      2 report crash + batch · 3 security posture + embedding projection ·
+      4 hidden/masked alerts · 5 avg_similarity compute-or-retire) → then **Wave B**
+      hygiene → then the pre-existing Phase 4 items (unchanged).
 
 ---
 
