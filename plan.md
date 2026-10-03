@@ -6,7 +6,7 @@ Status legend: ✅ done · 🔄 in progress · ⬜ not started
 |-------|------|--------|
 | 0 | Instruction cleanup + verification (docs only) | ✅ 2026-10-03 |
 | 1 | Readability pass, zero behavior changes | ✅ 2026-10-03 |
-| 2 | Current-state documentation | 🔄 in progress |
+| 2 | Current-state documentation | ✅ 2026-10-03 |
 | 3 | Review-only, no code changes | ⬜ |
 | 4 | Structural refactor (approval-gated) | ⬜ |
 
@@ -182,12 +182,29 @@ Carried forward (pre-existing):
        table + structure, Thread Architecture, MongoDB Schema, Data Flow,
        Data Models, all six Formula docs, Configuration System, Terminal Output
        Reference, all Problems notes, Issues.md see-also + ISSUE-5 closing note).
-- [ ] 3. **Audit in place — no new filenames:**
+- [x] 3. **Audit in place — no new filenames** (2026-10-03):
    - `docs/02 - Architecture/Data Flow.md` verified line-by-line against code.
-   - `docs/04 - Pipeline/Data Models.md` upgraded to carry the STATE_MODEL content
-     (what information exists at each stage: Frame → Detection → Track → face evidence →
-     Embedding → Match → Recognition → Policy → Finalization → Person/Event,
-     including `pending_*` fields and who writes/reads them).
+     Corrected: frame resize is `FRAME_WIDTH×FRAME_HEIGHT` (default 1920×1080,
+     not fixed 1280×720) · composite ID gained the `_{generation}` suffix ·
+     skip conditions are 4, not 3 (added `rescan_interval` + attempt budget) ·
+     full-frame face fallback is gated by `ENABLE_FULL_FRAME_FALLBACK=false` ·
+     mask penalty is `1 - 0.15×mask_norm`, not flat ×0.85 · status mapping
+     now documents the matched/unmatched × 70/55 table · finalization order
+     corrected (`log_event` before `broadcast_event`) · broadcast preview
+     corrected to 960×540 @ q85 (was 640×360 @ q90) · all `file:NNN` refs
+     replaced with function names.
+   - `docs/04 - Pipeline/Data Models.md` upgraded: line count 232 → 271 ·
+     fixed nonexistent field `last_recognition_frame` · `decision` and
+     `RecognitionResult/DecisionResult.status` are `Status` ints, not strings ·
+     `visibility` is the `Visibility` enum · added missing fields
+     (`byte_track_id`, `generation`, `person_name_similarity`,
+     `last_alert_time`, `image_url`, `_finalized`, `best_person_crop_jpeg`) ·
+     added `mark_finalized_once()` and `DedupStatus`/`DedupResult` ·
+     documented that `TrackSnapshot` is not merely "Track minus lock" ·
+     **new STATE_MODEL section**: 10 stages (Frame → Detection → Track →
+     face evidence → Embedding → Match → Recognition → Policy → Finalization →
+     Person/Event) with writers/readers, plus a `pending_*` summary table
+     (single write site + upgrade rule + readers for each).
 - [x] 4. **Create `docs/ARCHITECTURE_RULES.md`** — semantic boundaries only:
      Identity (track_id ≠ person_id) · Detection · Tracking · Recognition ·
      Verification (weak result must not replace stronger accumulated evidence) ·
@@ -202,6 +219,11 @@ Carried forward (pre-existing):
      (`_finalized_track_ids &= active_track_ids`) is already absent from code).
 
 Gate: all links resolve, 84 tests still pass (no code touched in Phase 2).
+**Gate passed 2026-10-03:** only remaining "broken" wiki-link is a false
+positive (`[[0.013, -0.082, ...]]` — an embedding array in `MongoDB Schema.md`,
+not a link); 84 tests green; git diff shows `.md` files only.
+
+**Phase 2 complete.**
 
 ---
 
