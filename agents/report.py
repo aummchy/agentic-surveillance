@@ -84,13 +84,10 @@ class ReportAgent(BaseAgent):
         person_id = data.get("person_id")
         name = data.get("name", "Unknown")
 
-        # Get memory context if available
-        memory_context = {}
-        if person_id:
-            try:
-                memory_context = get_visit_history(person_id)
-            except Exception as e:
-                logger.debug("visit_history_fetch_failed", person_id=person_id, error=str(e))
+        # Memory context arrives pre-batched: routes/reports.py fetches all
+        # visit histories in one query and passes them here as "visit_history".
+        # No per-incident DB query (avoids N+1).
+        memory_context = data.get("visit_history") or {}
 
         visit_count = memory_context.get("visit_count", 0)
         last_seen = memory_context.get("last_seen")
@@ -277,7 +274,10 @@ class ReportAgent(BaseAgent):
         parts.append(f"at camera {camera_id}")
 
         if isinstance(last_seen, datetime):
-            # last_seen is naive (from MongoDB). Use naive UTC for comparison.
+            # MongoDB stores naive UTC datetimes; normalize to aware UTC so the
+            # subtraction works no matter which form the value arrives in.
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
             now_utc = datetime.now(timezone.utc)
             days_ago = (now_utc - last_seen).days
             if days_ago == 0:
