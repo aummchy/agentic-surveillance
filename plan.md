@@ -48,8 +48,8 @@ Order (established pattern on the smallest, best-tested file first):
 |---|------|-------|--------|
 | 1 | `pipeline/recognition_pipeline.py` | 392 | ✅ 2026-10-03 (commit `57b46df`) |
 | 2 | `pipeline/track_state.py` | 454 | ✅ 2026-10-03 |
-| 3 | `agents/camera_agent.py` | 545 | 🔄 report pending approval |
-| 4 | `agents/track_processor.py` | 370 | ⬜ |
+| 3 | `agents/camera_agent.py` | 545 | ✅ 2026-10-03 |
+| 4 | `agents/track_processor.py` | 370 | 🔄 report pending approval |
 
 Coverage note: file 1 is covered by 9 stage tests in
 `tests/test_recognition_pipeline_stages.py`; full suite is 84.
@@ -98,6 +98,26 @@ From file 2 `pipeline/track_state.py`:
 - Lock-order invariant (`self._lock` → `track._lock`, never reversed) now stated
   explicitly at module level, plus why `_classify_visibility_inplace` needs only
   `self._lock`.
+
+From file 3 `agents/camera_agent.py`:
+- **No test file imports `CameraAgent`** — zero direct coverage. `_loop`,
+  `_process_tracks`, `_should_skip_recognition`, `_handle_decision_and_alert`,
+  `_cleanup_recognition_track`, `_finalize_track` are untested. Biggest testing
+  gap found so far → Phase 3.
+- Stale comment at `_finalized_track_ids` ("Intentionally not pruned") directly
+  contradicted by `_finalize_track`, which discards the id after finalization.
+  **Comment corrected in Phase 1** (approved); behavior untouched.
+- Unused import `Any` **removed**.
+- `_should_skip_recognition` mutates `track.rescan_attempts` — a predicate with a
+  side effect. Documented, not refactored.
+- `set_recognition_snapshot` is fed the **policy** decision status while
+  `_should_skip_recognition` reads it as if it were the recognition status —
+  same RECOG/POLICY conflation as verification memo Claim 8. → Phase 3/4.
+- `_recognizing_tracks` is set at worker start, not at submit time, so the
+  queue-time check alone is not airtight; the worker-start resolved-check is the
+  real backstop. Documented (this is the corrected form of `see.md` claim #1).
+- `_process_tracks` rebuilds the active-track snapshot once per detection
+  (quadratic per frame). Note only.
 
 Carried forward (pre-existing):
 - `track_processor.py` `_run_recognition_and_memory` constructs a fresh
