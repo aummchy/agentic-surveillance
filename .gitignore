@@ -51,3 +51,6 @@ scripts/query_*.py
 
 # Obsidian
 .obsidian/
+
+# Local reference archive (educational docs, kept local)
+docs/archive/
