@@ -107,10 +107,10 @@
 
   // ── JPEG Compression ────────────────────────────────────────
   // STORE: Quality for stored face captures (higher = better facial detail).
-  // BROADCAST: Quality for live WebSocket stream (lower = less bandwidth).
-  // At 640x480, 80 is recommended — 65 makes compression blocks visibly noisy.
+  // BROADCAST: Quality for live WebSocket stream (85 = clean boxes/labels at
+  // ~5.6x fewer bytes than 95/1080p. Raise only if overlay lines look rough).
   "JPEG_QUALITY_STORE": 85,
-  "JPEG_QUALITY_BROADCAST": 90,
+  "JPEG_QUALITY_BROADCAST": 85,
 
   // DEBUG_FACE_CROPS: Save face crops to captures/debug/face_crops/ (for debugging model behavior)
   "DEBUG_FACE_CROPS": true,
@@ -198,9 +198,11 @@
   // FRAME_SKIP: Broadcast every Nth frame to the dashboard WebSocket.
   // Higher = less bandwidth, lower FPS on dashboard.
   "FRAME_SKIP": 2,
-  // BROADCAST_WIDTH/HEIGHT: Preview resize dimensions for WebSocket stream.
-  "BROADCAST_WIDTH": 640,
-  "BROADCAST_HEIGHT": 360,
+  // BROADCAST_WIDTH/HEIGHT: Resize for WebSocket stream.
+  // 960x540 keeps the full-width dashboard panel sharp at ~1/5.6 the bytes of
+  // 1080p. Preview only — event thumbnails/face crops use JPEG_QUALITY_STORE at full res.
+  "BROADCAST_WIDTH": 960,
+  "BROADCAST_HEIGHT": 540,
   // ALLOWED_ORIGINS: CORS and WebSocket origin whitelist.
   "ALLOWED_ORIGINS": ["http://localhost:5173", "http://localhost:3000"],
 
@@ -231,8 +233,8 @@
   // ── Camera ───────────────────────────────────────────────────
   // CAMERA_SOURCE: RTSP URL string (e.g. "rtsp://192.168.1.10:554/stream")
   //   for mobile phone cameras. Empty string = use CAMERA_INDEX instead.
-  // "CAMERA_SOURCE": "videos/low_4.mp4",
-  "CAMERA_SOURCE": "",
+  "CAMERA_SOURCE": "videos/low_4.mp4",
+  // "CAMERA_SOURCE": "",
   "CAMERA_INDEX": 0,
   "CAMERA_ID": "cam_01",
 

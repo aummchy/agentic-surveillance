@@ -39,6 +39,20 @@ npm run dev
 
 Dashboard: http://localhost:5173 | API: http://localhost:8000
 
+### Run on a video file (instead of a live camera)
+
+Set `CAMERA_SOURCE` in `.env` — it overrides `CAMERA_INDEX`:
+
+```powershell
+CAMERA_SOURCE=D:/videos/sample.mp4     # forward slashes; relative paths work too, e.g. videos/low_4.mp4
+```
+
+- Works for local files, `rtsp://…` and `http://…/video` streams alike.
+- End-of-file: logs `video_complete` and the pipeline shuts down (no looping).
+- Back to webcam: remove/comment `CAMERA_SOURCE` → falls back to `CAMERA_INDEX=0`.
+- `CAMERA_BACKEND` (e.g. `dshow`) applies only to webcam indexes, not files/URLs.
+- Alternative location: `CAMERA_SOURCE` in `config/config.jsonc` (the `.env` value wins if both are set).
+
 ### Verify install
 
 ```powershell

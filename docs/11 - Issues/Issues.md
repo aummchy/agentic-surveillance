@@ -1,6 +1,6 @@
 # Issues
 
-> Single tracker for pipeline logic issues. Originally from the 2026-08-04 codebase review; absorbs `BUG_REPORT.md` (2026-08-01), all items re-verified against code 2026-10-01. Each has severity, reproduction conditions, and proposed fix.
+> Single tracker for pipeline logic issues. Originally from the 2026-08-04 codebase review; absorbs `BUG_REPORT.md` (2026-08-01), all items re-verified against code 2026-10-01. ISSUE-18/19 added 2026-10-03 from a `videos/low_4.mp4` run. Each has severity, reproduction conditions, and proposed fix.
 
 ---
 
@@ -299,6 +299,126 @@ Element-type casting only happens when `default` is non-empty; any list setting 
 Double-checked locking with an unguarded outer read — safe under the GIL, fragile on free-threaded Python 3.13+.
 
 **Fix:** drop the outer check; always take the (uncontended after first call) lock.
+
+---
+
+## Issues from the 2026-10-03 video-file run
+
+> Observed running `python main.py` with `CAMERA_SOURCE=videos/low_4.mp4` (1920×1080, 29.97 fps, 973 frames) and 4 dashboard tabs. Evidence from `logs/surveillance.jsonl` (2004 lines, run ends 07:49:28).
+
+---
+
+## ISSUE-18 — WebSocket broadcast flood: 1080p/q95 frames with no backpressure
+
+**Severity:** High → Medium (Tier 1 applied 2026-10-03) · **Status:** Partially fixed — Tier 2 open · **Files:** `config/config.jsonc:113,204-205`, `dashboard/backend/routes/live.py:16-45`, `agents/track_processor.py:62-80`, `dashboard/frontend/src/App.jsx`
+
+### Observed
+
+```
+07:49:12 / 07:49:22  frame_broadcast                      (frames flowing)
+07:49:25             video_complete videos/low_4.mp4
+07:49:25             camera_stopped
+07:49:27             client_disconnected ×4 (total 3,2,1,0)
+07:49:27-28          204 × client_send_timeout   (64 × TimeoutError,
+                                                  140 × 'Cannot call "send"
+                                                  once a close message has been sent.')
+07:49:28             ~40 × clients_dropped_silent count=4 remaining=0
+07:49:28             shutdown_complete
+```
+
+### What's wrong
+
+`config/config.jsonc` broadcast at full preview resolution **(state at time of observation — since changed to 960×540 q85, see Proposed fix)**:
+
+```jsonc
+"JPEG_QUALITY_BROADCAST": 95,     // line 113
+"BROADCAST_WIDTH": 1920,          // line 204
+"BROADCAST_HEIGHT": 1080,         // line 205
+```
+
+Measured on `videos/low_4.mp4`: one frame encodes to **433 KB JPEG → 577 KB base64 per WebSocket message**. At ~10 broadcasts/s × 4 connected clients that is ~23 MB/s of JSON the browser must `JSON.parse`, wrap in a data URL, and decode as a 1920×1080 JPEG — on a single main thread, alongside EventLog re-renders and `fetchStats()`.
+
+Intended values (`640×360` @ q80) produce **50 KB** — an 11.5× reduction. AGENTS.md documents the 640×360 preview as the design; config.jsonc overrides it.
+
+### Root cause
+
+Four defects compound:
+
+1. **Unbounded producer queue** — `agents/track_processor.py:62-80` submits an encode+broadcast job for every `FRAME_SKIP`-th frame with no check on whether previous sends completed. No flow control between camera loop and consumers. ~50 broadcast coroutines were still pending at shutdown.
+2. **Cancelled sends corrupt the connection** — `live.py:19-25` wraps `client.send_text()` in `asyncio.wait_for(..., 3.0)`. On timeout `wait_for` **cancels** the in-flight `send`, leaving the `websockets` connection state such that every subsequent send raises `RuntimeError: Cannot call "send" once a close message has been sent` — the 140-error wave.
+3. **Dead clients never closed, log spam** — `_broadcast` (live.py:28-45) only does `connected_clients.difference_update(...)`; it never calls `websocket.close()`. Each backlogged coroutine recomputes `disconnected` from its **own** results snapshot taken before the first one cleared the set, so ~40 of them log the identical `count=4 remaining=0` line.
+4. **Frontend reconnect storm** — `App.jsx:90-99` retries after a fixed 500 ms with no backoff and without closing the prior socket first.
+
+Loopback bandwidth is not the constraint (it does GB/s). The failure is **TCP backpressure**: the browser stops draining → its receive window closes → `transport.write()` stops progressing → `await send_text()` blocks → `wait_for` timers stack up → all fire in one burst. Because the app layer queues instead of dropping, latency only grows.
+
+### Consequence
+
+Live feed freezes/goes stale, `logs/surveillance.jsonl` gets 200+ warnings in 2 seconds at shutdown, ~115 MB of queued base64 strings resident in the event loop, and dashboard tabs churn through connect/drop cycles.
+
+### Proposed fix
+
+**Tier 1 — applied 2026-10-03** (config + frontend; fixes the observed flood):
+
+1. ✅ **Config** — `BROADCAST_WIDTH: 960`, `BROADCAST_HEIGHT: 540`, `JPEG_QUALITY_BROADCAST: 85` (implemented as 960×540 q85 rather than 640×360 q80 to keep the full-width panel sharp): 564 KB → ~101 KB per message, 22.0 → 4.0 MB/s at 4 clients.
+4. ✅ **Frontend** — exponential reconnect backoff (500 ms → cap 5 s) with stale-socket and unmount guards, close the existing socket before opening a new one, `setLiveFrame` throttled to one update per animation frame (latest frame wins).
+
+**Tier 2 — still open** (makes the failure structurally impossible; not yet implemented):
+
+2. **Latest-wins backpressure** — in `track_processor.handle_frame`, skip submitting when a broadcast is already in flight (atomic flag set by the producer, cleared by the coroutine). Queue depth stays 0–1; stale frames are dropped, never queued.
+3. **`live.py`** — never cancel an in-flight send; use a per-client in-flight slot so only one message is outstanding per client. On failure, `await client.close()` (guarded) and discard. Rate-limit `client_send_timeout` to one log per client per state change, and log `clients_dropped_silent` once per batch against the *current* set. Lower `_SEND_TIMEOUT` from 3.0 s to ~1.0 s.
+5. **Optional** — send binary WebSocket frames instead of base64-in-JSON to remove the +33% byte tax.
+
+Without Tier 2 the unbounded producer queue remains: raising the resolution back, or a large number of dashboard tabs, can reintroduce the same failure mode. See also [[ISSUE-19]] for the shutdown-time traceback.
+
+---
+
+## ISSUE-19 — Proactor `Exception in callback _start_serving` at shutdown (Windows)
+
+**Severity:** Low · **Status:** Open · **File:** `main.py:126-173`
+
+### What's wrong
+
+```
+Exception in callback BaseProactorEventLoop._start_serving.<locals>.loop(
+  <_Overlapped...0.1', 63624))>) at ...\asyncio\proactor_events.py:836
+```
+
+At shutdown `main.py:159` sets `server.should_exit = True`, uvicorn closes the port-8000 listening socket while a `_ProactorBaseServeSocketLoop` overlapped `accept()` is still pending. When the completion callback fires on the closed socket it raises, and asyncio prints the raw `Exception in callback` traceback to stderr. Windows/Proactor only — harmless in effect, alarming in appearance.
+
+### Root cause
+
+- No exception handler installed on the manually created loop, so callback errors go to stderr instead of structlog.
+- `main.py:169-171` aggravates it: `server_thread.join(timeout=5)` can expire while uvicorn is still draining, because the `/ws/live` handlers sit in `websocket.receive_text()` forever and never finish — then `loop.close()` runs against a loop the server thread is still using (`RuntimeError: Event loop is closed` from stragglers).
+- `run_server()` never calls `asyncio.set_event_loop(loop)` for its thread.
+
+### Consequence
+
+Scary traceback at the end of every video-file run; in the worst case lingering tasks fail against a closed loop and mask real errors.
+
+### Proposed fix
+
+```python
+def run_server():
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(server.serve())
+
+# after camera.start() returns:
+server.should_exit = True
+server_thread.join(timeout=10)
+if server_thread.is_alive():
+    server.force_exit = True          # uvicorn: stop waiting for idle conns
+    server_thread.join(timeout=5)
+if server_thread.is_alive():
+    logger.warning("server_thread_still_alive")   # do NOT close the loop
+else:
+    loop.close()
+
+loop.set_exception_handler(lambda lp, ctx: logger.debug("loop_exception", **ctx))
+```
+
+Also close every client in `live.connected_clients` before setting `should_exit`, so uvicorn can drain immediately instead of waiting on WebSocket handlers that never return.
+
+Related: [[ISSUE-18]] — the broadcast flood is what leaves clients wedged in `receive_text()` during shutdown.
 
 ---
 

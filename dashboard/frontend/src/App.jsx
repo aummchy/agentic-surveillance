@@ -24,6 +24,10 @@ function App() {
   const reconnectRef = useRef(null)
   const alertTimeoutRef = useRef(null)
   const liveEventPrependRef = useRef(null)
+  const reconnectAttemptRef = useRef(0)
+  const unmountedRef = useRef(false)
+  const pendingFrameRef = useRef(null)
+  const frameRafRef = useRef(null)
 
   const fetchStats = useCallback(async () => {
     try {
@@ -44,11 +48,17 @@ function App() {
 
   const connectWebSocket = useCallback(() => {
     try {
+      if (unmountedRef.current) return
+      if (wsRef.current) {
+        try { wsRef.current.close() } catch { /* already closed */ }
+        wsRef.current = null
+      }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`)
       wsRef.current = ws
 
       ws.onopen = () => {
+        reconnectAttemptRef.current = 0
         setWsConnected(true)
         if (ws._pingInterval) clearInterval(ws._pingInterval)
         const pingInterval = setInterval(() => {
@@ -61,7 +71,17 @@ function App() {
         try {
           const msg = JSON.parse(event.data)
           if (msg.type === 'frame' && msg.data) {
-            setLiveFrame(`data:image/jpeg;base64,${msg.data}`)
+            pendingFrameRef.current = `data:image/jpeg;base64,${msg.data}`
+            if (frameRafRef.current === null) {
+              frameRafRef.current = requestAnimationFrame(() => {
+                frameRafRef.current = null
+                const frame = pendingFrameRef.current
+                if (frame) {
+                  pendingFrameRef.current = null
+                  setLiveFrame(frame)
+                }
+              })
+            }
           } else if (msg.type === 'event' && msg.data) {
             if (liveEventPrependRef.current) {
               liveEventPrependRef.current(msg.data)
@@ -91,20 +111,33 @@ function App() {
         console.warn(`WebSocket closed (code=${e.code}, reason=${e.reason || 'none'})`)
         setWsConnected(false)
         if (ws._pingInterval) clearInterval(ws._pingInterval)
-        reconnectRef.current = setTimeout(connectWebSocket, 500)
+        if (unmountedRef.current || wsRef.current !== ws) return
+        const attempt = reconnectAttemptRef.current
+        reconnectRef.current = setTimeout(
+          connectWebSocket,
+          Math.min(500 * 2 ** attempt, 5000)
+        )
+        reconnectAttemptRef.current = attempt + 1
       }
     } catch (e) {
       console.error('WebSocket init failed:', e)
+      if (unmountedRef.current) return
       reconnectRef.current = setTimeout(connectWebSocket, 500)
     }
   }, [fetchStats])
 
   useEffect(() => {
+    unmountedRef.current = false
     connectWebSocket()
     return () => {
-      if (wsRef.current) wsRef.current.close()
+      unmountedRef.current = true
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.close()
+      }
       if (reconnectRef.current) clearTimeout(reconnectRef.current)
       if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
+      if (frameRafRef.current) cancelAnimationFrame(frameRafRef.current)
     }
   }, [connectWebSocket])
 
