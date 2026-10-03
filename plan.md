@@ -44,10 +44,15 @@ Docs/instruction files only. No Python touched.
 
 Order (established pattern on the smallest, best-tested file first):
 
-1. `pipeline/recognition_pipeline.py` (392 lines, ~20 stage tests)
-2. `pipeline/track_state.py` (454)
-3. `agents/camera_agent.py` (545)
-4. `agents/track_processor.py` (370)
+| # | File | Lines | Status |
+|---|------|-------|--------|
+| 1 | `pipeline/recognition_pipeline.py` | 392 | ✅ 2026-10-03 (commit `57b46df`) |
+| 2 | `pipeline/track_state.py` | 454 | 🔄 report pending approval |
+| 3 | `agents/camera_agent.py` | 545 | ⬜ |
+| 4 | `agents/track_processor.py` | 370 | ⬜ |
+
+Coverage note: file 1 is covered by 9 stage tests in
+`tests/test_recognition_pipeline_stages.py`; full suite is 84.
 
 Per-file loop, strictly sequential:
 
@@ -66,8 +71,21 @@ removal of clearly unused imports · formatting.
 (use function names — line numbers rot) · logic/import-behavior changes ·
 docstring claims about bugs · any fix found along the way (write it in the report instead).
 
-**Known notes to record during Phase 1 (not fix):**
-- `track_processor.py:197` constructs a fresh `RecognitionAgent()` per finalization.
+**Findings recorded during Phase 1 (documented, deliberately NOT fixed):**
+
+From file 1 `pipeline/recognition_pipeline.py`:
+- `skip_reason` is annotated/returned as plain `str` but semantically a
+  `config/status.py:SkipReason` member; equality with the enum only works because
+  `SkipReason` is a `StrEnum`. Phase 4 candidate.
+- `_select_best_face` picks `crop_faces[0]` — verified *not* a bug:
+  `embedding_utils.detect_faces_raw` sorts descending by `det_score`.
+- `RecognitionMetrics` is constructed twice (once in `_detect_face`, a fresh
+  embed/db-only one in `_build_embedding`); `run()` copies detection timings across
+  by hand. Documented at the handoff site. Phase 4 candidate for a cleaner shape.
+
+Carried forward (pre-existing):
+- `track_processor.py` `_run_recognition_and_memory` constructs a fresh
+  `RecognitionAgent()` per finalization.
 - Two recognition implementations exist (see verification memo, Claim 3).
 
 ---
