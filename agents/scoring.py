@@ -9,8 +9,11 @@ import datetime
 import threading
 from dataclasses import dataclass
 from typing import Optional
+import structlog
 from config import settings
 from config.status import Status, STATUS_LABELS
+
+logger = structlog.get_logger(__name__)
 
 _CALC_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "logs", "calculation.log"

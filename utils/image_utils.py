@@ -107,7 +107,9 @@ def save_image(image: np.ndarray, path: str) -> bool:
     """
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(path, image)
+        if not cv2.imwrite(path, image):
+            logger.warning("save_image_failed", path=path, error="imwrite returned False")
+            return False
         return True
     except Exception as e:
         logger.warning("save_image_failed", path=path, error=str(e))

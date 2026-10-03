@@ -59,6 +59,8 @@ async def list_faces(
             return await asyncio.to_thread(_fetch_all)
         else:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}. Use 'unknown', 'verified', or 'all'")
+    except HTTPException:
+        raise
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Server shutting down")
     except Exception as e:
