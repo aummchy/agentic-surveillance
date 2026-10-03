@@ -1,3 +1,22 @@
+"""Single-track recognition pass: detect -> quality -> embed -> match -> memory -> recognize -> decide.
+
+This module owns no state. It reads a Track's accumulated state under the
+track's lock, does the heavy lifting (InsightFace inference, one MongoDB
+vector search, memory read, recognition classification, policy decision),
+and returns a fresh PipelineResult. Writing results back onto the Track is
+the caller's job (see CameraAgent._handle_pipeline_result).
+
+Threading: instances are created once and shared. CameraAgent submits run()
+to its recognition ThreadPoolExecutor, so several different tracks may be
+inside run() concurrently on different threads. Nothing here mutates shared
+state; the only shared inputs are config settings (read-only) and the
+InsightFace singleton.
+
+Skip contract: run() may bail out early and return a PipelineResult with a
+non-"success" skip_reason instead of a full result. Callers must check
+skip_reason before consuming the other fields.
+"""
+
 from __future__ import annotations
 
 import time
@@ -19,15 +38,28 @@ logger = structlog.get_logger(__name__)
 
 @dataclass
 class RecognitionMetrics:
+    """Wall-clock timings (milliseconds) for one recognition pass.
+
+    Populated piecewise: _detect_face fills the detection/quality fields,
+    _build_embedding replaces the object with an embed/db-only one, and run()
+    copies the detection values across (see the metrics handoff noted there).
+    Total is measured in run() itself.
+    """
+
+    # Face detection stage
     crop_detect_ms: float = 0.0
     fallback_detect_ms: float = 0.0
     detect_ms: float = 0.0
+    # Face quality stage
     quality_ms: float = 0.0
+    # Embedding + vector search stage
     embed_ms: float = 0.0
     db_ms: float = 0.0
+    # Memory + recognition/policy stages
     memory_ms: float = 0.0
     recog_policy_ms: float = 0.0
     total_ms: float = 0.0
+    # Detection diagnostics, not timings
     fallback_used: bool = False
     faces_on_crop: int = 0
     person_crop_shape: str = ""
@@ -35,6 +67,14 @@ class RecognitionMetrics:
 
 @dataclass
 class PipelineResult:
+    """Everything one recognition pass produced, plus why it may be incomplete.
+
+    skip_reason is the contract with the caller: "success" means every field
+    below was populated; any other value means the pass bailed out early and
+    only the fields mentioned in that branch are meaningful. Values are the
+    SkipReason members from config/status.py (they are strings at runtime).
+    """
+
     decision: Optional[DecisionResult] = None
     match: Optional[MatchResult] = None
     recognition: Optional[Dict[str, Any]] = None
@@ -53,6 +93,10 @@ class PipelineResult:
 
 
 def _embedding_to_list(embedding: Any) -> list:
+    """Convert a numpy embedding (or anything iterable) into a plain list.
+
+    MongoDB/JSON layers take lists; InsightFace hands back ndarrays.
+    """
     if hasattr(embedding, "tolist"):
         return embedding.tolist()
     return list(embedding)
@@ -64,6 +108,13 @@ class RecognitionPipeline:
     Coordinates face detection, quality assessment, embedding generation,
     vector search matching, memory lookup, and policy decision into a
     single PipelineResult.
+
+    Lifecycle: one instance is built by CameraAgent and reused for the whole
+    session; the agent functions below are themselves stateless.
+
+    Dependencies are injectable for tests (matching_fn, recognition_agent,
+    memory_agent, decide_fn); the production defaults are imported inside
+    __init__ rather than at module level to avoid import cycles.
     """
 
     def __init__(self, matching_fn: Optional[Callable] = None,
@@ -83,11 +134,27 @@ class RecognitionPipeline:
     def run(self, frame: np.ndarray, track: Track) -> PipelineResult:
         """Execute the full recognition pipeline for a single track.
 
+        Stage order: detect face -> assess quality -> embed + vector search
+        -> memory lookup -> recognition -> policy decision.
+
         Returns a PipelineResult containing decision, match, recognition,
         memory, embedding, quality, and timing metrics.
+
+        Four early exits, each with its own skip_reason; on those paths only
+        the fields mentioned are populated:
+          - "high_confidence"  a prior pass already matched strongly, so this
+                               pass is redundant (nothing populated)
+          - "no_face"          no usable face in the person box or frame
+          - "low_quality"      face failed the validity gates (quality set)
+          - "embedding_failed" no embedding could be produced (quality set)
+
+        On "success", every field is populated. This method mutates nothing:
+        the caller decides which results to write back onto the Track.
         """
         t_total = time.perf_counter()
 
+        # Read under the track lock, then work with a local copy — another
+        # worker for a different purpose may rewrite this field mid-pass.
         with track._lock:
             pmr = track.pending_match_result
         if pmr and pmr.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY:
@@ -121,6 +188,9 @@ class RecognitionPipeline:
 
         match = embed_result.match_or_none
         metrics = embed_result.metrics
+        # Metrics handoff: _build_embedding built a fresh, embed/db-only
+        # RecognitionMetrics, so the detection timings recorded on
+        # face_det.metrics have to be carried across by hand here.
         metrics.crop_detect_ms = face_det.metrics.crop_detect_ms
         metrics.fallback_detect_ms = face_det.metrics.fallback_detect_ms
         metrics.fallback_used = face_det.metrics.fallback_used
@@ -165,6 +235,12 @@ class RecognitionPipeline:
 
         Tries crop detection first, then optional full-frame fallback.
         Returns _FaceResult or None if no usable face found.
+
+        "Best" means highest det_score: detect_faces_raw sorts its results
+        descending by det_score, so index 0 is already the best. Returns None
+        as well when the best detection's score is below
+        EMBEDDING_DET_SCORE_MIN — good enough to log is not good enough to
+        embed.
         """
         with track._lock:
             box = track.person_box
@@ -237,7 +313,11 @@ class RecognitionPipeline:
         )
 
     def _expand_person_box(self, box: tuple, frame_shape: tuple) -> tuple:
-        """Expand person box by configured ratio to ensure face is within crop."""
+        """Expand person box by configured ratio to ensure face is within crop.
+
+        Clips the expanded box to the frame boundary, so the result is always
+        a valid (x1, y1, x2, y2) inside the image.
+        """
         bx1, by1, bx2, by2 = map(int, box)
         w, h = bx2 - bx1, by2 - by1
         ex, ey = int(w * settings.PERSON_BOX_EXPANSION_RATIO), int(h * settings.PERSON_BOX_EXPANSION_RATIO)
@@ -248,6 +328,12 @@ class RecognitionPipeline:
         """Select best face detection, preferring crop over full-frame.
 
         Returns (best_detection_dict, detected_in_person_crop) or (None, False).
+
+        Preferring the crop is deliberate: a face found inside the person box
+        belongs to the tracked person with certainty, whereas a full-frame hit
+        may belong to someone standing behind them. Within either list the
+        first entry is already the highest-scoring one (detect_faces_raw
+        sorts by det_score descending), so no max() is needed here.
         """
         if crop_faces:
             best = crop_faces[0]
@@ -261,7 +347,12 @@ class RecognitionPipeline:
         return None, False
 
     def _compute_frame_bbox(self, best: dict, crop_box: tuple, detected_in_person_crop: bool) -> Optional[tuple]:
-        """Convert face bbox from detection-local to full-frame coordinates."""
+        """Convert face bbox from detection-local to full-frame coordinates.
+
+        Detections on the person crop are relative to that crop's origin and
+        must be offset; detections from the full-frame pass are already in
+        frame coordinates. Returns None when the detection carries no bbox.
+        """
         if not best.get("bbox"):
             return None
         fx1, fy1, fx2, fy2 = best["bbox"]
@@ -271,7 +362,11 @@ class RecognitionPipeline:
         return (fx1, fy1, fx2, fy2)
 
     def _extract_face_crop(self, frame: np.ndarray, person_crop: np.ndarray, frame_bbox: Optional[tuple]) -> np.ndarray:
-        """Extract face crop from frame using computed bounding box."""
+        """Extract face crop from frame using computed bounding box.
+
+        Falls back to the whole person crop when no frame-space bbox exists,
+        so callers always get a non-empty array to run quality scoring on.
+        """
         if frame_bbox:
             fx1, fy1, fx2, fy2 = frame_bbox
             return frame[fy1:fy2, fx1:fx2]
@@ -298,6 +393,8 @@ class RecognitionPipeline:
         """Generate embedding from face crop and run vector search matching.
 
         Returns an _EmbedResult with embedding, match, and timing metrics.
+        Note that the RecognitionMetrics returned here is a fresh, embed/db
+        only object — run() copies the detection timings onto it afterwards.
         """
         t_embed = time.perf_counter()
         embedding_list = _embedding_to_list(face_det.best["embedding"])
@@ -317,7 +414,9 @@ class RecognitionPipeline:
     def _lookup_memory(self, track: Track, match: Optional[MatchResult]) -> Dict[str, Any]:
         """Look up visit history and memory context for a matched person.
 
-        Returns empty dict if no match or person_id is available.
+        Returns empty dict if no match or person_id is available, and a
+        skip marker instead of a lookup when the match is already
+        high-confidence (re-reading visit history adds nothing there).
         """
         if not match or not match.matched or not match.person_id:
             return {}
@@ -342,6 +441,10 @@ class RecognitionPipeline:
         """Run the recognition agent to classify identity and confidence.
 
         Returns a dict with status, confidence, is_masked, and other fields.
+
+        track_duration and face_quality feed the confidence formula; top2 and
+        margin come from the match so the agent can judge separation between
+        the best and second-best candidate.
         """
         track_duration = time.time() - track.first_seen
         face_quality = quality.overall_score if quality and quality.overall_score > 0 else None
@@ -363,11 +466,19 @@ class RecognitionPipeline:
         """Run the policy agent to make a final decision.
 
         Returns a DecisionResult with status, alert_level, and action flags.
+
+        The policy owns alerting and registration, not the recognition agent;
+        it receives the recognition output as an input (see agents/policy.py).
         """
         return self._decide_fn(track, match, recognition, memory)
 
 
 class _FaceResult:
+    """Per-pass face detection outcome: what was found and where.
+
+    Private transport type between _detect_face and _build_embedding. Uses
+    __slots__ because it is allocated once per recognition pass.
+    """
     __slots__ = ("best", "face_crop", "person_crop", "frame_bbox", "face_ratio",
                  "detected_in_person_crop", "metrics")
 
@@ -384,6 +495,11 @@ class _FaceResult:
 
 
 class _EmbedResult:
+    """Per-pass embedding outcome: the vector, its match, and the timings.
+
+    Private transport type for _build_embedding's return; __slots__ for the
+    same allocation reason as _FaceResult.
+    """
     __slots__ = ("embedding", "match_or_none", "metrics")
 
     def __init__(self, embedding: list, match: Optional[MatchResult], metrics: RecognitionMetrics) -> None:
