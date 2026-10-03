@@ -115,7 +115,7 @@ The following issues have previously been reported or fixed and should **NOT** a
 * Track finalization has duplicate-finalization protection (three guards: `camera_agent.py:438-439`, `:734-735`, `:768`) — the "Duplicate Finalization (Visit Inflation)" problem doc is stale; the issue is Resolved.
 * Track ID and Person ID are distinct concepts (with the documented `"person_id"`-carries-`track_id` broadcast hazard).
 * WebSocket origin validation on `/ws/live` (`live.py:82-85`, close code 4003).
-* CORS limited to explicit methods/headers (`main.py:21-22`).
+* CORS limited to explicit methods/headers (`dashboard/backend/main.py:21-22`).
 * Policy RULE 5 returns `unknown` — auto-registered unknowns are no longer promoted to `known_visitor`.
 * Alert dispatch C1+H5 fixed: dead `track.alerted` guard removed, `AlertLevel` imported; two-layer dedup contract (caller marks first, cooldown stamped at allow-time) tested in `tests/test_alert_dispatch.py`.
 * Incident reports H1+H2 fixed: naive/aware datetime crash and N+1 `visit_history` query; tested in `tests/test_report.py` (2026-10-03).

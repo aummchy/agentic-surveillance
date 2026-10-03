@@ -114,7 +114,7 @@ Camera / Video / Stream
 
 > **Important:** The diagram above describes the current implementation. Recognition has **two execution paths** — progressive (mid-track) and finalization (end-of-track). This duplication is real and verified; it is documented in [Section 8](02%20-%20Architecture/Current%20Architecture%20-%20Recognition.md#8-current-recognition-architecture).
 
-> **Correction note:** An earlier version of this document claimed the track queue had ONE consumer. The code starts **two** (`main.py:117`, `for i in range(2)`). The inventory in section 25 reflects the code.
+> **Correction note:** An earlier version of this document claimed the track queue had ONE consumer. The code starts **two** (`runtime/track_workers.py`, `NUM_WORKERS = 2`). The inventory in section 25 reflects the code.
 
 ---
 
@@ -124,29 +124,38 @@ Camera / Video / Stream
 
 ### Responsibility
 
-The main application entry point.
+Thin composition root: validates configuration, wires the components in a fixed phase order, starts the camera (which blocks), then runs the shutdown sequence. Extracted 2026-10-03 into the `runtime/` package.
 
 ### Currently responsible for
 
-* Initializing the surveillance application (config load, logging setup, MongoDB connection).
-* Constructing the major components: `TrackProcessor`, then `CameraAgent`.
-* Registering the callbacks `on_track_finalized` (`main.py:69`) and `on_frame_annotated` (`main.py:74`).
-* Starting the track queue consumers — **two** daemon threads running `worker_process_tracks` (`main.py:117-120`).
-* Prewarming models (`_prewarm_yolo`, `_prewarm_insightface`) and running startup checks in one-shot daemon threads (`main.py:112, 139, 142, 143`).
-* Starting the dashboard/API integration: Uvicorn on port 8000 in a daemon thread (`main.py:134-135`).
-* Owning shutdown ordering: drain queue → executors → MongoDB → HTTP pools; waits on the server thread (`main.py:169`).
+* Phase 1: config validation (`settings.validate_config()`), formula header, startup log.
+* Phase 2/5/6: starting the background one-shot tasks — **delegated to `runtime/background.py`** (`start_llm_check`, `start_mongo_checks`, `start_prewarms`).
+* Phase 3: creating the track queue + its **two** consumer threads — **`runtime/track_workers.py`** (`TrackWorkers.start`, late-bound `process_fn`).
+* Phase 4: starting the dashboard/API (asyncio loop + Uvicorn on a daemon thread) — **`runtime/api_server.py`** (`ApiServer.start`).
+* Phase 7: constructing `TrackProcessor` then `CameraAgent`, registering the `handle_track_finalized` / `handle_frame_annotated` closures.
+* Phase 8: `camera.start()` (blocks until Ctrl+C).
+* Phase 9: shutdown orchestration in fixed order — `workers.stop()` → `api.request_exit()` → `workers.drain()` → `track_processor.shutdown()` → alert/LLM/Mongo close → `api.finalize()` (join thread + close loop).
+
+### `runtime/` package (extracted 2026-10-03)
+
+| Module | Owns |
+|--------|------|
+| `runtime/background.py` | LLM availability probe, Atlas index check + embedding backfill, YOLO/InsightFace prewarm — each on its own daemon thread |
+| `runtime/api_server.py` | `ApiServer`: asyncio loop, Uvicorn config/server, daemon thread; two-phase stop (`request_exit` / `finalize`) |
+| `runtime/track_workers.py` | `TrackWorkers`: `queue.Queue` + 2 consumer threads, worker loop (`_worker_loop`), `stop()`/`drain()` |
 
 ### Important dependencies
 
 * `agents.camera_agent` (capture loop, progressive recognition)
 * `agents.track_processor` (finalization sequence)
+* `runtime/` package (lifecycle concerns above)
 * configuration system (`config/settings.py`)
 * dashboard backend (`dashboard/backend/main.py`)
 * logging system (`config/logging_setup.py`)
 
 ### Notes
 
-`main.py` wires the system; it does not contain the processing logic. The per-frame work lives in `camera_agent`/`tracker`, the end-of-track work lives in `track_processor`, and the API lives under `dashboard/backend/`.
+`main.py` wires the system; it does not contain the processing logic. The per-frame work lives in `camera_agent`/`tracker`, the end-of-track work lives in `track_processor`, the API lives under `dashboard/backend/`, and process lifecycle lives in `runtime/`.
 
 ---
 
@@ -159,11 +168,11 @@ The main application entry point.
 | 1 | Main thread | process entry | starts everything, then waits for shutdown |
 | 2 | Camera thread | `camera_agent.start()` | capture → detect → track → update state → schedule recognition → enqueue finalizations |
 | 4 | Recognition pool (`RECOGNITION_MAX_WORKERS`, default 4) | `camera_agent.py:87-88` | progressive recognition passes; finalization work is also submitted here |
-| **2** | Track queue consumers | **`main.py:117` `range(2)`** | `TrackProcessor.process(track)` — final recognition, registration, alerts, events, broadcasts |
+| **2** | Track queue consumers | **`runtime/track_workers.py` `NUM_WORKERS = 2`** | `TrackProcessor.process(track)` — final recognition, registration, alerts, events, broadcasts |
 | 2 | JPEG encode pool | `track_processor.py:95-96` | preview JPEG encoding (`thread_name_prefix="jpeg"`) |
 | 2 | Alert executor | `alert_agent.py:18` | email / SMS / webhook alert channels (`thread_name_prefix="alert"`) |
-| 1 | API thread (daemon) | `main.py:134-135` | Uvicorn + asyncio loop for REST and `/ws/live` |
-| 4 | One-shot daemon helpers | `main.py:112, 139, 142, 143` | LLM background check, startup checks, YOLO prewarm, InsightFace prewarm |
+| 1 | API thread (daemon) | `runtime/api_server.py` `ApiServer.start()` | Uvicorn + asyncio loop for REST and `/ws/live` |
+| 4 | One-shot daemon helpers | `runtime/background.py` (`start_llm_check`, `start_mongo_checks`, `start_prewarms`) | LLM background check, startup checks, YOLO prewarm, InsightFace prewarm |
 
 Conceptual picture:
 
@@ -225,7 +234,7 @@ The camera loop must not block on slow external operations.
 | WebSocket broadcasts | posted onto the asyncio loop with `run_coroutine_threadsafe`, only while the loop is alive |
 | JPEG encode for preview | 2-thread JPEG pool (`track_processor.py:95-96`), outside track locks |
 
-Queues: one `queue.Queue` (`track_queue`) decouples finalization from the camera path; it has **two** consumers (section 25).
+Queues: one `queue.Queue` (`TrackWorkers.queue`, owned by `runtime/track_workers.py`) decouples finalization from the camera path; it has **two** consumers (section 25).
 
 > The exact ownership of every queue/worker was verified for the operations listed above. Anything not listed here is `UNKNOWN — NEEDS VERIFICATION`.
 

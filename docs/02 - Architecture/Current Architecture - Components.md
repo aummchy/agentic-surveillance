@@ -27,7 +27,7 @@
 * Progressive recognition coordination: worker body `_progressive_recognition` (`:504`), result write-back `_handle_pipeline_result` (`:550`) — the **sole write-back site** for progressive results.
 * Mid-track alerting: `_handle_decision_and_alert` (`:636`) → resolves the track image (`:678`) → `alert_dispatch(track, result.decision, image_url)` (`:679`).
 * Frame broadcasting coordination via the `on_frame_annotated` callback.
-* Track finalization coordination: `_finalize_expired_tracks` / `_finalize_track` (`:741`) — final embedding retry (`retry_embedding`, `:759`), then `on_track_finalized` → `main.handle_track_finalized` → `track_processor.enqueue`.
+* Track finalization coordination: `_finalize_expired_tracks` / `_finalize_track` (`:741`) — final embedding retry (`retry_embedding`, `:759`), then the `handle_track_finalized` closure in `main.py` → `track_processor.enqueue(workers.queue, track)`.
 * Debug diagnostics (`_log_duplicate_diagnostics`, `:442`) and FPS stats (`_update_fps_stats`, `:472`).
 
 ### Important state

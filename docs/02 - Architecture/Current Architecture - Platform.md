@@ -16,7 +16,7 @@
 
 ### Responsibility
 
-FastAPI REST + WebSocket API (Uvicorn, port 8000, started from `main.py:134`).
+FastAPI REST + WebSocket API (Uvicorn, port 8000, started from `runtime/api_server.py` via `main.py` phase 4).
 
 ### Current structure (verified from `dashboard/backend/main.py:25-29`)
 
@@ -31,7 +31,7 @@ FastAPI REST + WebSocket API (Uvicorn, port 8000, started from `main.py:134`).
 ### Security posture (as it exists today)
 
 * **No authentication anywhere.**
-* CORS: origins from `settings.ALLOWED_ORIGINS`, methods `["GET", "POST", "PUT", "DELETE"]`, headers `["Content-Type", "Authorization"]` (`main.py:19-22`).
+* CORS: origins from `settings.ALLOWED_ORIGINS`, methods `["GET", "POST", "PUT", "DELETE"]`, headers `["Content-Type", "Authorization"]` (`dashboard/backend/main.py:19-22`).
 * `/ws/live` validates the `Origin` header against `ALLOWED_ORIGINS` and closes with code 4003 if it does not match (`live.py:82-85`).
 * The API binds per `settings`/uvicorn config — the Phase 3 review flagged binding to `0.0.0.0` without auth as finding **H3** (pending decision: localhost-bind vs token auth; Wave A item 3).
 
