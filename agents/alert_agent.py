@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 from config import settings
-from config.status import Status, UNVERIFIED_STATUSES
+from config.status import Status, UNVERIFIED_STATUSES, AlertLevel
 from pipeline.models import Track, DecisionResult
 from utils import llm_client
 
@@ -62,13 +62,18 @@ def should_send_alert(track_id: str, alert_level: str, status: int = None) -> bo
 def dispatch(track: Track, decision: DecisionResult, image_url: str = None) -> bool:
     """Dispatch an alert to all configured channels.
 
-    Checks dedup rules, builds payload, and submits to alert executor.
-    Returns True if alert was dispatched.
+    Dedup contract: the one-shot guarantee lives at the call sites, which
+    must call track.mark_alerted_once() BEFORE dispatching (that flag flips
+    inside the track lock, so concurrent alerts race cleanly). This function
+    only enforces the second layer — should_send_alert()'s per-track,
+    per-level cooldown, stamped at allow-time (async channel outcomes are
+    unknowable by the time this returns).
+
+    Builds the payload and submits network-bound channels to the alert
+    executor. Returns True if the alert was accepted for delivery,
+    False if it was filtered (no should_alert, or cooldown).
     """
     if not decision.should_alert:
-        return False
-
-    if track.alerted:
         return False
 
     if decision.alert_level not in AlertLevel:
