@@ -47,8 +47,8 @@ Order (established pattern on the smallest, best-tested file first):
 | # | File | Lines | Status |
 |---|------|-------|--------|
 | 1 | `pipeline/recognition_pipeline.py` | 392 | ✅ 2026-10-03 (commit `57b46df`) |
-| 2 | `pipeline/track_state.py` | 454 | 🔄 report pending approval |
-| 3 | `agents/camera_agent.py` | 545 | ⬜ |
+| 2 | `pipeline/track_state.py` | 454 | ✅ 2026-10-03 |
+| 3 | `agents/camera_agent.py` | 545 | 🔄 report pending approval |
 | 4 | `agents/track_processor.py` | 370 | ⬜ |
 
 Coverage note: file 1 is covered by 9 stage tests in
@@ -82,6 +82,22 @@ From file 1 `pipeline/recognition_pipeline.py`:
 - `RecognitionMetrics` is constructed twice (once in `_detect_face`, a fresh
   embed/db-only one in `_build_embedding`); `run()` copies detection timings across
   by hand. Documented at the handoff site. Phase 4 candidate for a cleaner shape.
+
+From file 2 `pipeline/track_state.py`:
+- `get_active_track_ids_and_boxes` docstring/type hint were wrong (claimed
+  `(byte_track_id, person_box)` / `Tuple[int, tuple]`; the value is the composite
+  id, i.e. identical to the key). **Corrected in Phase 1** — annotation + doc only.
+  The redundant value itself (value duplicates key) is a Phase 4 note.
+- `remove()` has no callers in production or tests, and does not clear `_in_flight`.
+  Documented as unused; NOT deleted.
+- `set_embedding`'s `(bool, reason)` return is consumed by `finalizer.py` but ignored
+  by `camera_agent`. Documented.
+- `update()` matches tracks by `byte_track_id` alone (camera_id unused in the match —
+  correct for single-camera) via a linear scan under the global lock. Documented.
+- `set_person_name` cannot distinguish similarity 0.0 from "never set". Documented.
+- Lock-order invariant (`self._lock` → `track._lock`, never reversed) now stated
+  explicitly at module level, plus why `_classify_visibility_inplace` needs only
+  `self._lock`.
 
 Carried forward (pre-existing):
 - `track_processor.py` `_run_recognition_and_memory` constructs a fresh
