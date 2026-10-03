@@ -151,6 +151,6 @@ Step 5 — Status:
 3. **Critical alerts always update**: Even if confidence would downgrade.
 
 ## See also
-- [[Scoring Module]] — implementation code
-- [[Recognition Agent]] — calls compute_confidence()
-- [[All Thresholds]] — every threshold used
+- `agents/scoring.py` — implementation code
+- `agents/recognition.py` — calls compute_confidence()
+- [[CURRENT_ARCHITECTURE]] section 6 — every threshold used

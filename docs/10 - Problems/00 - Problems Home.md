@@ -2,6 +2,12 @@
 
 > Every known problem in the surveillance system, organized by subsystem.
 > Each note contains: what's wrong, the deep reason (with file:line), real log evidence, consequence, and fix.
+>
+> **Staleness warning:** file:line citations in these notes date from 2026-08 and
+> may no longer match the code — verify before acting (see `AGENTS.md` §0).
+> Already known stale: the Duplicate Finalization note cites a
+> `_finalized_track_ids &= active_track_ids` pruning step that is no longer in
+> the code. Statuses are unreviewed; re-verification happens in Phase 3 (`plan.md`).
 
 ---
 

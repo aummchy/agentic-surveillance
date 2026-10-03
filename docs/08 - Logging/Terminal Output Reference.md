@@ -74,5 +74,5 @@ Camera detects person
 ```
 
 ## See also
-- [[3-Tier Logging]] — logging architecture
-- [[Calculation Log]] — confidence formula breakdown
+- `AGENTS.md` (Logging system) — logging architecture
+- `agents/scoring.py` (calculation log) — confidence formula breakdown

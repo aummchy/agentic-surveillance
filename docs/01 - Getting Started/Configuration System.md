@@ -63,5 +63,5 @@ At startup, every tunable setting's effective value and source (env/config.jsonc
 
 ## See also
 - [[Environment Variables]] — full list of `.env` keys
-- [[All Config Settings]] — every tunable with defaults
-- [[All Thresholds]] — every threshold with purpose
+- `config/config.jsonc` — every tunable with defaults
+- [[CURRENT_ARCHITECTURE]] section 6 — every threshold with purpose

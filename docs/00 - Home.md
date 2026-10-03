@@ -1,49 +1,42 @@
-# Surveillance System — Map of Content
+# Surveillance System - Map of Content
 
 > AI-powered single-camera surveillance: YOLOv8 person detection → ByteTrack tracking → InsightFace face recognition → autonomous decision engine → alerts + local LLM for NL summaries.
 
 ---
 
+## Canonical documents (read in this order)
+
+| File | What it covers |
+|------|---------------|
+| [`../AGENTS.md`](../AGENTS.md) | Operating contract: workflow, invariants, do/don't |
+| [[CURRENT_ARCHITECTURE]] | As-built inventory: components, threads, stack, thresholds |
+| [`../plan.md`](../plan.md) | Phased roadmap: what is done, what is next, gates |
+| [[REFACTOR_PLAN]] | Phase 4 candidates — **nothing here is approved** |
+| [[HISTORICAL_DEBUG_NOTES]] | Old debugging notes — **not authoritative, verify first** |
+| [[Issues]] | Issue tracker (ISSUE-1..19 + verified-fixed history) |
+
+> Rule of thumb when docs and code disagree: **code wins** (see `AGENTS.md` §0).
+
 ## Getting Started
+
 - [[Quick Start]]
 - [[Prerequisites]]
 - [[Configuration System]]
 - [[Environment Variables]]
 
 ## Architecture
-- [[System Overview]]
-- [[Data Flow]]
-- [[Thread Architecture]]
-- [[MongoDB Schema]]
-- [[Tech Stack]]
 
-## Agents (AI Orchestration)
-- [[Base Agent]]
-- [[Camera Agent]]
-- [[Track Processor]]
-- [[Matching Agent]]
-- [[Recognition Agent]]
-- [[Scoring Module]]
-- [[Policy Agent]]
-- [[Memory Agent]]
-- [[Alert Agent]]
-- [[Finalizer]]
+- [[CURRENT_ARCHITECTURE]] — components, threads, tech stack, thresholds
+- [[Data Flow]] — per-frame step-by-step walkthrough
+- [[Thread Architecture]] — every thread and its responsibilities
+- [[MongoDB Schema]] — collections and indexes
 
-## Pipeline (Computer Vision)
-- [[Tracker (YOLO + ByteTrack)]]
-- [[Recognition Pipeline]]
-- [[Face Detection & Embedding]]
-- [[Quality Assessment]]
-- [[Track State]]
-- [[Data Models]]
+## Pipeline
 
-## Utilities
-- [[Database Utils]]
-- [[Embedding Utils]]
-- [[Image Utils]]
-- [[LLM Client]]
+- [[Data Models]] — data/state at each pipeline stage (`pending_*` fields, who writes/reads what)
 
 ## Formulas
+
 - [[Confidence Scoring]]
 - [[Face Quality Scoring]]
 - [[Vector Search & Matching]]
@@ -51,60 +44,40 @@
 - [[Policy Rules]]
 - [[Atlas Score Conversion]]
 
-## Dashboard
-- [[Backend API]]
-- [[Frontend]]
-- [[WebSocket Live Feed]]
-
 ## Logging
-- [[3-Tier Logging]]
-- [[Terminal Output Reference]]
-- [[Calculation Log]]
 
-## Reference
-- [[All Thresholds]]
-- [[All Config Settings]]
-- [[Common Gotchas]]
+- [[Terminal Output Reference]] — event formats seen in the console
 
-## Problems
+## Problems (Phase 3 triage input — line refs dated, verify against code)
+
 - [[00 - Problems Home]]
-  - Pipeline → [[Recognition Bottleneck (26s Full-Frame Scan)]] · [[Identities Never Generated (No Embeddings)]] · [[Database Latency]]
-  - Track → [[Duplicate Finalization (Visit Inflation)]] · [[Same Person Becomes Multiple Tracks]] · [[Fragmentation Detection is a No-op]]
-
-## Issues (open tracker)
-- [[Issues]] — pipeline logic issues + verified-fixed history (single tracker, re-verified 2026-10-01)
-
-## Canonical References (root)
-| File | What it covers |
-|------|---------------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Tech stack table, connection patterns, MongoDB collections, key thresholds |
-| [GOAL.md](GOAL.md) | Priority (pipeline first), use cases, commercial maturity, planned improvements |
-| [FEATURES.md](FEATURES.md) | Complete inventory of implemented features |
-| [REFERENCES.md](REFERENCES.md) | Open-source recognition pipelines to study (DeepFace, InsightFace, CompreFace, Frigate) |
-| [CODEREFERENCE.md](CODEREFERENCE.md) | File-by-file code map + metrics — dated refactoring snapshot, verify before relying on line numbers |
-
----
+  - Pipeline — [[Recognition Bottleneck (26s Full-Frame Scan)]] · [[Identities Never Generated (No Embeddings)]] · [[Database Latency]]
+  - Track — [[Duplicate Finalization (Visit Inflation)]] · [[Same Person Becomes Multiple Tracks]] · [[Fragmentation Detection is a No-op]]
 
 ## Source Code Layout
 
 ```
-main.py                          ← Entry point, wires everything
-agents/                          ← AI orchestration (7 agents + scoring + finalizer)
-pipeline/                        ← Computer vision (tracker, face, quality, models)
-utils/                           ← Shared utilities (DB, embedding, image, LLM)
-config/                          ← Settings loader + config.jsonc + ByteTrack YAML
-dashboard/                       ← FastAPI backend + React frontend
-tests/                           ← 84 pytest tests
+main.py                          Entry point, wires everything
+agents/                          AI orchestration (camera, matching, recognition,
+                                 scoring, policy, memory, alerts, report, timing,
+                                 finalizer, track_processor)
+pipeline/                        Computer vision (tracker, recognition_pipeline,
+                                 track_state, quality_agent, models)
+utils/                           Shared utilities (db_* modules, embedding,
+                                 image, llm)
+config/                          Settings loader + config.jsonc + ByteTrack YAML
+dashboard/                       FastAPI backend + React frontend
+tests/                           84 pytest tests
 ```
 
 ## Quick Navigation by Concept
 
 | Concept | Start here |
-|---------|-----------|
-| How does detection work? | [[Tracker (YOLO + ByteTrack)]] |
-| How does face recognition work? | [[Face Detection & Embedding]] → [[Vector Search & Matching]] |
+|---------|------------|
+| How does detection work? | [[CURRENT_ARCHITECTURE]] → `pipeline/tracker.py` |
+| How does face recognition work? | [[Data Flow]] → [[Vector Search & Matching]] |
 | How is confidence calculated? | [[Confidence Scoring]] |
-| What triggers an alert? | [[Policy Rules]] → [[Alert Agent]] |
-| How does the dashboard work? | [[Backend API]] → [[WebSocket Live Feed]] |
-| What are all the thresholds? | [[All Thresholds]] |
+| What triggers an alert? | [[Policy Rules]] → `agents/policy.py` |
+| How does the dashboard work? | `dashboard/backend/` → [[Data Flow]] |
+| What are all the thresholds? | [[CURRENT_ARCHITECTURE]] §6 |
 | How is the system configured? | [[Configuration System]] |

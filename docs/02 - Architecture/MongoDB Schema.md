@@ -117,6 +117,6 @@ faces.person_id ──► visit_memory.person_id (one face → one memory)
 ```
 
 ## See also
-- [[Database Utils]] — all MongoDB operations
+- `utils/db_*` — all MongoDB operations
 - [[Vector Search & Matching]] — how vector search works
 - [[Memory Boost]] — how visit history affects recognition

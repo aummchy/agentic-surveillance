@@ -95,6 +95,6 @@ Camera thread                    Worker threads (×4)
 ```
 
 ## See also
-- [[System Overview]] — high-level architecture
+- [[CURRENT_ARCHITECTURE]] — high-level architecture
 - [[Data Flow]] — per-frame walkthrough
-- [[Track State]] — thread-safe track management
+- `pipeline/track_state.py` — thread-safe track management

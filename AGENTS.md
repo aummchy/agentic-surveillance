@@ -283,7 +283,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 | dashboard/ | Web dashboard               | backend/main.py, frontend/src/                                                                                                                                     |
 | tests/     | 84 pytest tests             | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer                    |
 | scripts/   | Session query tools         | query\_\*.py (11 files)                                                                                                                                            |
-| docs/      | Documentation               | ARCHITECTURE, 00-Home, 01-Getting Started, 02-Architecture, 03-Agents, 04-Pipeline, 05-Utilities, 06-Formulas, 07-Dashboard, 08-Logging, 09-Reference, 10-Problems |
+| docs/      | Documentation               | CURRENT_ARCHITECTURE, ARCHITECTURE_RULES, REFACTOR_PLAN, HISTORICAL_DEBUG_NOTES (historical), 00-Home, 01-Getting Started, 02-Architecture (Data Flow, Thread Architecture, MongoDB Schema), 04-Pipeline (Data Models), 06-Formulas, 08-Logging (Terminal Output Reference), 10-Problems (stale-flagged, Phase 3 input), 11-Issues |
 
 ## Coding rules
 

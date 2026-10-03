@@ -1,5 +1,10 @@
 # Duplicate Finalization (Visit Inflation)
 
+> **Stale refs:** file:line citations date from 2026-08 — verify against current
+> code before acting. The cited pruning step `_finalized_track_ids &= active_track_ids`
+> is no longer present; a three-guard scheme (`mark_finalized_once` +
+> `_finalized_track_ids` + in-flight checks) now exists. Status needs Phase 3 re-verification.
+
 **Category:** Track · **Severity:** Critical · **Status:** Open
 
 ## What's wrong
@@ -126,9 +131,9 @@ def _finalize_track(self, track: Track):
 ## Related
 
 - [[Same Person Becomes Multiple Tracks]]
-- [[Track State]]
+- `pipeline/track_state.py`
 - [[Fragmentation Detection is a No-op]]
-- [[Camera Agent]]
+- `agents/camera_agent.py`
 
 ---
 

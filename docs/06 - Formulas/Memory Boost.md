@@ -87,6 +87,6 @@ boost = 0
 ```
 
 ## See also
-- [[Memory Agent]] — where the boost is computed
+- `agents/memory.py` — where the boost is computed
 - [[Confidence Scoring]] — how boost affects confidence
-- [[Database Utils]] — visit_memory operations
+- `utils/db_*` — visit_memory operations

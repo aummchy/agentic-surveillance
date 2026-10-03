@@ -97,5 +97,5 @@ stored_emb = stored_emb / (np.linalg.norm(stored_emb) + 1e-6)
 ## See also
 - [[Atlas Score Conversion]] — score math
 - [[Confidence Scoring]] — how similarity feeds into confidence (65% weight)
-- [[Matching Agent]] — the matching function
-- [[Database Utils]] — vector_search() implementation
+- `agents/matching_agent.py` — the matching function
+- `utils/db_*` — vector_search() implementation

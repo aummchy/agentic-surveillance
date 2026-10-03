@@ -75,6 +75,6 @@ DecisionResult(
 | `critical` | Blacklisted person | All channels, immediate |
 
 ## See also
-- [[Policy Agent]] — implementation (contains `decide()`)
-- [[Alert Agent]] — dispatches alerts based on decision
-- [[All Thresholds]] — policy-related thresholds
+- `agents/policy.py` — implementation (contains `decide()`)
+- `agents/alert_agent.py` — dispatches alerts based on decision
+- [[CURRENT_ARCHITECTURE]] section 6 — policy-related thresholds

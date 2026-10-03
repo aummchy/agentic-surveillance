@@ -1,5 +1,7 @@
 # Identities Never Generated (No Embeddings)
 
+> **Stale refs:** status "Resolved" is historical — citations date from 2026-08; verify against current code before relying on this note.
+
 **Category:** Pipeline · **Severity:** High · **Status:** Resolved (2026-07-30)
 
 ## What was wrong
@@ -34,7 +36,7 @@ Current state (after crop expansion + fallback removal):
 `EMBEDDING_DET_SCORE_MIN = 0.40` still filters out weak detections (< 0.40 det_score). This is intentional — it prevents garbage embeddings from low-confidence faces. No change needed.
 
 ## Related
-- [[Face Detection & Embedding]]
-- [[Embedding Utils]]
+- `utils/embedding_utils.py`
+- `utils/embedding_utils.py`
 - [[Vector Search & Matching]]
 - [[Recognition Bottleneck (26s Full-Frame Scan)]]

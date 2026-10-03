@@ -136,6 +136,6 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
 
 ## See also
 - [[Thread Architecture]] — which thread does what
-- [[Recognition Pipeline]] — detailed pipeline walkthrough
+- `pipeline/recognition_pipeline.py` — detailed pipeline walkthrough
 - [[Confidence Scoring]] — the weighted formula
 - [[Policy Rules]] — the 9-rule decision tree

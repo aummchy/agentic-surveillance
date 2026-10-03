@@ -1,5 +1,7 @@
 # Database Latency
 
+> **Stale refs:** file:line citations date from 2026-08 — verify against current code before acting (Phase 3 re-verification).
+
 **Category:** Pipeline · **Severity:** Low · **Status:** Open
 
 ## What's wrong
@@ -19,5 +21,5 @@
 - Consider a local index if the cloud round trip stays slow.
 
 ## Related
-- [[Database Utils]]
+- `utils/db_*`
 - [[Vector Search & Matching]]

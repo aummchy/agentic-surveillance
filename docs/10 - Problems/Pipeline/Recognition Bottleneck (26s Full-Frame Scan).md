@@ -1,5 +1,7 @@
 # Crop-Detect 2.2s Mean (was 6.4s)
 
+> **Stale refs:** status "Resolved" is historical — citations date from 2026-08; verify against current code before relying on this note.
+
 **Category:** Pipeline · **Severity:** High · **Status:** Resolved
 
 ## What was wrong
@@ -39,7 +41,7 @@ Note: isolated benchmark shows 30% speedup. Under pipeline contention with 2 wor
 - **FPS** — should improve significantly
 
 ## Related
-- [[Recognition Pipeline]]
-- [[Face Detection & Embedding]]
+- `pipeline/recognition_pipeline.py`
+- `utils/embedding_utils.py`
 - [[Identities Never Generated (No Embeddings)]]
 - [[Duplicate Finalization (Visit Inflation)]]

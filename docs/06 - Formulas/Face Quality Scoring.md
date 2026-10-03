@@ -48,5 +48,5 @@ quality_norm × 0.15 → 0 to 0.15 of final confidence
 
 ## See also
 - [[Confidence Scoring]] — how quality feeds in
-- [[Face Detection & Embedding]] — where quality is assessed
-- [[All Thresholds]] — quality-related thresholds
+- `utils/embedding_utils.py` — where quality is assessed
+- [[CURRENT_ARCHITECTURE]] section 6 — quality-related thresholds

@@ -1,5 +1,7 @@
 # Same Person Becomes Multiple Tracks
 
+> **Stale refs:** file:line citations date from 2026-08 — verify against current code before acting (Phase 3 re-verification).
+
 **Category:** Track · **Severity:** High · **Status:** Open
 
 ## What's wrong
@@ -38,6 +40,6 @@ Each finalized Track can auto-register an identity (`store_face`) or record a vi
 - Proposed: `TRACK_TIMEOUT_SECS` 15.0 → 10.0.
 
 ## Related
-- [[Track State]]
-- [[Tracker (YOLO + ByteTrack)]]
+- `pipeline/track_state.py`
+- `pipeline/tracker.py`
 - [[Fragmentation Detection is a No-op]]

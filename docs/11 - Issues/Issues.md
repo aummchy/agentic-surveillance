@@ -130,6 +130,10 @@ Remove the `active_ids` variable entirely (lines 165 and 169).
 
 Remove the row from `docs/09 - Reference/All Thresholds.md` and any other stale references.
 
+**Closing note (2026-10-03):** the referenced document no longer exists — the whole
+`docs/09 - Reference/` section was deleted in the documentation pruning. The stale
+row is gone with it, so this issue is resolved by deletion.
+
 ---
 
 ## ISSUE-6 — `set_best_face` never called on `"low_quality"` path
@@ -368,7 +372,7 @@ Live feed freezes/goes stale, `logs/surveillance.jsonl` gets 200+ warnings in 2 
 3. **`live.py`** — never cancel an in-flight send; use a per-client in-flight slot so only one message is outstanding per client. On failure, `await client.close()` (guarded) and discard. Rate-limit `client_send_timeout` to one log per client per state change, and log `clients_dropped_silent` once per batch against the *current* set. Lower `_SEND_TIMEOUT` from 3.0 s to ~1.0 s.
 5. **Optional** — send binary WebSocket frames instead of base64-in-JSON to remove the +33% byte tax.
 
-Without Tier 2 the unbounded producer queue remains: raising the resolution back, or a large number of dashboard tabs, can reintroduce the same failure mode. See also [[ISSUE-19]] for the shutdown-time traceback.
+Without Tier 2 the unbounded producer queue remains: raising the resolution back, or a large number of dashboard tabs, can reintroduce the same failure mode. See also ISSUE-19 for the shutdown-time traceback.
 
 ---
 
@@ -418,11 +422,11 @@ loop.set_exception_handler(lambda lp, ctx: logger.debug("loop_exception", **ctx)
 
 Also close every client in `live.connected_clients` before setting `should_exit`, so uvicorn can drain immediately instead of waiting on WebSocket handlers that never return.
 
-Related: [[ISSUE-18]] — the broadcast flood is what leaves clients wedged in `receive_text()` during shutdown.
+Related: ISSUE-18 — the broadcast flood is what leaves clients wedged in `receive_text()` during shutdown.
 
 ---
 
 ## See also
-- [[Common Gotchas]] — operational issues
-- [[All Thresholds]] — threshold references
-- [[All Config Settings]] — config references
+- `AGENTS.md` (Gotchas) — operational issues
+- [[CURRENT_ARCHITECTURE]] section 6 — threshold references
+- `config/config.jsonc` — config references

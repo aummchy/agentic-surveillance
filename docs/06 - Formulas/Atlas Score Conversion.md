@@ -64,5 +64,5 @@ This is defensive — the canonical pipeline stores L2-normalized vectors, but f
 
 ## See also
 - [[Vector Search & Matching]] — full search flow
-- [[Matching Agent]] — uses converted scores
+- `agents/matching_agent.py` — uses converted scores
 - [[Confidence Scoring]] — similarity feeds into confidence

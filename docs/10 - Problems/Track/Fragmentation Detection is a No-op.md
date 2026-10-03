@@ -1,5 +1,7 @@
 # Fragmentation Detection is a No-op
 
+> **Stale refs:** file:line citations date from 2026-08 — verify against current code before acting (Phase 3 re-verification).
+
 **Category:** Track · **Severity:** Medium · **Status:** Open
 
 ## What's wrong
@@ -22,6 +24,6 @@ Duplicate fragments pile up, each re-running the 26s recognition and producing s
 - **Recommendation:** B if duplicates are still a problem after the timeout + recognition fixes. C is overkill for a single-cam system.
 
 ## Related
-- [[Track State]]
+- `pipeline/track_state.py`
 - [[Same Person Becomes Multiple Tracks]]
-- [[Embedding Utils]]
+- `utils/embedding_utils.py`

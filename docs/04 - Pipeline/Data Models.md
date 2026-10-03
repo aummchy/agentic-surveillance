@@ -151,6 +151,6 @@ class RecognitionResult:
 ```
 
 ## See also
-- [[Track State]] — manages Track objects
-- [[Recognition Pipeline]] — produces PipelineResult (contains all these types)
+- `pipeline/track_state.py` — manages Track objects
+- `pipeline/recognition_pipeline.py` — produces PipelineResult (contains all these types)
 - [[Data Flow]] — how data flows through these structures

@@ -87,18 +87,16 @@ venv\Scripts\python.exe -m pytest tests/ -v
 | Document | Description |
 |----------|-------------|
 | [AGENTS.md](AGENTS.md) | AI agent instructions, architecture, coding rules, do/don'ts |
-| [TOOLS.md](TOOLS.md) | Developer tools — repomix, ctags, ast-grep, commands |
-| [SYSTEM_INDEX.md](SYSTEM_INDEX.md) | Complete system index — repo layout, execution flow, config map |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Tech stack, components, connection patterns, MongoDB schema |
-| [docs/00 - Home.md](docs/00%20-%20Home.md) | Vault map-of-content: links to all architecture, agent, pipeline, and reference notes |
+| [plan.md](plan.md) | Phased roadmap — what is done, what is next, gates |
+| [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) | As-built architecture: components, threads, tech stack, thresholds |
+| [docs/00 - Home.md](docs/00%20-%20Home.md) | Vault map-of-content: links to all remaining docs |
 
 ## Project Structure
 
 ```
 main.py                    # Entry point
 AGENTS.md                  # AI agent context (architecture, rules, do/don'ts)
-TOOLS.md                   # Developer tools (repomix, ctags, ast-grep)
-SYSTEM_INDEX.md            # Complete system index
+plan.md                    # Phased roadmap with gates
 agents/                    # Business logic (camera, matching, recognition, policy, alerts)
 pipeline/                  # CV pipeline (YOLO, ByteTrack, face detection, quality)
 utils/                     # Infrastructure (MongoDB, LLM, image processing)
@@ -108,7 +106,7 @@ dashboard/
   frontend/                # React + Vite SPA
 tests/                     # pytest test suite (84 tests)
 scripts/                   # Debug/dev utilities
-docs/                      # Documentation (ARCHITECTURE + structured vault: 00-Home → 10-Problems)
+docs/                      # Documentation (CURRENT_ARCHITECTURE + focused vault: 00-Home → 11-Issues)
 models/                    # ML weights (gitignored)
 logs/                      # Runtime logs (gitignored)
 captures/                  # Face captures (gitignored)
