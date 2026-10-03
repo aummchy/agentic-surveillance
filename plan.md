@@ -49,7 +49,9 @@ Order (established pattern on the smallest, best-tested file first):
 | 1 | `pipeline/recognition_pipeline.py` | 392 | ✅ 2026-10-03 (commit `57b46df`) |
 | 2 | `pipeline/track_state.py` | 454 | ✅ 2026-10-03 |
 | 3 | `agents/camera_agent.py` | 545 | ✅ 2026-10-03 |
-| 4 | `agents/track_processor.py` | 370 | 🔄 report pending approval |
+| 4 | `agents/track_processor.py` | 370 | ✅ 2026-10-03 |
+
+**Phase 1 status: all 4 core files complete (readability pass done).**
 
 Coverage note: file 1 is covered by 9 stage tests in
 `tests/test_recognition_pipeline_stages.py`; full suite is 84.
@@ -118,6 +120,34 @@ From file 3 `agents/camera_agent.py`:
   real backstop. Documented (this is the corrected form of `see.md` claim #1).
 - `_process_tracks` rebuilds the active-track snapshot once per detection
   (quadratic per frame). Note only.
+
+From file 4 `agents/track_processor.py` (Phase 1 complete):
+- **No test file imports `TrackProcessor`** — zero direct coverage of
+  `process()` (the whole finalization chain), `handle_frame`, `_handle_registration`,
+  etc. Combined with CameraAgent this is the largest testing gap → Phase 3.
+- This file is the **second implementation of the recognition chain** (verification
+  memo Claim 3): `_run_matching` + `_run_recognition_and_memory` + `decide()`
+  re-run what `RecognitionPipeline.run()` does, against a snapshot + `pending_*`
+  results instead of a live frame. **Now documented in the module docstring**;
+  unification remains Phase 4 (`run_final()`).
+- `RecognitionAgent()` constructed fresh **per track** at `_run_recognition_and_memory`
+  — the only non-reusing site in the system. Documented (already a Phase 4 item).
+- `fresh_match` is derived solely from `pending_match_result is None` and gates
+  trust in `pending_recognition` **and** `pending_memory_context` — three fields
+  coupled to one flag. Documented.
+- `_record_visit` mutates `memory_context["visit_count"]` **in place** after the
+  memory agent returns, so the event log shows the post-increment value.
+  Documented as deliberate.
+- `_broadcast_alert` stores `track.track_id` under the payload key **`"person_id"`**
+  — an established frontend contract (Phase 3/4 decision: rename + frontend together,
+  or leave). Documented as a hazard, payload **not** changed.
+- `_broadcast_event` uses `hasattr`/`getattr` for `alerted`/`person_name` but reads
+  `best_face_crop_path` bare — inconsistent defensiveness. Documented.
+- `_log_event` rebuilds `reason` from the status label instead of `decision.reason`,
+  so rows read "Track finalized: <status>". Documented.
+- `shutdown()` sets `_shutdown_event` but **nothing in this class reads it**
+  (main.py owns the real event; `handle_frame` guards on loop-alive). Documented.
+- `enqueue()` is a one-line `Queue.put` wrapper used once — documented as such.
 
 Carried forward (pre-existing):
 - `track_processor.py` `_run_recognition_and_memory` constructs a fresh

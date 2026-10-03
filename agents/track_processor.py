@@ -1,3 +1,30 @@
+"""Track finalization and live-frame relay.
+
+Two distinct jobs live here:
+
+  finalization   process() consumes a finished track from main.py's queue and
+                 runs the closing sequence — match, recognize, decide,
+                 register, record visit, dispatch alert, log event, broadcast.
+                 All of it is I/O-bound (MongoDB, Cloudinary, alerts,
+                 WebSocket), which is why it runs off the camera loop.
+  frame relay    handle_frame() throttles the annotated preview, resizes and
+                 JPEG-encodes it on a small pool, and posts it to the
+                 dashboard.
+
+Threading: the queue has a single consumer (main.py's worker thread), so
+process() runs one track at a time in submission order and does not need to
+be internally concurrent. handle_frame() is called from the camera thread.
+Broadcasts are handed to the asyncio loop via run_coroutine_threadsafe after
+checking that the loop is still alive.
+
+This module is also the second implementation of the recognition chain: it
+re-runs matching/recognition/memory/policy at finalization using the track's
+snapshot and any pending_* results cached by the progressive pass, whereas
+pipeline/recognition_pipeline.py runs the same stages mid-track against a
+live frame. The two differ because finalization usually has no frame
+available. Unifying them is a Phase 4 item (see plan.md).
+"""
+
 import asyncio
 import concurrent.futures
 import queue
@@ -25,12 +52,23 @@ _UNREGISTERED_STATUSES = (Status.UNKNOWN, Status.MASKED_UNKNOWN)
 
 
 def _is_unregistered(status: int) -> bool:
-    """Check if a status represents an unregistered person."""
+    """Check if a status represents an unregistered person.
+
+    UNKNOWN and MASKED_UNKNOWN mean no known identity was attached, so the
+    track's embedding is a candidate for a brand-new person record.
+    UNCERTAIN is deliberately excluded — a weak match must not create a
+    duplicate identity.
+    """
     return status in _UNREGISTERED_STATUSES
 
 
 def _get_display_name(match_result: MatchResult) -> str | None:
-    """Extract a display name from match result, with person_id fallback."""
+    """Extract a display name from match result, with person_id fallback.
+
+    Returns None for an unmatched result. A matched result with no name
+    falls back to the first 8 characters of person_id so logs and the
+    dashboard still have something to show.
+    """
     if not match_result.matched:
         return None
     return match_result.name or (match_result.person_id or "unknown")[:8]
@@ -41,9 +79,17 @@ class TrackProcessor:
 
     Owns the executor for JPEG encoding and delegates to agents
     for matching, recognition, memory, and decision.
+
+    No per-track state is held on the instance: process() works entirely
+    from a snapshot of the Track, so one processor instance serves every
+    track on the queue.
     """
 
     def __init__(self, loop, memory_agent=None):
+        """loop is the asyncio loop the WebSocket broadcasts are posted to.
+
+        memory_agent is injectable for tests; production uses the default.
+        """
         self._loop = loop
         self._memory_agent = memory_agent or MemoryAgent()
         self._encode_executor = concurrent.futures.ThreadPoolExecutor(
@@ -53,13 +99,36 @@ class TrackProcessor:
         self._frame_counter = 0
 
     def shutdown(self):
+        """Stop accepting broadcast work and close the JPEG pool.
+
+        wait=False lets in-flight encodes finish without blocking. Note
+        _shutdown_event is set here but never read by this class — main.py
+        has its own event for stopping the queue consumer, and handle_frame
+        relies on the loop-alive check instead. The executor close is the
+        effective part of this method.
+        """
         self._shutdown_event.set()
         self._encode_executor.shutdown(wait=False)
 
     def enqueue(self, track_queue: queue.Queue, track: Track):
+        """Put a finalized track on main.py's processing queue.
+
+        Called from CameraAgent's finalization worker thread. A thin
+        wrapper over Queue.put that keeps the queue an implementation
+        detail of the caller's wiring.
+        """
         track_queue.put(track)
 
     def handle_frame(self, frame):
+        """Relay an annotated preview frame to the dashboard.
+
+        Only every FRAME_SKIP-th frame; the rest return immediately so the
+        camera thread is never held up by encoding. The encode and
+        broadcast run on the JPEG pool (not the calling thread), resizing
+        to BROADCAST_WIDTH x BROADCAST_HEIGHT at JPEG_QUALITY_BROADCAST
+        before posting to the asyncio loop. Silently skips when the loop
+        is gone, which is normal during shutdown.
+        """
         self._frame_counter += 1
         if self._frame_counter % settings.FRAME_SKIP != 0:
             return
@@ -80,6 +149,34 @@ class TrackProcessor:
             self._encode_executor.submit(_encode_and_broadcast)
 
     def process(self, track: Track):
+        """Run the closing sequence for one finished track.
+
+        Stage order, all on the single queue-consumer thread:
+
+          1. snapshot the track and resolve its image URLs
+          2. release best_full_frame immediately — the frame is no longer
+             needed once the snapshot exists
+          3. no embedding? log an UNKNOWN event and stop here; without a
+             vector there is nothing to match or store
+          4. match (pending result or fresh vector search)
+          5. refresh the track's person name if this match is better
+          6. recognition + memory (pending results or fresh agent calls)
+          7. policy decision
+          8. auto-register if the decision says to
+          9. record the visit if matched
+         10. dispatch the alert, broadcast it if one went out
+         11. log the event to MongoDB
+         12. broadcast the event payload to the dashboard
+
+        Steps 4-6 are this module's own version of the recognition chain —
+        see the module docstring for why they differ from
+        RecognitionPipeline.
+
+        The whole body is wrapped in a try/except so a failure at any stage
+        still writes a fallback UNKNOWN event; a failure inside that
+        fallback is logged and swallowed rather than raised to the queue
+        consumer.
+        """
         try:
             snap = track.snapshot()
             image_url = resolve_track_image_url(track)
@@ -165,14 +262,26 @@ class TrackProcessor:
                 logger.error("event_log_failed_after_error", track_id=track.track_id, error=str(e2), exc_info=True)
 
     def _run_matching(self, snap) -> MatchResult:
-        """Run vector search matching if no pending result exists."""
+        """Run vector search matching if no pending result exists.
+
+        The progressive recognition pass caches its match on the snapshot
+        (pending_match_result); finalization reuses it instead of paying
+        for a second MongoDB vector search. Returns a fresh search only
+        when no pass produced one.
+        """
         match_result = snap.pending_match_result
         if match_result is None:
             match_result = run_matching_from_embedding(snap.embedding)
         return match_result
 
     def _update_person_name(self, track: Track, match_result: MatchResult):
-        """Update track's person name if this match has higher similarity."""
+        """Update track's person name if this match has higher similarity.
+
+        Guarded by track._lock because progressive passes on other threads
+        may also write person_name. The similarity floor keeps the display
+        name pinned to the best match seen, never downgraded by a weaker
+        later one.
+        """
         if match_result.matched and match_result.name:
             with track._lock:
                 if track.person_name_similarity == 0.0 or match_result.similarity_score >= track.person_name_similarity:
@@ -180,7 +289,20 @@ class TrackProcessor:
                     track.person_name_similarity = match_result.similarity_score
 
     def _run_recognition_and_memory(self, snap, match_result: MatchResult):
-        """Run recognition and memory agents, using pending results when available."""
+        """Run recognition and memory agents, using pending results when available.
+
+        fresh_match is derived from whether a pending match exists — that
+        one flag decides whether the recognition and memory results cached
+        by the progressive pass are trusted too. When the match had to be
+        recomputed, both cached results are discarded along with it, since
+        they were computed against the stale match.
+
+        memory_context is only produced for a matched identity (the memory
+        agent needs a person_id to look up). recognition_result falls back
+        to an empty dict if the agent returns None, so callers never see
+        None. This is the only place in the system that constructs a fresh
+        RecognitionAgent per call rather than reusing one.
+        """
         fresh_match = snap.pending_match_result is None
         recognition_result = snap.pending_recognition if not fresh_match else None
         memory_context = snap.pending_memory_context if not fresh_match else None
@@ -214,7 +336,20 @@ class TrackProcessor:
         return recognition_result, memory_context
 
     def _handle_registration(self, snap, decision, match_result, image_url, person_crop_url):
-        """Handle auto-registration of unknown persons."""
+        """Handle auto-registration of unknown persons.
+
+        Two gates, then four outcomes:
+          - unregistered statuses register as "Unknown"/auto_registered;
+            known identities keep their name/role
+          - a face below REGISTRATION_QUALITY_MIN is skipped entirely
+            (low-quality embeddings pollute the database)
+        After that the embedding goes through deduplication and one of:
+          MERGED  -> an existing person already covers it, nothing stored
+          FAILED  -> dedup unavailable (or raised), registration aborted
+                    rather than risking a duplicate
+          NEW     -> genuinely new identity, stored by _store_new_face
+          other   -> unexpected status, logged as a warning
+        """
         if _is_unregistered(decision.status):
             name = "Unknown"
             role = "unknown"
@@ -255,7 +390,13 @@ class TrackProcessor:
                            status=dedup.status)
 
     def _store_new_face(self, snap, name, role, tags, image_url, person_crop_url):
-        """Store a new face record in MongoDB."""
+        """Store a new face record in MongoDB.
+
+        The stored person_id is the composite track id — for an auto-
+        registered unknown, track id and person id are the same value by
+        design. Failures are logged and swallowed so a bad insert cannot
+        abort finalization.
+        """
         try:
             stored_id = store_face(
                 person_id=snap.track_id,
@@ -278,7 +419,14 @@ class TrackProcessor:
             logger.error("store_face_failed", track_id=snap.track_id, error=str(e), exc_info=True)
 
     def _record_visit(self, match_result, snap, decision, memory_context):
-        """Record a visit in the memory agent."""
+        """Record a visit in the memory agent.
+
+        The visit_action defaults to "recorded" when no memory context
+        exists. Afterwards memory_context["visit_count"] is incremented in
+        place so the subsequent event log and broadcast show the count
+        including this visit — the mutation is deliberate and visible to
+        both callers downstream.
+        """
         self._memory_agent.record_visit(
             person_id=match_result.person_id,
             camera_id=settings.CAMERA_ID,
@@ -291,7 +439,14 @@ class TrackProcessor:
             memory_context["visit_count"] = memory_context.get("visit_count", 0) + 1
 
     def _dispatch_alert(self, track, decision, image_url) -> bool:
-        """Dispatch alert if conditions are met. Returns True if alert was sent."""
+        """Dispatch alert if conditions are met. Returns True if alert was sent.
+
+        mark_alerted_once() makes this at-most-once per track: the flag
+        flips inside the track lock, so a concurrent progressive alert on
+        another thread loses the race cleanly. last_alert_time is only
+        stamped when dispatch actually succeeded, keeping the cooldown
+        anchored to a real alert.
+        """
         if decision.should_alert and track.mark_alerted_once():
             alert_dispatched = dispatch(track, decision, image_url)
             if alert_dispatched:
@@ -300,7 +455,14 @@ class TrackProcessor:
         return False
 
     def _broadcast_alert(self, track, decision, image_url, person_crop_url):
-        """Broadcast alert payload via WebSocket."""
+        """Broadcast alert payload via WebSocket.
+
+        Naming hazard, kept for API compatibility: the payload key
+        "person_id" carries track.track_id, not a real person id. This is
+        an established frontend contract, so the key must not be renamed
+        here — only noted. The event payload below uses the field
+        correctly.
+        """
         alert_payload = {
             "person_id": track.track_id,
             "status": decision.status,
@@ -319,7 +481,14 @@ class TrackProcessor:
 
     def _broadcast_event(self, snap, decision, match_result, image_url,
                          person_crop_url, memory_context):
-        """Broadcast event payload via WebSocket."""
+        """Broadcast event payload via WebSocket.
+
+        Reads alerted/person_name off the snapshot defensively (hasattr /
+        getattr) because not every snapshot carries them, while other
+        snapshot fields are read directly — inconsistent but harmless.
+        best_face_crop_path is turned into a URL with backslashes
+        normalised so Windows paths work in the browser.
+        """
         # Read from track snapshot (already captured)
         alerted_final = snap.alerted if hasattr(snap, 'alerted') else False
         person_name_final = getattr(snap, 'person_name', None)
@@ -350,7 +519,12 @@ class TrackProcessor:
                    alerted: bool, similarity_score: float, image_url: str = None,
                    person_id: str = None, name: str = None,
                    person_crop_url: str = None):
-        """Log event to MongoDB. Non-critical — failures are logged and swallowed."""
+        """Log event to MongoDB. Non-critical — failures are logged and swallowed.
+
+        Note the reason is rebuilt from the status label rather than using
+        decision.reason, so every row reads "Track finalized: <status>"
+        instead of the policy's own explanation.
+        """
         try:
             log_event(
                 track_id=track.track_id,
