@@ -428,5 +428,5 @@ Related: ISSUE-18 — the broadcast flood is what leaves clients wedged in `rece
 
 ## See also
 - `AGENTS.md` (Gotchas) — operational issues
-- [[CURRENT_ARCHITECTURE]] section 6 — threshold references
+- [[CURRENT_ARCHITECTURE]] Appendix B — threshold references
 - `config/config.jsonc` — config references

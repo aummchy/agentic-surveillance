@@ -77,4 +77,4 @@ DecisionResult(
 ## See also
 - `agents/policy.py` — implementation (contains `decide()`)
 - `agents/alert_agent.py` — dispatches alerts based on decision
-- [[CURRENT_ARCHITECTURE]] section 6 — policy-related thresholds
+- [[CURRENT_ARCHITECTURE]] Appendix B — policy-related thresholds

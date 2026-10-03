@@ -9,7 +9,7 @@
 | File | What it covers |
 |------|---------------|
 | [`../AGENTS.md`](../AGENTS.md) | Operating contract: workflow, invariants, do/don't |
-| [[CURRENT_ARCHITECTURE]] | As-built inventory: components, threads, stack, thresholds |
+| [[CURRENT_ARCHITECTURE]] | Current architecture snapshot: overview, runtime flow, concurrency — plus 5 linked detail files (components, recognition, decision, platform, code state) |
 | [`../plan.md`](../plan.md) | Phased roadmap: what is done, what is next, gates |
 | [[REFACTOR_PLAN]] | Phase 4 candidates — **nothing here is approved** |
 | [[HISTORICAL_DEBUG_NOTES]] | Old debugging notes — **not authoritative, verify first** |
@@ -26,7 +26,12 @@
 
 ## Architecture
 
-- [[CURRENT_ARCHITECTURE]] — components, threads, tech stack, thresholds
+- [[CURRENT_ARCHITECTURE]] — overview, runtime flow, concurrency, appendices (hub)
+  - [[Current Architecture - Components]] — major components, tracking, track state (§4–7)
+  - [[Current Architecture - Recognition]] — the two recognition paths, pipeline, quality, matching (§8–14)
+  - [[Current Architecture - Decision Flow]] — policy, finalization, memory, DB, alerts (§15–20)
+  - [[Current Architecture - Platform]] — dashboard, LLM, configuration, status (§21–24)
+  - [[Current Architecture - Code State]] — duplication, concerns, fixed issues, tests (§27–30)
 - [[Data Flow]] — per-frame step-by-step walkthrough
 - [[Thread Architecture]] — every thread and its responsibilities
 - [[MongoDB Schema]] — collections and indexes
@@ -67,7 +72,7 @@ utils/                           Shared utilities (db_* modules, embedding,
                                  image, llm)
 config/                          Settings loader + config.jsonc + ByteTrack YAML
 dashboard/                       FastAPI backend + React frontend
-tests/                           84 pytest tests
+tests/                           97 pytest tests (8 files)
 ```
 
 ## Quick Navigation by Concept
@@ -79,5 +84,5 @@ tests/                           84 pytest tests
 | How is confidence calculated? | [[Confidence Scoring]] |
 | What triggers an alert? | [[Policy Rules]] → `agents/policy.py` |
 | How does the dashboard work? | `dashboard/backend/` → [[Data Flow]] |
-| What are all the thresholds? | [[CURRENT_ARCHITECTURE]] §6 |
+| What are all the thresholds? | [[CURRENT_ARCHITECTURE]] Appendix B |
 | How is the system configured? | [[Configuration System]] |

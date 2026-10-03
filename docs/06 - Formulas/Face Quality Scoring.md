@@ -49,4 +49,4 @@ quality_norm × 0.15 → 0 to 0.15 of final confidence
 ## See also
 - [[Confidence Scoring]] — how quality feeds in
 - `utils/embedding_utils.py` — where quality is assessed
-- [[CURRENT_ARCHITECTURE]] section 6 — quality-related thresholds
+- [[CURRENT_ARCHITECTURE]] Appendix B — quality-related thresholds

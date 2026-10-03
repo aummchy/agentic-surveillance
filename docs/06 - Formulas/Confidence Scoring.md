@@ -153,4 +153,4 @@ Step 5 — Status:
 ## See also
 - `agents/scoring.py` — implementation code
 - `agents/recognition.py` — calls compute_confidence()
-- [[CURRENT_ARCHITECTURE]] section 6 — every threshold used
+- [[CURRENT_ARCHITECTURE]] Appendix B — every threshold used
