@@ -68,6 +68,22 @@ venv\Scripts\python.exe -m pytest tests/ -v
 - Camera device at `CAMERA_INDEX=0` or `CAMERA_SOURCE=http://<phone-ip>:8080/video` for mobile (adjust in `.env`)
 - For Intel Arc iGPU acceleration: `pip install openvino` and export YOLO (optional — CPU works too)
 
+## Tech Stack
+
+High-level view — full detail lives in [CURRENT_ARCHITECTURE.md Appendix A](docs/CURRENT_ARCHITECTURE.md) and the [architecture index §3](docs/02%20-%20Architecture/index.md).
+
+| Layer | Technology |
+|-------|------------|
+| Language | Python 3.11 |
+| Detection / tracking | YOLOv8 (`ultralytics`) + ByteTrack; optional OpenVINO or CUDA acceleration |
+| Face recognition | InsightFace `buffalo_l` — SCRFD detection + ArcFace 512-d embeddings; OpenCV for image operations |
+| Database | MongoDB Atlas — vector search (`vector_index`, 512-d cosine), 3 collections; Cloudinary image archive |
+| Backend | FastAPI + Uvicorn — REST + WebSocket on port 8000; PyMongo; structlog (3-tier logging) |
+| Frontend | React 18 + Vite 5 + axios — dashboard on port 5173 |
+| LLM | Ollama local — Gemma 3 4B / Qwen 3.5 4B via `httpx` (optional; falls back to template strings) |
+| Alerts | Email (SMTP) · Twilio SMS · webhook |
+| Config & tests | `.env` secrets + `config/config.jsonc` tunables · pytest (97 tests) |
+
 ## Commands
 
 | Task | Command |
