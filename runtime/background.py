@@ -9,7 +9,7 @@ import threading
 import structlog
 
 from config import settings
-from utils.db_utils import check_atlas_search_index, backfill_missing_embeddings
+from utils.db_utils import check_atlas_search_index
 from utils.llm_client import is_available as llm_available
 
 logger = structlog.get_logger(__name__)
@@ -30,10 +30,9 @@ def run_startup_checks():
         check_atlas_search_index()
     except Exception as e:
         logger.warning("atlas_check_failed", error=str(e))
-    try:
-        backfill_missing_embeddings()
-    except Exception as e:
-        logger.warning("backfill_failed", error=str(e))
+    # backfill_missing_embeddings() intentionally not called (disabled
+    # 2026-10-03, decision: not needed); implementation kept in
+    # utils/db_search.py — re-enable by calling it here.
 
 
 def prewarm_yolo():

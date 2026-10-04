@@ -140,7 +140,7 @@ Thin composition root: validates configuration, wires the components in a fixed 
 
 | Module | Owns |
 |--------|------|
-| `runtime/background.py` | LLM availability probe, Atlas index check + embedding backfill, YOLO/InsightFace prewarm — each on its own daemon thread |
+| `runtime/background.py` | LLM availability probe, Atlas index check (embedding backfill exists in `utils/db_search.py` but is not invoked — disabled 2026-10-03), YOLO/InsightFace prewarm — each on its own daemon thread |
 | `runtime/api_server.py` | `ApiServer`: asyncio loop, Uvicorn config/server, daemon thread; two-phase stop (`request_exit` / `finalize`) |
 | `runtime/track_workers.py` | `TrackWorkers`: `queue.Queue` + 2 consumer threads, worker loop (`_worker_loop`), `stop()`/`drain()` |
 

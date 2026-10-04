@@ -31,11 +31,13 @@ Main thread
 ├── Uvicorn server (1 thread)
 │   └── FastAPI REST + WebSocket server (port 8000)
 │
-└── Startup background threads (daemon)
-    ├── _check_llm_background() — ping Ollama
-    ├── _run_startup_checks() — Atlas index check + backfill
-    ├── _prewarm_yolo() — load YOLO model
-    └── _prewarm_insightface() — load InsightFace model
+└── Startup background threads (daemon, runtime/background.py)
+    ├── check_llm_background() — ping Ollama
+    ├── run_startup_checks() — Atlas index check (embedding backfill exists
+    │                           in utils/db_search.py but is not invoked —
+    │                           disabled 2026-10-03)
+    ├── prewarm_yolo() — load YOLO model
+    └── prewarm_insightface() — load InsightFace model
 ```
 
 ## Thread safety mechanisms
