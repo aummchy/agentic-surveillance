@@ -51,6 +51,7 @@ scripts/query_*.py
 
 # Obsidian
 .obsidian/
+Excalidraw/
 
 # Local reference archive (educational docs, kept local)
 docs/archive/
