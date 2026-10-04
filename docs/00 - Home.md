@@ -10,7 +10,7 @@
 |------|---------------|
 | [`../AGENTS.md`](../AGENTS.md) | Operating contract: workflow, invariants, do/don't |
 | [[CURRENT_ARCHITECTURE]] | Current architecture snapshot: overview, runtime flow, concurrency — plus 5 linked detail files (components, recognition, decision, platform, code state) |
-| [`../plan.md`](../plan.md) | Phased roadmap: what is done, what is next, gates |
+| [`plan.md`](plan.md) | Phased roadmap: what is done, what is next, gates |
 | [[REFACTOR_PLAN]] | Phase 4 candidates — **nothing here is approved** |
 | [[HISTORICAL_DEBUG_NOTES]] | Old debugging notes — **not authoritative, verify first** |
 | [[Issues]] | Issue tracker (ISSUE-1..19 + verified-fixed history) |
@@ -26,6 +26,7 @@
 
 ## Architecture
 
+- [Folder index](02%20-%20Architecture/index.md) — **text stack + tech stack + reading order** for this folder
 - [[CURRENT_ARCHITECTURE]] — overview, runtime flow, concurrency, appendices (hub)
   - [[Current Architecture - Components]] — major components, tracking, track state (§4–7)
   - [[Current Architecture - Recognition]] — the two recognition paths, pipeline, quality, matching (§8–14)

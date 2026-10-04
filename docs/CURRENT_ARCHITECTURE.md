@@ -363,6 +363,7 @@ Detailed field semantics: `docs/02 - Architecture/MongoDB Schema.md`.
 | `AGENTS.md` | Operating contract for AI agents (workflow, invariants, do/don't) |
 | `docs/CURRENT_ARCHITECTURE.md` | **this file** — hub: overview, runtime flow, entry points, concurrency, I/O, appendices |
 | `docs/02 - Architecture/Current Architecture - *.md` | the five detail files linked from the top of this page |
+| `docs/02 - Architecture/index.md` | folder index: text-stack breakdown, tech stack, reading order |
 | `docs/ARCHITECTURE_RULES.md` | semantic boundaries (what must not change) |
 | `docs/REFACTOR_PLAN.md` | approval-gated change candidates |
 | `docs/02 - Architecture/Data Flow.md` | per-frame step-by-step walkthrough |
