@@ -103,7 +103,7 @@ High-level view — full detail lives in [CURRENT_ARCHITECTURE.md Appendix A](do
 | Document | Description |
 |----------|-------------|
 | [AGENTS.md](AGENTS.md) | AI agent instructions, architecture, coding rules, do/don'ts |
-| [plan.md](plan.md) | Phased roadmap — what is done, what is next, gates |
+| [plan.md](docs/plan.md) | Phased roadmap — what is done, what is next, gates |
 | [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) | As-built architecture: components, threads, tech stack, thresholds |
 | [docs/00 - Home.md](docs/00%20-%20Home.md) | Vault map-of-content: links to all remaining docs |
 
@@ -112,7 +112,7 @@ High-level view — full detail lives in [CURRENT_ARCHITECTURE.md Appendix A](do
 ```
 main.py                    # Entry point
 AGENTS.md                  # AI agent context (architecture, rules, do/don'ts)
-plan.md                    # Phased roadmap with gates
+docs/plan.md                # Phased roadmap with gates
 agents/                    # Business logic (camera, matching, recognition, policy, alerts)
 pipeline/                  # CV pipeline (YOLO, ByteTrack, face detection, quality)
 utils/                     # Infrastructure (MongoDB, LLM, image processing)
