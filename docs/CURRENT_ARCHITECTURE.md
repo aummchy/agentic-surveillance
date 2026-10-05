@@ -59,7 +59,7 @@ Every one of these steps exists in the current code. The components that own eac
 Camera / Video / Stream
         |
         v
-   Frame Capture  (camera thread: resize to 1280x720)
+   Frame Capture  (main thread, inside `_loop()`: resize to 1280x720)
         |
         v
    YOLO Detection  (pipeline/tracker.py)
@@ -165,8 +165,7 @@ Thin composition root: validates configuration, wires the components in a fixed 
 
 | # | Thread(s) | Where started | What it does |
 |---|-----------|---------------|--------------|
-| 1 | Main thread | process entry | starts everything, then waits for shutdown |
-| 2 | Camera thread | `camera_agent.start()` | capture → detect → track → update state → schedule recognition → enqueue finalizations |
+| 1 | **Main thread** — phases 1–7, then `camera.start()` **blocks it** for the whole session | process entry; `main.py` phase 8 | phases 1–7 startup, then the camera loop: capture → detect → track → update state → schedule recognition → enqueue finalizations; after EOF/Ctrl+C the phase-9 shutdown runs on this same thread. **There is no separate camera thread** — everywhere this document says "camera thread" it means the main thread while inside `CameraAgent._loop()`. |
 | 4 | Recognition pool (`RECOGNITION_MAX_WORKERS`, default 4) | `camera_agent.py:87-88` | progressive recognition passes; finalization work is also submitted here |
 | **2** | Track queue consumers | **`runtime/track_workers.py` `NUM_WORKERS = 2`** | `TrackProcessor.process(track)` — final recognition, registration, alerts, events, broadcasts |
 | 2 | JPEG encode pool | `track_processor.py:95-96` | preview JPEG encoding (`thread_name_prefix="jpeg"`) |
@@ -177,7 +176,7 @@ Thin composition root: validates configuration, wires the components in a fixed 
 Conceptual picture:
 
 ```text
-                    Camera Thread
+              Main thread (camera loop)
                          |
                          v
                  Frame / Tracking
@@ -226,7 +225,7 @@ The camera loop must not block on slow external operations.
 
 | Operation | Where it runs (verified) |
 |-----------|--------------------------|
-| MongoDB reads/writes (vector search, faces, events, visit memory) | recognition workers + the **2 queue-consumer threads** — never the camera thread |
+| MongoDB reads/writes (vector search, faces, events, visit memory) | recognition workers + the **2 queue-consumer threads** — never the main thread's camera loop |
 | Cloudinary image upload (`resolve_track_image_url` / `resolve_track_person_crop_url`) | recognition worker (`camera_agent.py:678`, mid-track alert path) or queue consumer (`track_processor.py:182-183`) |
 | Console alert | synchronous on the calling worker (`alert_agent.py:101-106`) |
 | Email / SMS / webhook alerts | alert executor pool (`alert_agent.py:18`), submitted via `_alert_executor.submit` |

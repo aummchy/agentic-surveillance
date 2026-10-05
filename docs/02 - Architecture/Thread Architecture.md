@@ -19,8 +19,8 @@ Main thread
 │   ├── _progressive_recognition() — face detect → quality → embed → match → decide
 │   └── _finalize_track() — final embedding retry
 │
-├── Track worker pool (4 threads)
-│   └── worker_process_tracks() — queue consumer: final match → decide → store → alert → broadcast
+├── Track worker pool (2 threads — `runtime/track_workers.py` `NUM_WORKERS = 2`)
+│   └── `TrackWorkers._worker_loop()` — queue consumer: final match → decide → store → alert → broadcast
 │
 ├── JPEG encode executor (2 threads, inside TrackProcessor)
 │   └── _encode_and_broadcast() — resize + JPEG encode + WebSocket send
@@ -39,6 +39,11 @@ Main thread
     ├── prewarm_yolo() — load YOLO model
     └── prewarm_insightface() — load InsightFace model
 ```
+
+> **Note:** the camera loop runs **on the main thread** — `camera.start()`
+> blocks it for the whole session; there is no separate camera thread.
+> Other documents' "camera thread" = the main thread while it is inside
+> `CameraAgent._loop()`.
 
 ## Thread safety mechanisms
 
@@ -68,7 +73,7 @@ The recognition executor handles face detection, embedding, matching, and decisi
 ## Queue flow
 
 ```
-Camera thread                    Worker threads (×4)
+Camera loop (main thread)   Worker threads (×2)
      │                               │
      │  track_queue.put(track)  ──►  │  track_queue.get()
      │                               │  process(track)
@@ -84,16 +89,15 @@ Camera thread                    Worker threads (×4)
 ## Graceful shutdown sequence
 
 ```
-1. camera.stop()              ← sets _running=False, releases capture
-2. _shutdown_event.set()      ← tells workers to stop
-3. server.should_exit = True  ← tells uvicorn to stop
-4. track_queue.join()         ← waits for all pending tracks to be processed
+1. camera.stop()              ← sets _running=False, releases capture (runs in start()'s finally)
+2. workers.stop()             ← sets _shutdown_event → consumers exit (runtime/track_workers.py)
+3. api.request_exit()         ← flips uvicorn should_exit → serving stops
+4. workers.drain()            ← queue.join() — waits for all pending tracks
 5. track_processor.shutdown() ← stops JPEG encode executor
 6. alert_shutdown()           ← stops alert executor
 7. llm_shutdown()             ← closes httpx client
 8. close_client()             ← closes MongoDB client
-9. server_thread.join(5)      ← waits for uvicorn to finish
-10. loop.close()              ← closes asyncio event loop
+9. api.finalize(timeout=5)    ← joins uvicorn thread + closes asyncio loop
 ```
 
 ## See also
