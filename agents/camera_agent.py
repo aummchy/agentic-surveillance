@@ -13,11 +13,11 @@ Two threads meet in this module:
                 own executors.
   recognition   ThreadPoolExecutor of RECOGNITION_MAX_WORKERS threads running
   workers       _progressive_recognition -> _pipeline.run -> write-back ->
-                cleanup -> possibly _finalize_track.
+                cleanup -> possibly TrackFinalizer.finalize_track.
 
-Coordination between them is two sets guarded by _track_sets_lock
-(_recognizing_tracks, _finalized_track_ids) plus the lock-protected
-registry inside TrackState. Callbacks fire on whichever thread reaches them:
+Coordination between them is the TrackWorkGate (exactly-once claims for
+recognition and finalization) plus the lock-protected registry inside
+TrackState. Callbacks fire on whichever thread reaches them:
 on_track_finalized runs on a recognition worker, on_frame_annotated on the
 main thread.
 """
@@ -28,7 +28,7 @@ import structlog
 import threading
 import concurrent.futures
 import numpy as np
-from typing import Callable, List, Optional, Set, Tuple
+from typing import Callable, List, Optional, Tuple
 from config import settings
 from config.status import Status, RESOLVED_STATUSES, SkipReason, AlertLevel
 from pipeline.tracker import track_persons
@@ -38,7 +38,10 @@ from pipeline.recognition_pipeline import RecognitionPipeline, PipelineResult
 from utils.image_utils import draw_annotations, save_image, resolve_track_image_url, compute_iou
 from agents.timing import TimingCollector
 from agents.alert_agent import dispatch as alert_dispatch
-from agents.finalizer import retry_embedding
+from agents.capture import camera_source, open_capture, apply_frame_props
+from agents.recognition_throttle import should_skip_recognition
+from agents.track_work_gate import TrackWorkGate
+from agents.track_finalization import TrackFinalizer
 
 logger = structlog.get_logger(__name__)
 
@@ -49,19 +52,19 @@ class CameraAgent:
     Frame path (main thread), once per captured frame:
         resize -> track_persons -> _process_tracks (update, IoU dedup,
         schedule recognition every RECOGNITION_INTERVAL_FRAMES) ->
-        get_expired_tracks + _finalize_expired_tracks ->
+        get_expired_tracks + TrackFinalizer.finalize_expired ->
         draw_annotations -> on_frame_annotated -> FPS stats.
 
     Recognition path (worker thread), per scheduled track:
         resolved-check -> mark recognizing -> begin_recognition ->
         ensure_fallback_frame -> _pipeline.run -> _handle_pipeline_result
-        (the sole write-back site) -> _cleanup_recognition_track.
+        (the sole write-back site) -> TrackFinalizer.cleanup_after_recognition.
 
-    A track reaches finalization by either of two routes, both gated on
-    _finalized_track_ids so it happens at most once: _finalize_expired_tracks
-    when the track expires while idle, or _cleanup_recognition_track when it
-    expires while a worker still holds it. _finalize_track adds a third,
-    per-object guard via Track.mark_finalized_once().
+    A track reaches finalization by either of two routes, both claimed
+    exactly once via TrackWorkGate: finalize_expired when the track expires
+    while idle, or cleanup_after_recognition when it expires while a worker
+    still holds it. TrackFinalizer.finalize_track adds a third, per-object
+    guard via Track.mark_finalized_once().
     """
 
     def __init__(self, on_track_finalized: Optional[Callable[[Track], None]] = None,
@@ -75,86 +78,27 @@ class CameraAgent:
         self._frame_count = 0
         self._stop_event = threading.Event()
         self._pipeline = recognition_pipeline or RecognitionPipeline()
-        self._recognizing_tracks = set()
-        # Guarded by _track_sets_lock. Ids are added when a worker starts
-        # (_progressive_recognition) or when finalization is scheduled
-        # (_finalize_expired_tracks), and discarded once finalization
-        # completes (_finalize_track) so a ByteTrack id can be reused by a
-        # later track. The pairing of these two sets is what stops duplicate
-        # progressive alerts and duplicate finalization scheduling.
-        self._finalized_track_ids = set()
-        self._track_sets_lock = threading.Lock()
+        # Exactly-once invariant: worker-busy set + finalized-claimed set,
+        # each check-and-add atomic under the gate's lock. See
+        # agents/track_work_gate.py for the full statement.
+        self._gate = TrackWorkGate()
         self._recognition_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=settings.RECOGNITION_MAX_WORKERS, thread_name_prefix="recognition"
         )
         self._timing = TimingCollector()
+        # Finalization routes (both idle-expiry and worker-release), sharing
+        # the gate, the track registry, and the recognition pool above.
+        self._finalizer = TrackFinalizer(
+            gate=self._gate, track_state=self.track_state,
+            executor=self._recognition_executor,
+            on_track_finalized=self.on_track_finalized, timing=self._timing,
+        )
 
         # FPS counter state (guarded by settings.PERFORMANCE_STATS)
         self._fps_last_time = time.perf_counter()
         self._fps_frame_count = 0
         self._fps_tracker_ms_total = 0.0
         self._fps_tracker_ms_max = 0.0
-
-    @staticmethod
-    def _camera_source() -> str | int:
-        """Return RTSP URL string if CAMERA_SOURCE is set, else CAMERA_INDEX int.
-
-        The type of the return value decides downstream behavior: a str is a
-        URL or file path (read timeouts applied, EOF ends the loop), an int
-        is a device index (no timeouts, read failures trigger reconnect).
-        """
-        src = getattr(settings, "CAMERA_SOURCE", "")
-        if src:
-            return src
-        return settings.CAMERA_INDEX
-
-    @staticmethod
-    def _open_capture() -> cv2.VideoCapture:
-        """Open VideoCapture with configured backend (dshow/msmf/auto).
-
-        Backend selection only applies to device indexes — network URLs and
-        file paths always use OpenCV's default. On Windows, CAMERA_BACKEND
-        picks the capture backend (dshow avoids the MSMF frame-drop error).
-
-        For string sources, CAP_PROP_READ_TIMEOUT_MSEC is set so a stalled
-        stream returns from read() instead of blocking the loop forever;
-        a failed cap.set is non-fatal and only logged.
-        """
-        source = CameraAgent._camera_source()
-        backend = getattr(settings, "CAMERA_BACKEND", "")
-        if backend and isinstance(source, int):
-            be = getattr(cv2, f"CAP_{backend.upper()}", None)
-            if be is not None:
-                cap = cv2.VideoCapture(source, be)
-            else:
-                cap = cv2.VideoCapture(source)
-        else:
-            cap = cv2.VideoCapture(source)
-        # Set read timeout for network streams so read() doesn't block indefinitely
-        if isinstance(source, str):
-            for prop in ("CAP_PROP_READ_TIMEOUT_MSEC", "CAP_PROP_OPEN_TIMEOUT_MSEC"):
-                attr = getattr(cv2, prop, None)
-                if attr is not None:
-                    try:
-                        cap.set(attr, settings.CAMERA_READ_TIMEOUT_MS)
-                    except Exception as e:
-                        logger.debug("camera_prop_set_failed", prop=prop, error=str(e))
-        return cap
-
-    def _apply_frame_props(self) -> str:
-        """Set frame dimensions on the current capture and return actual resolution.
-
-        The requested FRAME_WIDTH/FRAME_HEIGHT are a hint — the device may
-        negotiate something else, so the value read back is what gets logged.
-        Returns "unknown" if the capture is not open.
-        """
-        if self._cap and self._cap.isOpened():
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.FRAME_WIDTH)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.FRAME_HEIGHT)
-            actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            return f"{actual_w}x{actual_h}"
-        return "unknown"
 
     def start(self) -> None:
         """Open the capture and run the frame loop until it stops.
@@ -166,16 +110,16 @@ class CameraAgent:
         """
         self._running = True
 
-        source = CameraAgent._camera_source()
+        source = camera_source()
 
         # Open camera once (no test-then-reopen)
-        self._cap = CameraAgent._open_capture()
+        self._cap = open_capture()
         if not self._cap.isOpened():
             logger.error("camera_open_failed", source=source)
             self._cap.release()
             return
 
-        resolution = self._apply_frame_props()
+        resolution = apply_frame_props(self._cap)
 
         logger.info("camera_started", source=source, backend=getattr(settings, "CAMERA_BACKEND", "auto"), resolution=resolution,
                     yolo_model=settings.YOLO_MODEL, yolo_device=settings.YOLO_DEVICE, face_model=settings.INSIGHTFACE_MODEL)
@@ -192,8 +136,9 @@ class CameraAgent:
 
         Shuts the recognition pool down with wait=True so queued workers
         finish before the capture is released. A worker that is still in
-        _cleanup_recognition_track may then find the pool already closed;
-        that path expects the RuntimeError and logs it rather than failing.
+        TrackFinalizer.cleanup_after_recognition may then find the pool
+        already closed; that path expects the RuntimeError and logs it
+        rather than failing.
         """
         self._running = False
         self._stop_event.set()
@@ -217,7 +162,7 @@ class CameraAgent:
         optional FPS stats; nothing after it blocks on external I/O.
         """
         consecutive_failures = 0
-        source = CameraAgent._camera_source()
+        source = camera_source()
         is_file_source = isinstance(source, str) and "://" not in source
         while self._running:
             ret, frame = self._cap.read()
@@ -230,9 +175,9 @@ class CameraAgent:
                     logger.error("camera_disconnected", failures=consecutive_failures)
                     self._cap.release()
                     time.sleep(settings.CAMERA_RECONNECT_DELAY_SECS)
-                    self._cap = CameraAgent._open_capture()
+                    self._cap = open_capture()
                     if self._cap.isOpened():
-                        resolution = self._apply_frame_props()
+                        resolution = apply_frame_props(self._cap)
                         logger.info("camera_reconnected", resolution=resolution)
                         consecutive_failures = 0
                     else:
@@ -254,12 +199,12 @@ class CameraAgent:
                 logger.debug("recognition_cycle",
                              frame=self._frame_count,
                              track_count=len(tracks),
-                             recognizing=len(self._recognizing_tracks))
+                             recognizing=self._gate.recognizing_count())
 
             self._process_tracks(frame, tracks)
 
             expired = self.track_state.get_expired_tracks()
-            self._finalize_expired_tracks(expired)
+            self._finalizer.finalize_expired(expired)
 
             all_tracks = self.track_state.get_all()
             self._log_duplicate_diagnostics(tracks, all_tracks)
@@ -320,8 +265,9 @@ class CameraAgent:
         then submits to the recognition pool unless this track already has a
         worker active.
 
-        Timing caveat worth knowing: _recognizing_tracks is checked here but
-        set inside the worker (_progressive_recognition), not at submit time.
+        Timing caveat worth knowing: the gate's worker-busy check runs here
+        but begin_recognizing() happens inside the worker
+        (_progressive_recognition), not at submit time.
         A second tick can therefore pass the check before the first worker
         starts; the interval between ticks (RECOGNITION_INTERVAL_FRAMES)
         makes that unlikely, and the worker-start resolved-check is the
@@ -357,9 +303,7 @@ class CameraAgent:
                        last_status=track.last_recognition_status)
             return
 
-        with self._track_sets_lock:
-            already_recognizing = track.track_id in self._recognizing_tracks
-        if not already_recognizing:
+        if not self._gate.is_recognizing(track.track_id):
             logger.debug("progressive_recognition_scheduled",
                        track_id=track.track_id,
                        frame=self._frame_count)
@@ -374,70 +318,14 @@ class CameraAgent:
             )
 
     def _should_skip_recognition(self, track: Track) -> Tuple[bool, str]:
-        """Determine if recognition should be skipped for this track.
+        """Delegate to agents/recognition_throttle.should_skip_recognition.
 
-        Returns (should_skip: bool, reason: str).
-
-        Reasons, in order of evaluation:
-          "resolved"          decision already reached — nothing left to learn
-          "high_confidence"   a prior pass matched above HIGH_CONFIDENCE_SIMILARITY
-          "rescan_interval"   UNKNOWN/UNCERTAIN but the rescan backoff has not elapsed
-          "quality_throttle"  face quality has not improved on the last attempt
-                              by MIN_QUALITY_IMPROVEMENT
-
-        Not a pure predicate: when it decides to allow a rescan it increments
-        track.rescan_attempts as a side effect, spending one of the
-        MAX_RESCAN_ATTEMPTS budget. Callers therefore must not invoke it
-        speculatively.
-
-        The last_recognition_status it branches on is written from the policy
-        decision status (see _handle_decision_and_alert), not from the
-        recognition agent's own classification — the two can differ.
+        Kept as a method so existing references to
+        CameraAgent._should_skip_recognition (e.g. pipeline/track_state.py)
+        stay true; the implementation and its full contract live in the
+        throttle module.
         """
-        already_resolved = track.decision in RESOLVED_STATUSES
-        high_confidence = (
-            track.pending_match_result
-            and track.pending_match_result.similarity_score > settings.HIGH_CONFIDENCE_SIMILARITY
-        )
-
-        if already_resolved or high_confidence:
-            return True, "resolved" if already_resolved else "high_confidence"
-
-        if track.last_recognition_status in (Status.UNKNOWN, Status.UNCERTAIN):
-            has_similarity = (
-                track.pending_match_result
-                and track.pending_match_result.similarity_score > 0
-            )
-            if has_similarity and track.rescan_attempts < settings.MAX_RESCAN_ATTEMPTS:
-                time_since_last = time.time() - track.last_recognition_time
-                if time_since_last >= settings.RESCAN_INTERVAL_SECS:
-                    track.rescan_attempts += 1
-                    return False, ""
-                return True, "rescan_interval"
-            # Throttle if face was previously detected and quality didn't improve
-            if track.best_face_score > 0:
-                quality_improved = track.best_face_score > (
-                    track.last_recognition_quality + settings.MIN_QUALITY_IMPROVEMENT
-                )
-                if not quality_improved:
-                    return True, "quality_throttle"
-
-        return False, ""
-
-    def _finalize_expired_tracks(self, expired: List[Track]) -> None:
-        """Submit expired tracks for finalization if not already processing.
-
-        Idle route to finalization: only submits when the track has no worker
-        active (_recognizing_tracks) and has not already been scheduled
-        (_finalized_track_ids). The worker-held route is handled instead by
-        _cleanup_recognition_track. Adding to the set happens under the same
-        lock as the check, so a track is scheduled once.
-        """
-        for track in expired:
-            with self._track_sets_lock:
-                if track.track_id not in self._recognizing_tracks and track.track_id not in self._finalized_track_ids:
-                    self._finalized_track_ids.add(track.track_id)
-                    self._recognition_executor.submit(self._finalize_track, track)
+        return should_skip_recognition(track)
 
     def _log_duplicate_diagnostics(self, raw_tracks: List[dict], all_tracks: List[Track]) -> None:
         """Log duplicate box diagnostics when debug is enabled.
@@ -510,8 +398,8 @@ class CameraAgent:
         mark the track as recognizing, register the in-flight reference with
         TrackState, capture a fallback photo, then run the pipeline.
 
-        Every exit path lands in _cleanup_recognition_track via finally,
-        which releases the in-flight reference and decides whether
+        Every exit path lands in TrackFinalizer.cleanup_after_recognition via
+        finally, which releases the in-flight reference and decides whether
         finalization should be scheduled — including the exception path, so a
         failed pass never strands a track as permanently in-flight.
         """
@@ -534,8 +422,7 @@ class CameraAgent:
                          track_id=track.track_id,
                          queue_delay_ms=round(queue_delay * 1000, 1) if queue_delay is not None else None,
                          thread=threading.current_thread().name)
-        with self._track_sets_lock:
-            self._recognizing_tracks.add(track.track_id)
+        self._gate.begin_recognizing(track.track_id)
         self.track_state.begin_recognition(track.track_id)
         self.track_state.ensure_fallback_frame(track, frame)
 
@@ -545,7 +432,7 @@ class CameraAgent:
         except Exception as e:
             logger.error("progressive_recognition_failed", track_id=track.track_id, error=str(e), exc_info=True)
         finally:
-            self._cleanup_recognition_track(track)
+            self._finalizer.cleanup_after_recognition(track)
 
     def _handle_pipeline_result(self, result: PipelineResult, track: Track, frame: np.ndarray) -> None:
         """Process recognition pipeline results and update track state.
@@ -672,8 +559,7 @@ class CameraAgent:
         )
 
         if result.decision.should_alert and result.decision.alert_level == AlertLevel.CRITICAL and track.mark_alerted_once():
-            with self._track_sets_lock:
-                already_finalized = track.track_id in self._finalized_track_ids
+            already_finalized = self._gate.is_finalized(track.track_id)
             if not already_finalized and not alert_cooldown_active:
                 image_url = resolve_track_image_url(track)
                 alert_dispatch(track, result.decision, image_url)
@@ -701,68 +587,3 @@ class CameraAgent:
 
         self.track_state.set_recognition_snapshot(
             track.track_id, track.best_face_score, result.decision.status)
-
-    def _cleanup_recognition_track(self, track: Track) -> None:
-        """Final cleanup after recognition: end recognition, schedule finalization.
-
-        Runs from _progressive_recognition's finally, so it executes exactly
-        once per pass whether the pass succeeded or raised. It releases the
-        in-flight reference (which may itself remove an expired track from
-        TrackState), drops the id from _recognizing_tracks, and then — only
-        if that track has already disappeared from the registry — schedules
-        finalization. A track still present here will be picked up later by
-        _finalize_expired_tracks instead.
-
-        Submitting can race with stop() closing the pool; the RuntimeError
-        that produces is expected and logged at debug level.
-        """
-        if settings.DEBUG_RECOGNITION:
-            duration_ms = self._timing.get_duration_ms(track.track_id)
-            current_track = self.track_state.get(track.track_id)
-            track_stale = current_track is not track if current_track else True
-            actual_decision = current_track.decision if current_track else "track_removed"
-            logger.debug("recognition_worker_done",
-                         track_id=track.track_id,
-                         duration_ms=duration_ms,
-                         decision=track.decision,
-                         actual_decision=actual_decision,
-                         confidence=track.confidence,
-                         track_stale=track_stale)
-        self.track_state.end_recognition(track.track_id)
-        with self._track_sets_lock:
-            self._recognizing_tracks.discard(track.track_id)
-            if track.track_id not in self._finalized_track_ids and self.track_state.get(track.track_id) is None:
-                self._finalized_track_ids.add(track.track_id)
-                try:
-                    self._recognition_executor.submit(self._finalize_track, track)
-                except RuntimeError:
-                    logger.debug("finalize_submit_after_shutdown", track_id=track.track_id)
-
-    def _finalize_track(self, track: Track) -> None:
-        """Finalize one track: retry its embedding, then notify the caller.
-
-        Third and last duplicate guard — Track.mark_finalized_once() — covers
-        the case where both scheduling routes somehow reached this point.
-        retry_embedding() gives a track that never produced a usable
-        embedding one more attempt using the stored best frame; failures are
-        logged rather than raised so finalization still completes.
-
-        on_track_finalized fires from this worker thread regardless of the
-        embedding outcome, so the caller always sees the track. The id is
-        removed from _finalized_track_ids at the end so ByteTrack may reuse
-        it for a later track.
-        """
-        if not track.mark_finalized_once():
-            logger.debug("finalize_skipped_duplicate", track_id=track.track_id)
-            return
-        try:
-            retry_embedding(track, set_embedding=self.track_state.set_embedding)
-        except Exception as e:
-            logger.error("track_finalization_failed", track_id=track.track_id, error=str(e), exc_info=True)
-        finally:
-            if self.on_track_finalized:
-                self.on_track_finalized(track)
-            # Allow ByteTrack ID reuse — remove from set after finalization
-            # completes so a new track with the same ID can finalize.
-            with self._track_sets_lock:
-                self._finalized_track_ids.discard(track.track_id)
