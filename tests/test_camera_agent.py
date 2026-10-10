@@ -15,7 +15,7 @@ Covered concerns:
 
 No camera, MongoDB, Cloudinary, or alert channel is touched: the recognition
 pipeline is injected as a mock, TrackState stays real (in-memory), and the
-alert/IO helpers are patched at their import site in agents.camera_agent.
+alert/IO helpers are patched at their import site in agents.recognition_worker.
 
 Run: python -m pytest tests/test_camera_agent.py -v
 """
@@ -332,8 +332,8 @@ class TestHandleDecisionAndAlert:
 
     def _patched(self):
         return (
-            patch("agents.camera_agent.alert_dispatch"),
-            patch("agents.camera_agent.resolve_track_image_url", return_value=None),
+            patch("agents.recognition_worker.alert_dispatch"),
+            patch("agents.recognition_worker.resolve_track_image_url", return_value=None),
         )
 
     def test_critical_dispatches_immediately(self, agent):
