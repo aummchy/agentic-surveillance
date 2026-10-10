@@ -212,7 +212,7 @@ code is allowed to mutate that state.
 - **Written by:** `TrackState.update()` (camera thread, every frame);
   setters for all accumulated fields below.
 - **Read by:** scheduling checks (`_maybe_schedule_recognition`,
-  `_finalize_expired_tracks`), `snapshot()` at finalization.
+  `TrackFinalizer.finalize_expired`), `snapshot()` at finalization.
 - **Rule:** every mutation goes through `TrackState` under its lock;
   two-lock ordering `TrackState._lock` → `track._lock`, never reversed.
 

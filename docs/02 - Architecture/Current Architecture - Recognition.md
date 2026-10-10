@@ -22,7 +22,7 @@ This section is intentionally explicit because this is one of the main architect
 
 ### Entry
 
-`agents/camera_agent.py:504` `_progressive_recognition` (runs on a recognition-pool worker).
+`agents/recognition_worker.py:107` `progressive_recognition` (runs on a recognition-pool worker; entered through the `CameraAgent._progressive_recognition` delegate at `agents/camera_agent.py:348`).
 
 ### Flow
 
@@ -30,7 +30,7 @@ This section is intentionally explicit because this is one of the main architect
 Active Track + live frame
   |
   v
-_scheduled by _maybe_schedule_recognition (camera_agent.py:316)
+_scheduled by maybe_schedule_recognition (agents/recognition_worker.py:47)
   |    every RECOGNITION_INTERVAL_FRAMES (20) frames,
   |    and only if quality improved by MIN_QUALITY_IMPROVEMENT (0.10)
   v
@@ -45,7 +45,7 @@ pipeline/recognition_pipeline.py :: RecognitionPipeline.run(frame, track)
   +--> Policy decision       (policy.decide)
   |
   v
-PipelineResult → camera_agent._handle_pipeline_result (:550)
+PipelineResult → recognition_worker.handle_pipeline_result (agents/recognition_worker.py:153)
   |    the SOLE write-back site for progressive results
   v
 Track fields / pending_* caches (upgrade-only setters)
@@ -58,8 +58,8 @@ Allows recognition to occur **while a track is still active**, using the live ca
 ### Important behavior
 
 * Two gates before any work starts: frame cadence (every 20 frames) and quality improvement (≥ 0.10 over `last_recognition_quality`).
-* `_should_skip_recognition` (`camera_agent.py:376`) also enforces `MAX_RESCAN_ATTEMPTS` — and, as its own docstring documents, it **mutates `track.rescan_attempts` as a side effect** (`:414`), i.e. a predicate with a side effect.
-* Duplicate-run guards: `_recognizing_tracks` membership + `pending_recognition is not None` check.
+* `should_skip_recognition` (`agents/recognition_throttle.py:18`, delegated at `camera_agent.py:276`) also enforces `MAX_RESCAN_ATTEMPTS` — and, as its own docstring documents, it **mutates `track.rescan_attempts` as a side effect** (`:56`), i.e. a predicate with a side effect.
+* Duplicate-run guards: `TrackWorkGate.is_recognizing()` membership (`agents/track_work_gate.py:33`) + `pending_recognition is not None` check.
 * Upgrade-only rules prevent lower-quality/low-confidence results from replacing stronger stored results.
 
 ---
@@ -143,7 +143,7 @@ Policy Decision (_run_policy → policy.decide)
 
 ### Important facts
 
-* **Called by:** `camera_agent._progressive_recognition` only. It mutates nothing itself — the caller writes results back to the `Track`.
+* **Called by:** `recognition_worker.progressive_recognition` (via `camera_agent._progressive_recognition`) only. It mutates nothing itself — the caller writes results back to the `Track`.
 * **Threading:** runs entirely on one recognition worker; reads track state under lock, writes nothing.
 * **Quality selection:** `_select_best_face` picks between faces found in the person crop vs. the full frame; `_compute_frame_bbox` / `_expand_person_box` map crops back to frame coordinates.
 
@@ -290,5 +290,5 @@ Each component is normalized to [0, 1] before weighting (`normalize_cosine`, etc
 
 * The exact weights above are **verified** from `agents/scoring.py:68-77, 99-101` (they come from config/`settings.py` defaults: 0.65 / 0.15 / 0.10 / 0.05 / 0.05).
 * A full per-computation tabular breakdown is written to `logs/calculation.log`.
-* **The confidence "never downgrade" gate does NOT live here** — it lives in the callers (`TrackState` setters + `camera_agent` write-back). Remember this when reading `scoring.py` in isolation.
+* **The confidence "never downgrade" gate does NOT live here** - it lives in the callers (`TrackState` setters + the `recognition_worker` write-back). Remember this when reading `scoring.py` in isolation.
 * Out-of-range raw cosine values are logged (`confidence_raw_cosine_out_of_range`) and clamped.

@@ -108,7 +108,7 @@ This module combines **multiple responsibilities** (matching, recognition, memor
 
 ### Ownership (verified — not open)
 
-* **Called by:** `camera_agent._finalize_track` (`camera_agent.py:759`) only: `retry_embedding(track, set_embedding=self.track_state.set_embedding)`.
+* **Called by:** `TrackFinalizer.finalize_track` (`agents/track_finalization.py:85`) only: `retry_embedding(track, set_embedding=self._track_state.set_embedding)` (`:103`).
 * **Runs on:** a recognition-pool worker (finalization is submitted to the same 4-thread pool).
 * The result is written back through the injected `TrackState.set_embedding` callback (lock-protected).
 
@@ -206,7 +206,7 @@ caller:  dispatch(track, decision, image_url)
 
 ### Call sites (verified)
 
-* `camera_agent.py:679` — mid-track alert (e.g., blacklist while the track is live).
+* `agents/recognition_worker.py:282` — mid-track alert (e.g., blacklist while the track is live).
 * `track_processor.py:451` — finalization alert.
 
 ### Known characteristics

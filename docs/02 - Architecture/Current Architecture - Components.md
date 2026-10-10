@@ -4,7 +4,7 @@
 >
 > **Source of truth:** current source code and tests. Facts that could not be proven from the source are marked `UNKNOWN — NEEDS VERIFICATION`.
 >
-> **Last verified:** 2026-10-03
+> **Last verified:** 2026-10-10
 
 **Navigation:** [Hub](../CURRENT_ARCHITECTURE.md) · [Components](Current%20Architecture%20-%20Components.md) · [Recognition](Current%20Architecture%20-%20Recognition.md) · [Decision Flow](Current%20Architecture%20-%20Decision%20Flow.md) · [Platform](Current%20Architecture%20-%20Platform.md) · [Code State](Current%20Architecture%20-%20Code%20State.md)
 
@@ -16,47 +16,43 @@
 
 ### File
 
-`agents/camera_agent.py` (669 lines)
+`agents/camera_agent.py` (375 lines) — the frame loop and scheduling only. The progressive recognition path it schedules lives in `agents/recognition_worker.py` (306 lines), and the split also created `agents/capture.py`, `agents/recognition_throttle.py`, `agents/track_work_gate.py` and `agents/track_finalization.py` (Phase 4 refactor, completed 2026-10-10).
 
 ### Current responsibilities
 
-* Camera/video capture: `_open_capture()` (`:112`), frame property application (`:144`), unconditional resize to 1280×720 before inference.
+* Camera/video capture via `agents/capture.py`: `camera_source()` (`:18`), `open_capture()` (`:31`), `apply_frame_props()` (`:64`), plus the unconditional resize to 1280×720 before inference.
 * YOLO/ByteTrack execution through `pipeline/tracker.py`, once per frame.
-* Track lifecycle: `TrackState.update()` results, IoU overlap dedup (`OVERLAP_IOU_THRESHOLD` 0.5), expired-track sweep (`_finalize_expired_tracks`, `:427`).
-* Recognition scheduling: `_maybe_schedule_recognition` (`:316`) — every `RECOGNITION_INTERVAL_FRAMES` (20) frames (`:313`), gated so a pass only starts if face quality improved by `MIN_QUALITY_IMPROVEMENT` (0.10) over `last_recognition_quality`.
-* Progressive recognition coordination: worker body `_progressive_recognition` (`:504`), result write-back `_handle_pipeline_result` (`:550`) — the **sole write-back site** for progressive results.
-* Mid-track alerting: `_handle_decision_and_alert` (`:636`) → resolves the track image (`:678`) → `alert_dispatch(track, result.decision, image_url)` (`:679`).
+* Track lifecycle: `TrackState.update()` results, IoU overlap dedup (`OVERLAP_IOU_THRESHOLD` 0.5), expired-track sweep (`TrackFinalizer.finalize_expired`, `agents/track_finalization.py:38`).
+* Recognition scheduling: `CameraAgent._maybe_schedule_recognition` (`camera_agent.py:266`, body in `agents/recognition_worker.py:47`) — every `RECOGNITION_INTERVAL_FRAMES` (20) frames, gated so a pass only starts if face quality improved by `MIN_QUALITY_IMPROVEMENT` (0.10) over `last_recognition_quality`.
+* Progressive recognition coordination (bodies in `agents/recognition_worker.py`): worker entry `progressive_recognition` (`:107`), result write-back `handle_pipeline_result` (`:153`) — the **sole write-back site** for progressive results.
+* Mid-track alerting: `handle_decision_and_alert` (`agents/recognition_worker.py:240`) → resolves the track image (`:281`) → `alert_dispatch(track, result.decision, image_url)` (`:282`).
 * Frame broadcasting coordination via the `on_frame_annotated` callback.
-* Track finalization coordination: `_finalize_expired_tracks` / `_finalize_track` (`:741`) — final embedding retry (`retry_embedding`, `:759`), then the `handle_track_finalized` closure in `main.py` → `track_processor.enqueue(workers.queue, track)`.
-* Debug diagnostics (`_log_duplicate_diagnostics`, `:442`) and FPS stats (`_update_fps_stats`, `:472`).
+* Track finalization coordination (`agents/track_finalization.py`): `finalize_expired` / `cleanup_after_recognition`, both ending in `finalize_track` (`:85`) — final embedding retry (`retry_embedding`), then the `handle_track_finalized` closure in `main.py` → `track_processor.enqueue(workers.queue, track)`.
+* Debug diagnostics (`_log_duplicate_diagnostics`, `camera_agent.py:286`) and FPS stats (`_update_fps_stats`, `:316`).
+
+Each of the four worker-path methods above still exists on `CameraAgent` as a one-line delegate to `agents/recognition_worker.py`, so references to `CameraAgent.<method>` (including the tests) keep working.
 
 ### Important state
 
 * `TrackState` (active tracks registry) — shared, lock-protected.
-* `_recognizing_tracks` — set of track IDs currently being recognized; **added inside the worker** (`:538`), discarded at cleanup (`:733`).
-* `_finalized_track_ids` — set of track IDs already finalized; add/discard protocol at `:438-439`, `:734-735`, `:768`; keeps ByteTrack ID reuse safe.
+* `_recognition_executor` = `ThreadPoolExecutor(RECOGNITION_MAX_WORKERS=4)` (`camera_agent.py:90`).
+* `TrackWorkGate` (`agents/track_work_gate.py`) — owns the two sets that used to live in this file: the recognizing set (**marked inside the worker**, not at submit time, released at cleanup) and the finalized set (add/discard protocol, keeps ByteTrack ID reuse safe).
 * `_frame_count` — drives the recognition cadence.
 * Camera/session info: camera ID from settings, capture handle, FPS counters.
 
 ### Threads / concurrency
 
 * Capture, detection, tracking, scheduling: camera thread.
-* Recognition passes and finalization retry: `_recognition_executor` = `ThreadPoolExecutor(RECOGNITION_MAX_WORKERS=4)` (`:87-88`).
+* Recognition passes and finalization retry: `_recognition_executor` (4 workers).
 * Finalization does **not** run inline — it ends in an enqueue onto `track_queue` consumed by one of the two `TrackProcessor` threads.
 
 ### Known architectural concern
 
-`camera_agent.py` currently contains camera/tracking responsibilities **and** recognition orchestration (scheduling, worker body, write-back, decision/alert handling, cleanup). This creates coupling between:
-
-```text
-Camera → Tracking → Recognition scheduling
-```
-
-This is documented as an architectural concern only. No change is implied by this document.
+**Resolved 2026-10-10.** `camera_agent.py` previously mixed camera/tracking responsibilities with recognition orchestration (scheduling, worker body, write-back, decision/alert, cleanup). The worker path now lives in `agents/recognition_worker.py`; scheduling helpers, throttle checks, exactly-once claims and finalization moved to their own modules in steps 1–4. What remains in `camera_agent.py` is the frame loop plus one-line delegates.
 
 ### Test coverage
 
-**No test file imports `CameraAgent`.** Its behavior is only exercised by live runs.
+`tests/test_camera_agent.py` (38 characterization tests covering the throttle, scheduling, write-back order, decision/alert branches, finalization guards and worker entry) plus `tests/test_track_work_gate.py` (9 gate tests, including a 16-thread claim-contention test).
 
 ---
 
@@ -164,7 +160,7 @@ Track ID  !=  Person ID
 ### Important invariants (current implementation protects against)
 
 * Updating pending results with weaker results — upgrade-only setters.
-* Duplicate finalization — `_finalized_track_ids` protocol plus the `Track._finalized` flag.
+* Duplicate finalization - `TrackWorkGate._finalized` protocol plus the `Track._finalized` flag.
 * Invalid concurrent state mutation — `TrackState._lock` around dictionary and field writes.
 * Confidence downgrade — max-upgrade gate at the setters/write-back sites.
 

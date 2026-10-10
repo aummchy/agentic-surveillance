@@ -130,7 +130,12 @@ Dashboard: http://localhost:5173. API: http://localhost:8000.
 
 ```
 main.py (entry point, wires everything)
-├── agents/camera_agent.py        — capture loop + ByteTrack + progressive recognition
+├── agents/camera_agent.py        — capture loop + ByteTrack + recognition scheduling (delegates)
+├── agents/capture.py             — camera source / open / frame-property helpers
+├── agents/recognition_worker.py  — progressive path: schedule → run → write-back → decision/alert
+├── agents/recognition_throttle.py — should_skip_recognition (throttle + rescan side effect)
+├── agents/track_work_gate.py     — TrackWorkGate: exactly-once claims (recognition + finalization)
+├── agents/track_finalization.py  — TrackFinalizer: both finalize routes + finalize_track close-out
 ├── agents/matching_agent.py      — embedding + MongoDB vector search
 ├── agents/memory.py              — visit history tracking
 ├── agents/alert_agent.py         — alert dispatch (console/email/sms/webhook)
@@ -160,7 +165,7 @@ main.py (entry point, wires everything)
 ├── config/settings.py            — loads .env + config.jsonc, validate_config()
 ├── config/logging_setup.py       — Colors, CompactTerminalRenderer, JSONFileRenderer, setup_logging()
 ├── config/config.jsonc           — tunable parameters (edit this, not settings.py)
-├── tests/                        — pytest test suite (84 tests)
+├── tests/                        — pytest test suite (144 tests)
 └── dashboard/
     ├── backend/main.py           — FastAPI app (REST + WebSocket)
     └── frontend/                 — React + Vite
@@ -267,7 +272,7 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 | File                        | What it starts                                | How to run                        |
 | --------------------------- | --------------------------------------------- | --------------------------------- |
 | `main.py`                   | Full pipeline + API server                    | `python main.py`                  |
-| `agents/camera_agent.py`    | Capture loop, recognition, track finalization | Loaded by main.py                 |
+| `agents/camera_agent.py`    | Capture loop + recognition scheduling        | Loaded by main.py                 |
 | `dashboard/backend/main.py` | FastAPI REST + WebSocket                      | Starts automatically on port 8000 |
 | `pipeline/tracker.py`       | YOLO + ByteTrack model loading                | Loaded by camera_agent            |
 | `config/settings.py`        | All configuration loading                     | Imported by every module          |
@@ -276,12 +281,12 @@ See `docs/08 - Logging/Terminal Output Reference.md` for full event format refer
 
 | Folder     | Purpose                     | Key files                                                                                                                                                          |
 | ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| agents/    | AI orchestration (7 agents) | camera_agent, matching, recognition, scoring, policy, memory, alerts, report                                                                                       |
-| pipeline/  | Computer vision pipeline    | tracker, models, track_state, quality_agent, recognition_pipeline                                                                                                  |
-| utils/     | Shared utilities            | db_client, db_faces, db_events, db_memory, db_search, db_utils (facade), embedding_utils, llm_client, image_utils                                                 |
-| config/    | Configuration               | settings.py, status.py, logging_setup.py, config.jsonc, bytetrack_surveillance.yaml                                                                                 |
-| dashboard/ | Web dashboard               | backend/main.py, frontend/src/                                                                                                                                     |
-| tests/     | 84 pytest tests             | test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer                    |
+| agents/    | AI orchestration              | camera_agent, recognition_worker, recognition_throttle, track_work_gate, track_finalization, capture, matching, recognition, scoring, policy, memory, alerts, report, track_processor, finalizer, timing |
+| pipeline/  | Computer vision pipeline      | tracker, models, track_state, quality_agent, recognition_pipeline                                                                                                  |
+| utils/     | Shared utilities              | db_client, db_faces, db_events, db_memory, db_search, db_utils (facade), embedding_utils, llm_client, image_utils                                                 |
+| config/    | Configuration                 | settings.py, status.py, logging_setup.py, config.jsonc, bytetrack_surveillance.yaml                                                                                 |
+| dashboard/ | Web dashboard                 | backend/main.py, frontend/src/                                                                                                                                     |
+| tests/     | 144 pytest tests              | test_camera_agent (38), test_track_work_gate (9), test_recognition, test_recognition_pipeline, test_recognition_pipeline_stages, test_embedding_history, test_thread_safety, test_track_finalizer |
 | scripts/   | Session query tools         | query\_\*.py (11 files)                                                                                                                                            |
 | docs/      | Documentation               | CURRENT_ARCHITECTURE, ARCHITECTURE_RULES, REFACTOR_PLAN, HISTORICAL_DEBUG_NOTES (historical), 00-Home, 01-Getting Started, 02-Architecture (Data Flow, Thread Architecture, MongoDB Schema), 04-Pipeline (Data Models), 06-Formulas, 08-Logging (Terminal Output Reference), 10-Problems (stale-flagged, Phase 3 input), 11-Issues |
 

@@ -32,12 +32,12 @@ expired, schedules finalization.
 
 ## Phase 2: Progressive Recognition (every 20 frames)
 
-**Files**: `agents/camera_agent.py` → `pipeline/recognition_pipeline.py`
+**Files**: `agents/camera_agent.py` → `agents/recognition_worker.py` → `pipeline/recognition_pipeline.py`
 
 For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
 
 ```
-6. Check skip conditions (_should_skip_recognition) — first match wins:
+6. Check skip conditions (should_skip_recognition, agents/recognition_throttle.py) — first match wins:
    - "resolved"          track.decision is already a RESOLVED status
                          (KNOWN_VISITOR / VERIFIED / AUTHORIZED)
    - "high_confidence"   a prior pass matched above HIGH_CONFIDENCE_SIMILARITY (0.85)
@@ -51,7 +51,7 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
    (reads pending_match_result under the track lock) before doing any work.
 
 7. Submit to ThreadPoolExecutor(max_workers=RECOGNITION_MAX_WORKERS=4):
-   _progressive_recognition(frame.copy(), track)
+   progressive_recognition(frame.copy(), track)     [agents/recognition_worker.py]
 ```
 
 ### Inside progressive recognition (`RecognitionPipeline.run`)
@@ -104,14 +104,14 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
     a. Evaluate 9 rules in priority order (first match wins)
     b. Return DecisionResult(status, alert_level, should_alert, should_register)
 
-14. Write back (_handle_pipeline_result — the ONLY write-back site), in order:
+14. Write back (handle_pipeline_result, agents/recognition_worker.py — the ONLY write-back site), in order:
     - update_face_visibility
     - set_best_face (quality-hysteresis: needs +0.03 improvement) [+ debug crop]
     - set_embedding (only if det_score beats existing by ≥ 0.05)
     - set_person_name / set_pending_match_result   (match)
     - set_pending_recognition_data                 (recognition)
     - set_pending_memory_context                   (memory)
-    - _handle_decision_and_alert → set_decision,
+    - handle_decision_and_alert → set_decision,
       update_confidence_if_higher, set_recognition_snapshot,
       critical-alert dispatch
     Each write goes through a TrackState setter that applies its own
@@ -120,7 +120,7 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
 
 ## Phase 3: Track Expiry + Finalization
 
-**Files**: `agents/camera_agent.py` → `agents/finalizer.py` → `agents/track_processor.py`
+**Files**: `agents/camera_agent.py` → `agents/track_finalization.py` → `agents/finalizer.py` → `agents/track_processor.py`
 
 ```
 15. Track expires when:
@@ -134,13 +134,13 @@ For each active track, every `RECOGNITION_INTERVAL_FRAMES` (20) frames:
     - never saw a face and total_frames_seen ≥ 15    → hidden
     - else                                           → unknown
 
-17. Submit _finalize_track(track) to the recognition executor — two routes
-    can reach it (_finalize_expired_tracks when the track is not being
-    recognized, _cleanup_recognition_track when a worker finishes after the
+17. Submit TrackFinalizer.finalize_track(track) to the recognition executor — two routes
+    can reach it (finalize_expired when the track is not being
+    recognized, cleanup_after_recognition when a worker finishes after the
     track vanished); Track.mark_finalized_once() is the third and final
     duplicate guard.
 
-18. Inside _finalize_track:
+18. Inside TrackFinalizer.finalize_track:
     a. retry_embedding if still None (agents/finalizer.py, crop first;
        full-frame fallback again gated by ENABLE_FULL_FRAME_FALLBACK)
     b. on_track_finalized → main.py enqueues the track onto track_queue

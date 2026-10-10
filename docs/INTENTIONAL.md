@@ -26,7 +26,7 @@ Documented trade-offs that look like limitations but are deliberate choices.
 
 **Why:** Early recognition passes may produce low similarity scores (partial face, angle, blur). Dispatching HIGH/MEDIUM alerts during the track risks false positives for verified users when the first recognition pass is uncertain. Blacklist alerts are high-confidence and always dispatched immediately.
 
-**File:** `agents/camera_agent.py:438-443`
+**File:** `agents/recognition_worker.py:240` (`handle_decision_and_alert`)
 
 ---
 
@@ -36,7 +36,7 @@ Documented trade-offs that look like limitations but are deliberate choices.
 
 **Why:** Indoor WiFi cameras (phone IP, RTSP stream) either work or are offline. Exponential backoff is for transient network failures — camera disconnection is typically a hard failure (app killed, network lost) requiring manual intervention. Fixed delay is sufficient.
 
-**File:** `agents/camera_agent.py:133-148`
+**File:** `agents/camera_agent.py:155` (`_loop` reconnect block)
 
 ---
 

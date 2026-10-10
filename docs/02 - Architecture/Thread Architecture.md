@@ -16,8 +16,8 @@ Main thread
 │   └── broadcast_frame() — JPEG encode + WebSocket
 │
 ├── Recognition executor (4 threads)
-│   ├── _progressive_recognition() — face detect → quality → embed → match → decide
-│   └── _finalize_track() — final embedding retry
+│   ├── recognition_worker.progressive_recognition() — face detect → quality → embed → match → decide
+│   └── TrackFinalizer.finalize_track() — final embedding retry
 │
 ├── Track worker pool (2 threads — `runtime/track_workers.py` `NUM_WORKERS = 2`)
 │   └── `TrackWorkers._worker_loop()` — queue consumer: final match → decide → store → alert → broadcast
@@ -57,8 +57,8 @@ Main thread
 | `_collection_locks` | `utils/db_utils.py:18-22` | Per-collection MongoDB connection creation |
 | `_alert_lock` | `agents/alert_agent.py:19` | Alert dedup timestamp access |
 | `_client_lock` | `utils/db_utils.py:17` | MongoDB client creation |
-| `_recognizing_tracks` | `agents/camera_agent.py:31` | Set of tracks currently being recognized |
-| `_finalized_track_ids` | `agents/camera_agent.py:32` | Set of tracks already submitted for finalization |
+| `TrackWorkGate._recognizing` | `agents/track_work_gate.py:27` | Set of tracks currently being recognized (claim inside the worker) |
+| `TrackWorkGate._finalized` | `agents/track_work_gate.py:28` | Set of tracks already submitted for finalization |
 
 ## Critical invariant: Camera loop never blocks
 

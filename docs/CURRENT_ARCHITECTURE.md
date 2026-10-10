@@ -146,7 +146,7 @@ Thin composition root: validates configuration, wires the components in a fixed 
 
 ### Important dependencies
 
-* `agents.camera_agent` (capture loop, progressive recognition)
+* `agents.camera_agent` (capture loop) → `agents.recognition_worker` (progressive recognition) → `agents.track_finalization` (finalize routes); `agents.track_work_gate` owns the exactly-once claims
 * `agents.track_processor` (finalization sequence)
 * `runtime/` package (lifecycle concerns above)
 * configuration system (`config/settings.py`)
@@ -166,7 +166,7 @@ Thin composition root: validates configuration, wires the components in a fixed 
 | # | Thread(s) | Where started | What it does |
 |---|-----------|---------------|--------------|
 | 1 | **Main thread** — phases 1–7, then `camera.start()` **blocks it** for the whole session | process entry; `main.py` phase 8 | phases 1–7 startup, then the camera loop: capture → detect → track → update state → schedule recognition → enqueue finalizations; after EOF/Ctrl+C the phase-9 shutdown runs on this same thread. **There is no separate camera thread** — everywhere this document says "camera thread" it means the main thread while inside `CameraAgent._loop()`. |
-| 4 | Recognition pool (`RECOGNITION_MAX_WORKERS`, default 4) | `camera_agent.py:87-88` | progressive recognition passes; finalization work is also submitted here |
+| 4 | Recognition pool (`RECOGNITION_MAX_WORKERS`, default 4) | `camera_agent.py:90` | progressive recognition passes; finalization work is also submitted here |
 | **2** | Track queue consumers | **`runtime/track_workers.py` `NUM_WORKERS = 2`** | `TrackProcessor.process(track)` — final recognition, registration, alerts, events, broadcasts |
 | 2 | JPEG encode pool | `track_processor.py:95-96` | preview JPEG encoding (`thread_name_prefix="jpeg"`) |
 | 2 | Alert executor | `alert_agent.py:18` | email / SMS / webhook alert channels (`thread_name_prefix="alert"`) |
@@ -207,15 +207,15 @@ Conceptual picture:
 * `TrackState` dictionary + per-track `Track` fields — guarded by `TrackState._lock` and `track._lock`.
 * **Lock ordering rule:** `TrackState._lock` may be taken before `track._lock`, never the reverse.
 * `pending_recognition` / `pending_match_result` / `pending_memory_context` — lock-protected setters with upgrade-only rules (weaker results never replace stronger ones).
-* `_recognizing_tracks` and `_finalized_track_ids` — camera-side bookkeeping that prevents duplicate recognition scheduling and duplicate finalization. `_recognizing_tracks.add()` runs **inside the worker** (`camera_agent.py:538`), not at submit time; the queue-time check alone is not airtight, so the worker-start resolved-check is the real backstop.
+* `TrackWorkGate._recognizing` and `TrackWorkGate._finalized` (`agents/track_work_gate.py`) - the bookkeeping that prevents duplicate recognition scheduling and duplicate finalization. The recognizing claim is taken **inside the worker** (`agents/recognition_worker.py:140`), not at submit time; the queue-time check alone is not airtight, so the worker-start resolved-check is the real backstop.
 * Alert cooldown cache (`agents/alert_agent._alert_timestamps`) — module-global dict, pruned by age.
 
 ### Current protection (verified)
 
 * Duplicate recognition scheduling has guards (set membership + `pending_recognition` check).
-* Duplicate finalization has guards (`_finalized_track_ids` add/discard protocol, `camera_agent.py:438-439, 734-735, 768`).
+* Duplicate finalization has guards (`TrackWorkGate._finalized` add/discard protocol plus `Track.mark_finalized_once()`; see `agents/track_work_gate.py`, `agents/track_finalization.py`).
 * Pending results are upgrade-only (lock-protected setters in `TrackState`).
-* Confidence never downgrades across recognition passes (max-upgrade gate lives in `TrackState` setters and `camera_agent` write-back, not in `scoring.py`).
+* Confidence never downgrades across recognition passes (max-upgrade gate lives in `TrackState` setters and the `recognition_worker` write-back, not in `scoring.py`).
 
 ---
 
@@ -226,7 +226,7 @@ The camera loop must not block on slow external operations.
 | Operation | Where it runs (verified) |
 |-----------|--------------------------|
 | MongoDB reads/writes (vector search, faces, events, visit memory) | recognition workers + the **2 queue-consumer threads** — never the main thread's camera loop |
-| Cloudinary image upload (`resolve_track_image_url` / `resolve_track_person_crop_url`) | recognition worker (`camera_agent.py:678`, mid-track alert path) or queue consumer (`track_processor.py:182-183`) |
+| Cloudinary image upload (`resolve_track_image_url` / `resolve_track_person_crop_url`) | recognition worker (`agents/recognition_worker.py:281`, mid-track alert path) or queue consumer (`track_processor.py:182-183`) |
 | Console alert | synchronous on the calling worker (`alert_agent.py:101-106`) |
 | Email / SMS / webhook alerts | alert executor pool (`alert_agent.py:18`), submitted via `_alert_executor.submit` |
 | LLM generation (summaries, chat, reports) | inline on the calling worker or route thread; optional — template fallbacks when Ollama is unavailable |
